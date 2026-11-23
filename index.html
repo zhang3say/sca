@@ -12,7 +12,7 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="./index.html" class="active">课程首页 · 全局路线图</a>
-        <a href="./lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">当前课程 · Lesson 0008</a>
+        <a href="./lessons/0009-offline-vuln-db-distribution-and-matching-index.html">当前课程 · Lesson 0009</a>
         <a href="./reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
         <a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
         <a href="./reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 字典</a>
@@ -34,8 +34,8 @@
       <div class="hero-stats">
         <div class="stat-card">
           <div class="stat-label">课程进度</div>
-          <div class="stat-value">8 / 22 课</div>
-          <div class="stat-sub">已发布 8 课 · 下一课 0009</div>
+          <div class="stat-value">9 / 22 课</div>
+          <div class="stat-sub">已发布 9 课 · 下一课 0010</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">当前主攻阶段</div>
@@ -55,7 +55,7 @@
       </div>
 
       <div class="hero-actions">
-        <a class="btn-link-primary" href="./lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">进入当前课程：Lesson 0008 →</a>
+        <a class="btn-link-primary" href="./lessons/0009-offline-vuln-db-distribution-and-matching-index.html">进入当前课程：Lesson 0009 →</a>
         <a class="btn-link-secondary" href="./reference/layer3-intel-and-version-matrix.html">打开最新速查卡：Ref 04 L3 情报、版本与许可矩阵</a>
       </div>
     </header>
@@ -291,24 +291,26 @@
           </div>
         </li>
 
-        <li class="lesson-row is-next" data-phase="p1" data-layer="L3" data-status="next">
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L3" data-status="ready">
           <div class="lesson-num">0009</div>
           <div>
-            <div class="lesson-main-title">离线/私有化漏洞库分发、增量更新与高并发匹配索引设计</div>
-            <p class="lesson-desc">拆解 Trivy OCI/BoltDB 与 Grype SQLite 本地库架构；设计基于 PURL 前缀与版本区间的内存/倒排索引，实现万级组件毫秒级匹配与内网断网环境的安全增量同步。</p>
+            <div class="lesson-main-title">
+              <a href="./lessons/0009-offline-vuln-db-distribution-and-matching-index.html">离线/私有化漏洞库分发、增量更新与高并发匹配索引设计</a>
+            </div>
+            <p class="lesson-desc">拆解 Trivy <code>bbolt</code>/OCI 与 Grype v6 <code>SQLite Handle+Blob</code> 架构；拍板 OCI 签名逻辑增量链（防 <code>bsdiff</code> 页分裂膨胀与墓碑防复活）、云端 <code>atomic.Pointer</code> 预解析内存索引及 <code>RoaringBitmap</code> 0-day 秒级倒排重算。</p>
             <div class="lesson-tags">
               <span class="tag-chip">L3 情报引擎</span>
-              <span class="tag-chip">Trivy DB · Grype DB · OCI 分发</span>
-              <span class="tag-chip">离线私有化</span>
+              <span class="tag-chip">Trivy bbolt · Grype v6 SQLite · OCI</span>
+              <span class="tag-chip">签名逻辑增量 · 倒排索引</span>
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="badge badge-ok">已发布 · 可学习</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>
 
-        <li class="lesson-row" data-phase="p1" data-layer="L3,L4" data-status="planned">
+        <li class="lesson-row is-next" data-phase="p1" data-layer="L3,L4" data-status="next">
           <div class="lesson-num">0010</div>
           <div>
             <div class="lesson-main-title">开源许可证合规引擎与传染性兼容性推理</div>
@@ -320,7 +322,7 @@
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-blue">规划中</span>
+            <span class="badge badge-build">下一课 · ZPD</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>

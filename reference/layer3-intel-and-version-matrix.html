@@ -14,6 +14,7 @@
         <a href="../index.html">课程首页 · 全局路线图</a>
         <a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007 · 多源漏洞汇聚</a>
         <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008 · 版本区间引擎</a>
+        <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009 · 离线分发与索引</a>
         <a href="./layer3-intel-and-version-matrix.html" class="active">Ref 04 · L3 情报与许可矩阵</a>
         <a href="./layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
       </div>
@@ -28,10 +29,10 @@
         <span>PRINT-READY LAYER 3 CHEAT SHEET</span>
       </div>
       <h1>Layer 3 漏洞情报汇聚、版本语义与合规速查矩阵</h1>
-      <p class="subtitle">供 Layer 3 漏洞情报管线、License Policy Gate、跨生态版本区间求值器与 Backport 隔离路由器开发评审时随时翻阅（随 Chapter 03 推进持续扩充：当前覆盖 Lesson 0007–0008）。</p>
+      <p class="subtitle">供 Layer 3 漏洞情报管线、License Policy Gate、跨生态版本区间求值器与双模离线分发/内存索引开发评审时随时翻阅（随 Chapter 03 推进持续扩充：当前覆盖 Lesson 0007–0009）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准：</strong>OpenSSF OSV Schema v1.7.0 · CVE JSON 5 · VERS Spec · Maven / PEP 440 / deb-version / rpmvercmp / APK</span>
-        <span><strong>关联课程：</strong><a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> · <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a>（待扩展：0009–0010）</span>
+        <span><strong>依据标准：</strong>OpenSSF OSV Schema v1.7.0 · CVE JSON 5 · VERS Spec · OCI Artifact / ORAS · Cosign TUF · Grype v6 Handle+Blob</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> · <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a> · <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a>（待扩展：0010）</span>
       </div>
     </header>
 
@@ -232,14 +233,75 @@
       </div>
     </section>
 
+    <!-- SECTION 4: OFFLINE DISTRIBUTION, DELTA SYNC & HIGH-CONCURRENCY INDEX -->
+    <section class="full-width">
+      <h2><span class="sec-num">04</span>离线分发、签名逻辑增量链与双模高并发匹配索引（Lesson 0009）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>交付层级 / 场景</th>
+              <th>物理存储与协议选型</th>
+              <th>核心工程设计机制</th>
+              <th>头号红线与商用避坑</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Trivy DB 对标</strong><br/>（<code>aquasecurity/trivy-db</code>）</td>
+              <td><code>go.etcd.io/bbolt</code>（B+Tree）+ <code>metadata.json</code>；OCI Artifact（<code>db.tar.gz</code> ~90–125 MB）</td>
+              <td>桶结构 <code>vulnerability</code> / <code>advisory-detail</code> / <code>data-source</code>；支持 <code>NextUpdate</code> 限频与 Cosign 验签。</td>
+              <td><code>trivy.db</code> <strong>不是 SQLite</strong>；无原生逻辑增量（全层重拉）；商业平台禁直接镜像 <code>ghcr.io/aquasecurity/trivy-db</code>。</td>
+            </tr>
+            <tr>
+              <td><strong>Grype DB v6 对标</strong><br/>（<code>anchore/grype</code>）</td>
+              <td>SQLite3 + Zstd（<code>.tar.zst</code> ~65 MB / 解压 ~1.6 GB）；<code>v6/latest.json</code></td>
+              <td><strong>Handle + Blob 解耦：</strong><code>affected_package_handles</code> / <code>vulnerability_handles</code> 指向去重 JSON <code>blobs</code>，内置 KEV/EPSS。</td>
+              <td>不可裸解压覆盖，须经 <code>import</code> 重建索引；高并发万级组件云端热路径不宜直接单条查 SQLite。</td>
+            </tr>
+            <tr>
+              <td><strong>断网私有化分发与增量同步</strong><br/>（Air-Gap Track）</td>
+              <td>OCI Artifact（<code>tar+zst</code>，复用内网 Harbor）+ <strong>Ed25519 / 离线 TUF</strong> 签名逻辑增量（<code>pb.zst</code>）</td>
+              <td>Weekly Base + Daily Delta（~200–500 KB）：头带 <code>prev_state_sha256</code> 与 <code>target_state_sha256</code>，在 <code>staging.db</code> 原子重放。</td>
+              <td>严禁用 <code>bsdiff</code> 对 B+Tree 做二进制差分（页分裂致膨胀）；断链缺块必须熔断回退 Base；离线 Cosign 需先 <code>cosign initialize</code>。</td>
+            </tr>
+            <tr>
+              <td><strong><code>withdrawn</code> 撤回同步</strong><br/>（防复活闭环）</td>
+              <td>增量载荷 <code>tombstones[]</code> + 逻辑状态位 <code>is_enabled = false</code></td>
+              <td>标记撤回时间戳 <code>withdrawn_at</code>，同步推事件收敛存量工单（<code>RESOLVED_WITHDRAWN</code>）。</td>
+              <td><strong>严禁物理 <code>DELETE</code></strong>，否则内网滞后 NVD 镜像下次同步时会令假 CVE 重新复活。</td>
+            </tr>
+            <tr>
+              <td><strong>Cloud 高并发内存匹配引擎</strong><br/>（10,000+ 组件 / 扫）</td>
+              <td>纯 Go <code>atomic.Pointer[ImmutableVulnSnapshot]</code> + <code>PkgKey</code> 哈希（~120–220 MB）</td>
+              <td><strong>四级快路径：</strong>① 规范化 <code>PkgKey</code> ~40ns 跳过 90%+ 洁净包；② 构建期预解析 <code>Intervals</code>；③ 无锁指针热换；④ 命中后异步富化描述。</td>
+              <td>禁在热路径现场正则拆解版本或用全局 <code>RWMutex</code> 清库重建；<code>PkgKey</code> 必须保留 <code>Scope</code> 与 <code>DistroQualifier</code> 隔离。</td>
+            </tr>
+            <tr>
+              <td><strong>0-day 秒级应急重算</strong><br/>（十万级存量资产）</td>
+              <td><code>PkgKey &rarr; RoaringBitmap[AssetVerID]</code> 倒排索引（Apache-2.0）</td>
+              <td>新 CVE 到来时先查倒排位图筛出 ~0.3% 受影响资产集合，再纯内存求值区间，&lt;10 ms 完成应急定界。</td>
+              <td>严禁从 PostgreSQL 全量拉出十万份 SBOM 重跑全量扫描；配合 Lesson 0006 Hyades 事件流驱动消警/告警。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">待解锁速查模块（随 Ch 03 后续课程陆续合入）</div>
-      <p><strong>Section 04（Lesson 0009）：</strong>Trivy BoltDB / Grype SQLite 离线包结构、增量签名分发与 PURL 前缀倒排索引；<strong>Section 05（Lesson 0010）：</strong>SPDX 表达式语法树与开源许可证传染性兼容性矩阵。</p>
+      <div class="callout-label">待解锁速查模块（随 Ch 03 收官课合入）</div>
+      <p><strong>Section 05（Lesson 0010）：</strong>SPDX 表达式语法树求值（<code>AND / OR / WITH</code>）、基于链接/分发形态的开源许可证传染性兼容性矩阵与 Notice 自动生成规范。</p>
     </div>
 
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">← 返回 Lesson 0008 · 版本区间语义引擎</a>
-      <a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007 · 多源漏洞汇聚</a>
+      <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">← 返回 Lesson 0009 · 离线分发与匹配索引</a>
+      <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008 · 版本区间引擎</a>
       <a href="../index.html">返回课程首页 · 全局路线图</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>

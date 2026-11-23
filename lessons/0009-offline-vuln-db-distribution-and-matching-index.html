@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0009：离线/私有化漏洞库分发、增量更新与高并发匹配索引设计</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008 · 版本区间引擎</a>
+        <a href="./0009-offline-vuln-db-distribution-and-matching-index.html" class="active">Lesson 0009 · 离线分发与匹配索引</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0009</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 03 漏洞情报底座与精确匹配引擎</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>离线/私有化漏洞库分发、增量更新与高并发匹配索引设计</h1>
+      <p class="subtitle">打通了 <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> 的多源权威入库和 <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a> 的生态原生比较器之后，Layer 3 的最后一块硬骨头是<strong>运行态交付与吞吐量</strong>：如何让同一份洁净情报既能塞进 65–120 MB 离线包、经加密验签与逻辑增量摆渡进客户断网内网，又能在云端高并发 Worker 里以毫秒级扫完万级组件、并在 0-day 爆发时秒级筛出十万级存量资产？</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 Trivy <code>bbolt</code> 与 Grype v6 <code>SQLite Handle+Blob</code> 存储范式，拍板 OCI 签名逻辑增量链与云端 <code>atomic.Pointer</code> 双模索引</span>
+        <span><strong>先修底座：</strong><a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> · <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> · <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>我们的产品同时面临两个截然相反的运行环境：一端是 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 确立的 <strong>Single Go Core 本地 CLI / AI Agent MCP / 客户断网内网一体机</strong>（零外置 PostgreSQL、毫秒级冷启动、防篡改离线交付）；另一端是 <strong>云端 SaaS 多租户扫描集群</strong>（单次 SBOM 万级组件、全库十万级历史资产）。试图拿一套“每次查 SQLite”或“全量拖出十万份 SBOM”的朴素方案打天下，上线必崩。本课要拍板 <strong>双模交付 + 加密增量链 + 内存倒排索引</strong> 的完整架构。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>开源标杆源码解剖：Trivy <code>bbolt</code> vs Grype v6 <code>SQLite</code> vs OSV <code>all.zip</code></h2>
+
+    <div class="prose-col has-sidenote">
+      <p>在决定自研商业漏洞库的物理存储与分发格式前，我们先逐行拆解三大主流 Apache-2.0 开源底座的工程设计哲学，看清它们各自解决了什么、又在商业化落地时踩中了哪条暗线：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">纠偏常见误区：<code>trivy.db</code> 不是 SQLite</span>
+        许多网文把 Trivy 的 <code>trivy.db</code> 误写成 SQLite，实际上 <a href="https://github.com/aquasecurity/trivy-db" target="_blank" rel="noopener"><code>aquasecurity/trivy-db</code></a> 底层采用的是纯 Go 嵌入式 B+Tree 键值库 <a href="https://github.com/etcd-io/bbolt" target="_blank" rel="noopener"><code>go.etcd.io/bbolt</code></a>（MIT），通过 <code>mmap</code> 只读页映射直接定位嵌套 Bucket；只有 <a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Grype</a> 才使用 SQLite3 作为本地库格式。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:16%" />
+          <col style="width:24%" />
+          <col style="width:24%" />
+          <col style="width:18%" />
+          <col style="width:18%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>标杆底座 / 许可</th>
+            <th>底层存储与 Schema 布局</th>
+            <th>分发协议、体积与校验机制</th>
+            <th>核心工程亮点</th>
+            <th>商业化参考边界与硬坑</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/aquasecurity/trivy-db" target="_blank" rel="noopener">Aqua <code>trivy-db</code></a></strong><br/><span class="badge badge-ok">代码 Apache-2.0</span></td>
+            <td><strong><code>go.etcd.io/bbolt</code>（BoltDB）</strong>单文件 B+Tree；核心顶级桶 <code>vulnerability</code>（<code>CVE-ID &rarr; JSON</code>）、<code>advisory-detail</code>（<code>CVE &rarr; 平台 &rarr; 包名</code>）与 <code>data-source</code>，辅以生态包桶支持 <code>ForEachAdvisory</code> / <code>GetAdvisories</code>。</td>
+            <td>封装为 <strong>OCI Artifact</strong>（<code>ghcr.io/aquasecurity/trivy-db:2</code>），层 MediaType 为 <code>application/vnd.aquasec.trivy.db.layer.v1.tar+gzip</code>；压缩包 <code>db.tar.gz</code> 约 <strong>90–125 MB</strong>（解压 300–500+ MB），含 <code>metadata.json</code>（<code>NextUpdate</code>）与 <strong>Cosign</strong> 签名。</td>
+            <td>纯 Go 零 CGO；借助 OCI Registry 复用企业 Harbor/ECR 防火墙通道；<code>metadata.json</code> 的 <code>NextUpdate</code> 窗口天然节流高频 CI 重复拉取。</td>
+            <td><strong>无逻辑增量：</strong>每次仍整层重拉 ~100 MB；官方已剔除 Safety DB 等非商用源，但混有 OSV 转换源且受限于 <code>ghcr.io</code> 限流，商业产品须自建洁净构建流水线。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Anchore Grype v6</a></strong><br/><span class="badge badge-ok">代码 Apache-2.0</span></td>
+            <td><strong>SQLite3（Handle + Blob 范式）</strong>：v6 彻底抛弃 v5 的冗余宽表，改用轻量索引 Handle 表（<code>affected_package_handles</code> / <code>affected_cpe_handles</code> / <code>vulnerability_handles</code> / <code>packages</code> / <code>operating_systems</code>）指向内容去重的 OSV 风格 JSON <code>blobs</code> 表，并原生合入 <strong>CISA KEV、EPSS 与 <code>withdrawn</code></strong>。</td>
+            <td>通过 <a href="https://docs.anchore.com/" target="_blank" rel="noopener"><code>v6/latest.json</code></a>（含 <code>schemaVersion</code> / <code>url</code> / <code>built</code> / <code>checksum: sha256:...</code>）分发 <code>.tar.zst</code> 压缩包；压缩体积从 v5 的约 210 MB 骤降至约 <strong>65 MB</strong>（解压约 1.6 GB）。</td>
+            <td><strong>Handle + Blob 解耦</strong>是嵌入式 SQLite 存储的里程碑设计：索引表极瘦可常驻 OS Page Cache，重复的修复元数据通过 <code>blob_id</code> 归一，Zstd 解压速度与压缩比远超 gzip。</td>
+            <td>v6 客户端不可裸解压覆盖，须走 <code>grype db import --checksum</code> 重建 <code>import.json</code> 与本地索引；单机 CLI 极佳，但云端万级组件高频并发扫描仍受限于 SQLite 单库并发探针开销。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener">Google <code>osv-scanner</code></a></strong><br/><span class="badge badge-ok">代码 Apache-2.0</span></td>
+            <td>直接拉取按生态切分的原始 OSV JSON 压缩包（无二进制索引层），扫描时遍历或内存加载生态内全量 JSON 文件。</td>
+            <td>通过 <code>--download-offline-databases</code> 从 GCS Bucket（<code>osv-vulnerabilities.storage.googleapis.com/&lt;eco&gt;/all.zip</code>）下载全量 ZIP 归档。</td>
+            <td>零格式转换成本，对开源生态社区贡献者极为友好；天然保留 OSV v1.7.0 完整字段与函数符号扩展。</td>
+            <td><span class="badge badge-danger">商业红线</span> 如 <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> 警示，GCS <code>all.zip</code> 混入 <code>CC-BY-NC-ND-4.0</code>（Wolfi/Chainguard）与 <code>CC-BY-SA-4.0</code> 源，且缺少索引，严禁直接打包进商业产品。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout tip">
+      <div class="callout-label">架构师收敛结论：站在 Grype v6 与 Trivy OCI 的肩膀上做「双模分工」</div>
+      <p>我们既不直接搬运 Aqua/Anchore 的官方公共成品库（规避上游许可证混杂与外部 CDN 依赖），也不必从零发明冷门文件格式：<strong>① 借鉴 Grype v6 的「SQLite Handle 表 + 去重 Zstd-JSON Blobs」作为本地 CLI / Agent / 断网一体机的只读交付物</strong>（纯 Go 可选 <a href="https://github.com/ncruces/go-sqlite3" target="_blank" rel="noopener"><code>ncruces/go-sqlite3</code></a> 或 <a href="https://pkg.go.dev/modernc.org/sqlite" target="_blank" rel="noopener"><code>modernc.org/sqlite</code></a>，均为 MIT/BSD 零 CGO）；<strong>② 借鉴 Trivy 的 OCI Artifact 封装思路，并补齐它缺失的「密码学签名逻辑增量链」</strong>；<strong>③ 云端 Worker 彻底绕开磁盘数据库热路径查询，直接构建全内存不可变快照</strong>。</p>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>断网私有化分发与防篡改增量链（OCI + TUF + 逻辑增量）</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 为什么企业私有化交付必须拥抱 OCI Artifact 与离线信任根？</h3>
+      <p>国内政企、金融与军工客户的内网往往处于严格的物理隔离（Air-Gap）或单向光闸摆渡环境。如果要求客户安全团队专门为你开一个非标 HTTP 文件站点的白名单，审批周期动辄数月；但客户生产网里<strong>99% 都已经架设了 Harbor、Nexus 或 Artifactory 等私有 OCI 镜像仓库</strong>，且早已纳入安全摆渡流程。</p>
+      <p>借鉴 <a href="https://trivy.dev/docs/latest/guide/references/configuration/air-gap/" target="_blank" rel="noopener">Trivy Air-Gap 最佳实践</a> 与 <a href="https://oras.land/" target="_blank" rel="noopener">ORAS</a> 规范，将漏洞基线包与增量包打包为标准 <strong>OCI Artifact</strong>（自定义 Config 与 Layer MediaType，如 <code>application/vnd.oursca.vulndb.v1.tar+zst</code>），即可零改造复用客户现有 Harbor 同步与 RBAC 鉴权体系。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">离线 Cosign 验签的隐藏坑</span>
+        如果采用 <a href="https://docs.sigstore.dev/cosign/verifying/verify/" target="_blank" rel="noopener">Sigstore Cosign</a> 无密钥验签，Cosign 默认会联网访问 <code>tuf-repo-cdn.sigstore.dev</code> 拉取信任根！在完全断网环境会直接超时报错。工程落地两条路：① 提前执行 <code>cosign initialize</code> 将 <code>~/.sigstore</code> TUF 根缓存打入私有化安装包；② 在自有产品体系内更推荐 <strong>双签名</strong>（公网交付带 Cosign Bundle，私有化离线内核直接用编译内置的<strong>企业离线 Ed25519 公钥环</strong>校验 Manifest 与载荷摘要，零外部 TUF/Rekor 网络依赖）。
+      </aside>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.2 为什么 <code>bsdiff</code> 二进制差分会翻车？拍板「哈希链签名逻辑增量」</h3>
+      <p>政企客户每天摆渡一次漏洞库时，实际新增/变更的 CVE 通常只有 <strong>100–500 条</strong>（对应原始规则不到 300 KB），但如果直接每次搬运 65–120 MB 的全量 SQLite/bbolt 包，带宽与人工运维成本极高。可为什么不能简单用 <code>bsdiff</code> 或 <code>xdelta3</code> 对前后两天的 <code>vulnerability.db</code> 做二进制差分？</p>
+      <p>原因在于 <strong>SQLite / bbolt 的底层 B+Tree 页分裂（Page Split）</strong>：今天往 B+Tree 中间插了 50 个 CVE，会引发成百上千个 4 KB 数据库页分裂重排与空闲页链表重组，导致整份 1 GB 文件里有 40% 以上的二进制偏移发生变化——<code>bsdiff</code> 产出的补丁包体积瞬间膨胀到几十 MB，彻底丧失增量意义！</p>
+      <p><strong>正确解：</strong>构建期同时导出<strong>「每周/每月全量 Base Snapshot」</strong>与<strong>「每日哈希链式逻辑增量包（Signed Logical Delta Log）」</strong>：</p>
+      <ul>
+        <li><strong>不可变逻辑操作集：</strong>每个 <code>delta_vN_to_vN+1.pb.zst</code> 仅包含自上次构建后变更的 <code>upserts[]</code>（精简 Protobuf 记录）与 <code>tombstones[]</code>（对应 OSV <code>withdrawn</code> 的逻辑撤回 ID），日均体积仅 <strong>200–500 KB</strong>（压缩比 &gt; 99%）。</li>
+        <li><strong>防篡改哈希双锚定：</strong>Delta 头强制携带 <code>prev_db_sha256</code>、<code>target_db_sha256</code> 与构建期 Ed25519 签名（注意：SQLite 重建后的文件字节受 <code>VACUUM</code>/页序影响，<strong>建议对逻辑规范化序列或内容表行哈希计算确定性摘要 <code>logical_state_sha256</code></strong>，而非仅依赖物理文件字节）。</li>
+        <li><strong>断链熔断与原子事务：</strong>本地引擎仅在<strong>验签通过且 <code>prev_state_sha256 == local_state_sha256</code></strong> 时，才开启临时库 <code>staging.db</code> 事务重放（<code>BEGIN IMMEDIATE</code>）；一旦检测到缺失中间某天增量包（Chain Break），立即拒绝重放并自动回退拉取最近签名全量 Base Snapshot，杜绝半残库静默漏报。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title"><code>withdrawn</code> 墓碑绝不可物理删行</span>
+        收到逻辑撤回事件时，只允许把规则标记为 <code>is_enabled = false, withdrawn_at = RFC3339</code>（墓碑持久化），<strong>绝不能 <code>DELETE FROM rules</code></strong>。否则一旦客户内网接入了某个滞后的 NVD 镜像源，已经撤回的假 CVE 会在下次同步时“死灰复燃”。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 3 双模漏洞库构建、加密签名逻辑增量分发与断网原子切换流水线</strong>
+        <span>上游洁净聚合源一次编译出两套物理交付物：面向 Edge/断网环境的 SQLite + OCI 增量链，以及面向 Cloud Worker 的内存不可变快照</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Stage 1 · 洁净规则编译与双产物发射（Cleanroom Publisher）</span>
+            <span class="orch-stage-kicker">Lesson 0007 License Gate + Lesson 0008 VERS 化简</span>
+          </div>
+          <p class="orch-stage-desc">
+            从 <code>canonical_match_rules</code>（已剔除 CC-BY-NC-ND 等受限源）导出确定性版本序列，生成周级全量基线 <code>base_vN.db.zst</code>、日级逻辑增量 <code>delta_vN_vN+1.pb.zst</code>（附 <code>prev_state_sha256</code> / <code>target_state_sha256</code>）及 <strong>Ed25519 + Cosign</strong> 双签名 Manifest，推送至源端 OCI Registry。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 一次编译 · 两条并行交付轨道（物理隔离运行态约束） &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Track A · Edge / 断网内网交付轨（Harbor + SQLite）</span>
+              <span class="badge badge-ok">CLI · MCP · 私有化一体机</span>
+            </div>
+            <ul>
+              <li><strong>OCI 摆渡：</strong>通过 <code>oras cp</code> 或光闸镜像同步进客户内网 Harbor，零自定义外网端点。</li>
+              <li><strong>离线硬验签：</strong>先校验内置公钥签名（防压缩炸弹与恶意删改 CVE），再核验 <code>prev_state_sha256</code> 链连续性。</li>
+              <li><strong>原子切换：</strong>在 <code>staging.db</code> 重放事务并校验目标摘要后，通过原子指针/软链切换；断链则自动熔断回退 Base 快照。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Track B · Cloud 高并发内存索引轨（atomic.Pointer）</span>
+              <span class="badge badge-build">SaaS Worker · 10k+ QPS</span>
+            </div>
+            <ul>
+              <li><strong>构建期预编译：</strong>在加载期直接把 <code>introduced</code> / <code>fixed</code> 解析成原生比较 Token（消灭扫描热路径字符串解析）。</li>
+              <li><strong>无锁双缓冲热更：</strong>后台构建全新 <code>ImmutableVulnSnapshot</code>，校验通过后执行 <code>snapPtr.Store(next)</code> 零停机切换。</li>
+              <li><strong>双向联动：</strong>配合 <code>PkgKey &rarr; RoaringBitmap</code> 资产倒排索引，支撑 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 持续重算。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>万级组件毫秒级匹配：内存索引、预解析与 0-day 倒排重算</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 为什么 10,000 个组件的 SBOM 不能在热路径里查 SQLite？</h3>
+      <p>单机 CLI 扫一个 500 依赖的项目时，查 500 次只读 SQLite 或 <code>bbolt</code> 耗时不过 15–50 ms，用户毫无感知；但当云端 SaaS Worker 面对一份包含 <strong>10,000–20,000 个组件</strong> 的大型企业级 Monorepo / 多容器集群 SBOM，且每秒要并发吞吐上百份扫描请求时，逐组件查磁盘数据库会瞬间暴露三大瓶颈：</p>
+      <ol>
+        <li><strong>大量「洁净组件」白跑 B-Tree 探针：</strong>真实生产 SBOM 中，通常 <strong>85%–95% 的包根本没有任何历史漏洞</strong>，但逐条查 SQLite 依然要走完 B-Tree 下降、页校验与驱动层序列化，白白烧掉 ~1 秒/份扫描。</li>
+        <li><strong>热点包区间重复解析爆炸：</strong>像 <code>openssl</code>、<code>linux</code>、<code>ffmpeg</code> 或 <code>lodash</code> 这类历史悠久的热点包，往往挂载数百条历史漏洞规则。如果在匹配循环里每次拿到组件版本都要现场把规则里的 <code>introduced</code> / <code>fixed</code> 字符串再拆一遍 Token，CPU 会被无意义的重复解析吃满。</li>
+        <li><strong>热更新锁竞争：</strong>如果用一把全局 <code>sync.RWMutex</code> 保护内存索引，更新线程拿写锁重建索引的几百毫秒内，整台 Worker 节点的全部扫描请求都会被卡死导致 P99 延迟尖刺。</li>
+      </ol>
+      <aside class="sidenote">
+        <span class="sidenote-title">Go 内存索引到底占多大内存？</span>
+        以全量 ~30 万条规范化受影响规则估算：去掉冗长的 CVE 英文描述、参考链接和 CVSS 向量字符串（这些仅在最后<strong>命中告警需要渲染报告时</strong>再按 <code>advisory_id</code> 异步回查 Redis/PostgreSQL 富化！），纯索引仅存 <code>PkgKey</code> 哈希、整型 <code>advisory_ref_id</code> 与预解析区间结构，全量驻留内存通常仅需 <strong>120–220 MB</strong>，单核 Go Worker 轻松全量托管。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 四级无锁匹配流水线与 0-day 秒级应急倒排索引</h3>
+      <p>高并发云端匹配引擎应当将「<strong>快路径裁剪</strong>」与「<strong>详情富化</strong>」彻底物理拆分，在 Go 核心内构建以下四级结构：</p>
+      <ul>
+        <li><strong>L1 · 规范化 <code>PkgKey</code> 哈希 + 零分配负向快返：</strong>按照 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> 与 <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a> 的隔离规范，将索引键严格定义为 <code>(RuleScope, PurlType, Namespace, CanonicalName, DistroQualifier)</code>（注意 PyPI PEP 503 连字符折叠与 OS SourcePkgName 映射）。90%+ 没有漏洞记录的包在 Go 原生 SwissTable（Go 1.24+ 内置哈希表）上 <strong>~30–50 ns</strong> 直接 <code>!ok</code> 退出。</li>
+        <li><strong>L2 · 构建期预解析 <code>ParsedVersion</code> 切片（Pre-parsed Intervals）：</strong>在构建 <code>ImmutableVulnSnapshot</code> 阶段，就提前调用 <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a> 的各生态解析器把每条规则的 <code>introduced</code> / <code>fixed</code> / <code>last_affected</code> 编译成不可变二进制结构体；扫描热路径只对当前待测组件解析<strong>一次</strong>版本号，随即与预编译边界直接做整数/切片对比，CPU 消耗下降一个数量级。</li>
+        <li><strong>L3 · <code>atomic.Pointer[ImmutableVulnSnapshot]</code> 无锁双缓冲：</strong>后台协程拉取到新增量并构建完下一代只读快照后，直接 <code>snapPtr.Store(nextSnap)</code>。所有正在执行的扫描协程在入口处 <code>snap := snapPtr.Load()</code> 拿走当前指针即可全程零锁跑完，旧快照待现存协程退出后由 GC 自动安全回收。</li>
+        <li><strong>L4 · 资产倒排位图（Reverse Index）驱动 0-day 应急响应：</strong>呼应 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 的 Hyades 持续重算流水线——每份入库资产的组件清单除了正排存储，同时异步维护一张<strong>「组件键 &rarr; 资产版本 ID 压缩位图（<a href="https://github.com/RoaringBitmap/roaring" target="_blank" rel="noopener"><code>RoaringBitmap</code></a>，Apache-2.0）」</strong>。当某天突发 0-day 漏洞（如 <code>CVE-2026-XXXX</code> 影响 <code>pkg:maven/org.apache.commons/commons-text</code>），引擎先查倒排位图把 10 万个存量项目瞬间裁剪到真正使用了该包的 ~300 个项目，再针对这 300 个项目的已知版本执行纯内存区间求值，<strong>全平台应急排查耗时从数十分钟压缩至 10 毫秒以内</strong>。</li>
+      </ul>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心内存匹配引擎：<code>atomic.Pointer</code> 无锁热更 + 预解析区间 + 资产倒排裁剪</strong>
+        <span>纯 Go 零 CGO · 扫描热路径零 I/O、零锁竞争、零规则字符串重复解析</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> PkgKey <span class="tok-kw">struct</span> {
+    Scope           <span class="tok-type">string</span> <span class="tok-cmt">// "UPSTREAM_PKG" | "DISTRO_BACKPORT"</span>
+    PurlType        <span class="tok-type">string</span> <span class="tok-cmt">// "npm", "pypi", "maven", "deb", "rpm"...</span>
+    Namespace       <span class="tok-type">string</span> <span class="tok-cmt">// 已小写规范化</span>
+    CanonicalName   <span class="tok-type">string</span> <span class="tok-cmt">// PyPI PEP 503 折叠 / OS SourcePkgName</span>
+    DistroQualifier <span class="tok-type">string</span> <span class="tok-cmt">// 如 "debian-12", "rhel-9"; 上游包为空</span>
+}
+
+<span class="tok-kw">type</span> CompiledRule <span class="tok-kw">struct</span> {
+    RuleID     <span class="tok-type">uint64</span>
+    AdvisoryID <span class="tok-type">uint32</span>          <span class="tok-cmt">// 仅存整型引用，命中后再查详情库富化描述</span>
+    Withdrawn  <span class="tok-type">bool</span>            <span class="tok-cmt">// 逻辑墓碑标志，true 时直接跳过</span>
+    Intervals  []ParsedRange   <span class="tok-cmt">// 构建期已预解析好的 native 版本边界</span>
+}
+
+<span class="tok-kw">type</span> ImmutableVulnSnapshot <span class="tok-kw">struct</span> {
+    StateSHA256 <span class="tok-type">string</span>
+    ByPkg       <span class="tok-kw">map</span>[PkgKey][]CompiledRule <span class="tok-cmt">// 构建完成后彻底只读</span>
+}
+
+<span class="tok-kw">var</span> currentSnap atomic.Pointer[ImmutableVulnSnapshot]
+
+<span class="tok-kw">func</span> MatchSBOMFast(components []IRComponent) []MatchHit {
+    snap := currentSnap.Load() <span class="tok-cmt">// 无锁获取只读快照指针</span>
+    <span class="tok-kw">var</span> hits []MatchHit
+    <span class="tok-kw">for</span> _, comp := <span class="tok-kw">range</span> components {
+        rules := snap.ByPkg[comp.NormalizedKey()] <span class="tok-cmt">// ~40ns 跳过 90%+ 洁净包</span>
+        <span class="tok-kw">if</span> <span class="tok-kw">len</span>(rules) == <span class="tok-num">0</span> { <span class="tok-kw">continue</span> }
+        parsedVer := ParseNativeOnce(comp.PurlType, comp.Version)
+        <span class="tok-kw">for</span> _, r := <span class="tok-kw">range</span> rules {
+            <span class="tok-kw">if</span> r.Withdrawn { <span class="tok-kw">continue</span> }
+            <span class="tok-kw">if</span> evalPreParsedRanges(comp.PurlType, parsedVer, r.Intervals) {
+                hits = append(hits, MatchHit{CompID: comp.ID, AdvisoryID: r.AdvisoryID})
+            }
+        }
+    }
+    <span class="tok-kw">return</span> hits
+}</code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>下面的双模交互实验台带你实操两项核心决策：先在<strong>模式一</strong>对比三大离线库路线并触发断链/篡改/撤回墓碑测试，再切到<strong>模式二</strong>动态调节 SBOM 规模与存量资产数观察性能数量级跃迁；最后完成 <strong>5 项工程拍板评审</strong>。</p>
+    </div>
+
+    <!-- INTERACTIVE VULN INDEX LAB -->
+    <section class="widget-panel full-width" data-widget="vuln-index-lab">
+      <script type="application/json" class="vuln-index-lab-data">
+        {
+          "title": "交互实验台：离线分发安全链与万级组件匹配性能沙盘",
+          "intro": "切换两个工作台：验证断网环境下签名逻辑增量链的边界容错与墓碑机制，再对比 SQLite / bbolt / atomic.Pointer 内存索引及 0-day 倒排位图的性能差异。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 3 分发与匹配索引架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你的商业 SCA 平台需同时交付「金融客户完全断网内网一体机（仅允许走内部 Harbor OCI 摆渡）」与「公有云高并发扫描 Worker（支持 2 万组件 SBOM 及 10 万存量资产 0-day 响应）」。",
+          "summary": {
+            "optimal": "全部 {optimal} 项交付与索引架构决策精准无误！你已打通“Cleanroom 洁净构建 → OCI + 签名逻辑增量 → Edge SQLite / Cloud atomic.Pointer 双模执行 → 资产倒排位图”完整闭环，Layer 3 漏洞引擎已具备商业化上线水准。",
+            "warning": "核心数据链路安全可用，但在 {warning} 项上存在带宽浪费、冷启动偏慢或热更新抖动风险（标黄项），建议按双模分工架构收口。",
+            "critical": "当前架构存在 {critical} 处会直接引爆断网验签失效、商业侵权阻断、静默漏报或系统雪崩的致命缺陷（标红项）！请修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "商业闭源产品的离线漏洞库来源与底层存储蓝本选型",
+              "layer": "商用合规 · 存储内核",
+              "context": "团队需要为本地 CLI 与客户离线一体机准备约 30 万条规则的嵌入式漏洞库。",
+              "options": [
+                {
+                  "label": "写个定时脚本直接拉取 ghcr.io/aquasecurity/trivy-db 或 Google osv-vulnerabilities/all.zip 原封不动打包进商业安装包转售",
+                  "status": "critical",
+                  "verdictTitle": "触发开源数据许可与外部上游限流双重红线",
+                  "feedback": "osv.dev 批量导出的 all.zip 混含 Wolfi/Chainguard CC-BY-NC-ND-4.0 与 CC-BY-SA-4.0 数据源；直接搬运第三方成品镜像也会受制于上游 schema 变动与 CDN 封禁。必须自建 Cleanroom Publisher。"
+                },
+                {
+                  "label": "借鉴 Grype v6「SQLite Handle 索引表 + 去重 JSON Blobs + Zstd」范式，基于 Lesson 0007 洁净规则库自研生成并封装为 OCI Artifact",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾极致压缩比、多维查询能力与 100% 商业合规自主权",
+                  "feedback": "约 65 MB 的紧凑快照既能复用客户内网 Harbor 分发，又在 Edge 端保持极低 IO 与清晰的数据溯源署名台账。"
+                },
+                {
+                  "label": "直接在交付物里塞入一份 2 GB 未压缩 JSON 文件夹让 Go CLI 启动时全量解析",
+                  "status": "warning",
+                  "verdictTitle": "破坏单核 CLI 与 MCP Agent 亚秒级冷启动体验",
+                  "feedback": "每次调用都要花十几秒解析数百 MB JSON 会彻底毁掉 Lesson 0006 追求的 1.5 秒本地 Agent 拦截体验。"
+                }
+              ]
+            },
+            {
+              "name": "面向物理隔离（Air-Gap）客户的每日增量更新协议设计",
+              "layer": "断网分发 · 防篡改链",
+              "context": "客户内网不允许直连公网，运维每周或每日通过单向光闸/Harbor 同步漏洞更新，并要求防范补丁漏传与中间人删改。",
+              "options": [
+                {
+                  "label": "对前后两天的 SQLite 数据库文件跑 bsdiff 生成二进制补丁，客户内网直接按字节偏移覆盖原文件",
+                  "status": "warning",
+                  "verdictTitle": "B+Tree 页分裂导致二进制差分膨胀，且直接覆盖易破坏在线查询句柄",
+                  "feedback": "SQLite/bbolt 每次写入都会重排 4KB B+Tree 页；二进制补丁体积常接近全量包，且无原子 staging 切换风险极高。"
+                },
+                {
+                  "label": "全量包与增量包均关闭签名验证以简化内网脚本，遇到增量编号跳跃时直接忽略跳过",
+                  "status": "critical",
+                  "verdictTitle": "高危安全与漏报灾难：篡改包可静默删掉高危 CVE，跳块导致规则永远缺失",
+                  "feedback": "没有密码学验签与 prev_state_sha256 链校验的增量同步，一旦中间漏拷一天包就会制造永久性漏洞盲区。"
+                },
+                {
+                  "label": "采用「OCI Base 快照 + 哈希链式 Ed25519 签名逻辑增量（upserts + withdrawn tombstones）」；离线预置公钥验签，断链自动熔断回退 Base 快照",
+                  "status": "optimal",
+                  "verdictTitle": "日均传输压至 <500 KB，同时具备密码学防篡改与断链自愈保证",
+                  "feedback": "逻辑增量不受 B+Tree 页分裂影响，staging 原子重放并核验目标摘要后再切换，真正达到金融级私有化交付标准。"
+                }
+              ]
+            },
+            {
+              "name": "云端 SaaS 扫描 Worker 的高并发匹配引擎与热更新设计",
+              "layer": "Cloud 吞吐 · 无锁索引",
+              "context": "单个 Worker 需以毫秒级吞吐 10,000+ 组件的大型 SBOM，且每隔数小时动态热更新一次漏洞情报。",
+              "options": [
+                {
+                  "label": "热路径直接对共享只读 SQLite 发起 10,000 次单条 SELECT 查询，并在循环里现场用正则拆解规则版本字符串",
+                  "status": "warning",
+                  "verdictTitle": "大量洁净包白走磁盘 B-Tree 且重复解析版本串，P99 延迟突破秒级",
+                  "feedback": "90% 以上组件其实零漏洞，逐条进 SQLite + 现场解析版本边界会浪费超过 95% 的 CPU 与 IO。"
+                },
+                {
+                  "label": "用一把全局 sync.RWMutex 保护可变 map，更新时直接加写锁清空并重建内存索引",
+                  "status": "warning",
+                  "verdictTitle": "冷重建窗口期阻塞全部在线扫描协程，制造服务周期性毛刺",
+                  "feedback": "在 Go 中完全可以用不可变对象配合 atomic.Pointer 实现零锁切换，无需让读者和写者争抢全局锁。"
+                },
+                {
+                  "label": "构建期预解析规则版本边界，按规范化 PkgKey 构建只读内存索引（90%+ 洁净包 ~40ns 空返），配合 atomic.Pointer 无锁双缓冲热切换",
+                  "status": "optimal",
+                  "verdictTitle": "扫描热路径零 I/O、零锁竞争、零字符串重解析，万级组件压缩至数毫秒",
+                  "feedback": "同时将 CVE 冗长描述剥离到命中后的异步富化阶段，把核心驻留内存压在 200 MB 以内。"
+                }
+              ]
+            },
+            {
+              "name": "上游对某条历史漏洞标记 withdrawn（撤销误报）后的增量同步处置",
+              "layer": "墓碑机制 · 状态一致性",
+              "context": "昨天库里存在 CVE-2025-99999，今天上游发布 withdrawn 撤回标记，但客户内网旁路同步的某个 NVD 镜像源因滞后仍带有该 CVE。",
+              "options": [
+                {
+                  "label": "在增量应用脚本里执行物理 DELETE FROM rules WHERE cve_id = 'CVE-2025-99999' 彻底抹除记录",
+                  "status": "critical",
+                  "verdictTitle": "破坏历史审计链，且滞后镜像下次同步会令已撤销假漏洞“死灰复燃”",
+                  "feedback": "没有墓碑记录时，引擎分不清“从未见过此 CVE”还是“已权威撤回此 CVE”，遇到滞后数据源必会重新入库误报。"
+                },
+                {
+                  "label": "写入不可变逻辑墓碑（is_enabled=false, withdrawn_at=RFC3339），内存快照跳过匹配同时发事件收敛存量工单",
+                  "status": "optimal",
+                  "verdictTitle": "彻底封死假 CVE 复活路径并自动完成存量告警闭环消警",
+                  "feedback": "与 Lesson 0007 的墓碑原则一脉相承，确保多源异步到达时依然保持最终状态严格一致。"
+                },
+                {
+                  "label": "忽略所有增量包里的 withdrawn 列表，保留原规则等客户安全人员自己手工误报忽略",
+                  "status": "warning",
+                  "verdictTitle": "把上游已经勘误的垃圾噪音强行转嫁给客户安全运营团队",
+                  "feedback": "商业产品核心卖点就是低误报率，主动消费 withdrawn 墓碑消警是基本功。"
+                }
+              ]
+            },
+            {
+              "name": "突发高危 0-day 漏洞出现时对十万级存量项目资产的应急排查方案",
+              "layer": "持续重算 · 倒排位图",
+              "context": "今天新披露 CVE-2026-XXXX（影响 commons-text），需立刻回答“全司 10 万个历史构建版本中到底哪几百个受影响”。",
+              "options": [
+                {
+                  "label": "从 PostgreSQL 拖出全部 10 万份历史 SBOM JSON 逐一重跑全量版本匹配流水线",
+                  "status": "warning",
+                  "verdictTitle": "每次新 CVE 到来都触发 O(全库资产) 重算，直接打爆数据库 IO",
+                  "feedback": "在每日新增几十个 CVE 的常态下，全库轮询重扫会把后端算力彻底拖垮。"
+                },
+                {
+                  "label": "维护「PkgKey → 资产版本 ID 压缩位图（RoaringBitmap）」倒排索引，先秒筛出真正包含该包的 0.3% 资产再做内存区间求值",
+                  "status": "optimal",
+                  "verdictTitle": "十万级资产 0-day 应急排查收敛到 10 毫秒级，算力消耗下降三个数量级",
+                  "feedback": "完美衔接 Lesson 0006 的 Hyades v5 事件驱动持续重算架构：新情报只重算极小受影响交集。"
+                },
+                {
+                  "label": "不提供存量重算功能，要求全部开发团队等下次发版跑 CI/CD 时再顺便发现",
+                  "status": "critical",
+                  "verdictTitle": "失去第三代 SCA「一次采集、持续防护」核心商业价值，0-day 应急窗口完全失守",
+                  "feedback": "对停滞不再发版却仍在运行的老旧生产容器，永远等不到下一次 CI 构建。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核场景题涵盖 <strong>Trivy/Grype 存储与许可红线、断网逻辑增量链、无锁内存快照以及 0-day 倒排位图与墓碑机制</strong>。<strong>先凭记忆作答，再看解析。</strong>（每题 4 个选项字数严格等长，答案分布均匀。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0009 · 离线漏洞库分发与高并发匹配索引回忆测验",
+          "intro": "重点检验存储结构选型、防篡改增量链以及万级组件/十万资产高并发索引设计。",
+          "questions": [
+            {
+              "prompt": "关于 Trivy DB、Grype DB v6 与 OSV 离线包的底层架构及商业闭源引用红线，下列哪项判断完全准确？",
+              "options": [
+                "Trivy 采用 SQLite 存储按修补版本冗余行，直接搬运其镜像可规避上游全部数据许可条款。",
+                "Grype v6 直接裸解压目录即可使用，且 OSV 全量导出包全部字段均允许商业产品打包转售。",
+                "Grype v6 用轻量索引表加去重 Blobs 瘦身，商用平台须借自研洁净聚合流重制离线快照。",
+                "Trivy 与 Grype 均仅靠明文 HTTP 分发全量包，不支持任何容器镜像仓库与摘要验签。"
+              ],
+              "answerIndex": 2,
+              "explanation": "Trivy DB 底层是 go.etcd.io/bbolt（不是 SQLite），且通过 OCI Artifact + Cosign 分发；Grype v6 才是 SQLite3，通过轻量 Handle 搜索表 + 去重 JSON Blobs 把压缩包缩减到 ~65 MB（且导入须走 grype db import 重建索引）；而 OSV.dev 批量 all.zip 混有 CC-BY-NC-ND-4.0 与 CC-BY-SA-4.0 源，商业平台必须自建洁净聚合流水线再封装分发（C 正确）。"
+            },
+            {
+              "prompt": "在客户断网/摆渡的私有化环境中实现安全的每日增量漏洞库同步，为何优先选择「哈希链签名逻辑增量」而非二进制 bsdiff，且缺块时应如何处置？",
+              "options": [
+                "B+Tree 页分裂会打乱字节偏移使二进制补丁膨胀；遇断链缺块必须拒用并回退全量基线快照。",
+                "二进制补丁在离线端根本无法校验密码学摘要；遇断链缺块时可直接跳过缺口版本强行重放旧补丁包。",
+                "逻辑增量无需非对称签名即可防中间人恶意篡改；遇断链缺块时只需手工改写本地版本号以完成升级。",
+                "SQLite 更新后会压为单层 OCI 镜像；遇断链缺块时内网客户端可直接向公网发起补拉。"
+              ],
+              "answerIndex": 0,
+              "explanation": "SQLite/bbolt 在插入少量新规则后极易触发 4KB B+Tree 页分裂与页序重排，导致跨版本二进制差分（bsdiff）体积剧增；采用哈希链签名逻辑增量（upserts + withdrawn tombstones）日均仅数百 KB。一旦检测到 prev_state_sha256 断链缺块，绝不可跳过强行重放，必须熔断并回退最近签名全量 Base 快照重建（A 正确）。"
+            },
+            {
+              "prompt": "针对单次扫万级组件、且同时有 90%+ 洁净包与数百条 CVE 热点包的高并发云端匹配 Worker，以下哪种内存索引与热更新架构最优？",
+              "options": [
+                "每次扫描为每个组件发起带全局写锁的 SQLite 实时查询，并在匹配瞬间现场正则拆解版本字符串处理。",
+                "把全库按 CVE 编号顺排让每个组件遍历全部漏洞规则，再用全局读写锁在更新瞬间彻底阻塞全部扫描任务。",
+                "取消本地内存缓存把一万个组件分批同步请求公网 API，借助网络超时重试机制天然削峰与保稳并持续运行。",
+                "构建期预解析区间并用 PURL 哈希使洁净包纳秒返回，再靠 atomic.Pointer 无锁切换。"
+              ],
+              "answerIndex": 3,
+              "explanation": "在云端高并发匹配场景下，通过规范化 PkgKey 哈希（含 Scope 与 DistroQualifier 隔离）可在 ~40ns 跳过 90%+ 洁净包；构建期预解析规则边界消除热路径版本字符串重复解析开销；后台构建新只读快照后用 atomic.Pointer.Store 无锁切换，兼顾极致吞吐与零毛刺 P99 延迟（D 正确）。"
+            },
+            {
+              "prompt": "当突发 0-day 漏洞需要秒级排查十万级存量资产，同时离线端需验证 Cosign 签名与处理上游 withdrawn 撤回时，正确的工程闭环是什么？",
+              "options": [
+                "全库拖出十万份 SBOM 逐一重扫；离线机直连公网 Rekor 验证；收到撤回后物理删数据库行。",
+                "用 PURL 资产倒排位图秒筛项目；预置离线 TUF 根缓存并验签；撤回仅置墓碑禁用规则防复活。",
+                "每周定时全量重算十万份资产；离线环境关闭数字签名校验；撤回由人工逐条下发工单批量彻底清理并归档。",
+                "逐台拉起容器重跑底层提取器；用明文 MD5 替代非对称签名；撤回信息直接丢弃且不做任何额外记录。"
+              ],
+              "answerIndex": 1,
+              "explanation": "面对十万级存量资产，借助「PkgKey → RoaringBitmap」倒排索引可先将重算范围精准裁剪至 ~0.3% 受影响项目；离线验签须预置 ~/.sigstore TUF 根缓存（cosign initialize）或内嵌企业离线公钥环；收到 withdrawn 撤回必须写逻辑墓碑（is_enabled=false）而非物理删除，避免滞后数据源令假 CVE 复活（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计自研商业双模漏洞库分发包与内存索引引擎时，建议精读以下一手源码与规范：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/aquasecurity/trivy-db" target="_blank" rel="noopener"><strong><code>aquasecurity/trivy-db</code></strong></a>（Apache-2.0）&amp; <a href="https://trivy.dev/docs/latest/guide/references/configuration/air-gap/" target="_blank" rel="noopener"><strong>Trivy Air-Gap Docs</strong></a>：OCI 漏洞库 MediaType、<code>bbolt</code> 桶设计与断网离线镜像流程。</li>
+          <li><a href="https://github.com/anchore/grype" target="_blank" rel="noopener"><strong><code>anchore/grype</code> DB Schema v6</strong></a>（Apache-2.0）：Handle 搜索表 + 内容去重 <code>blobs</code> + Zstd + <code>latest.json</code> 的极致 SQLite 瘦身结构。</li>
+          <li><a href="https://oras.land/" target="_blank" rel="noopener"><strong>ORAS Project</strong></a>（Apache-2.0）&amp; <a href="https://docs.sigstore.dev/cosign/verifying/verify/" target="_blank" rel="noopener"><strong>Sigstore Cosign</strong></a>：OCI 非镜像制品推送拉取规范与离线 TUF 根（<code>cosign initialize</code>）验证指南。</li>
+          <li><a href="https://github.com/RoaringBitmap/roaring" target="_blank" rel="noopener"><strong><code>RoaringBitmap/roaring</code></strong></a>（Apache-2.0）&amp; <a href="https://github.com/ncruces/go-sqlite3" target="_blank" rel="noopener"><strong><code>ncruces/go-sqlite3</code></strong></a>（MIT）：纯 Go 压缩位图倒排与零 CGO 嵌入式只读 SQLite 引擎。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>到这里，Layer 3 的「多源汇聚 → 版本区间语义 → 离线分发与高并发索引」三大支柱已彻底贯通！带着思考继续追问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“为了防止 SQLite 物理文件页序差异导致哈希变化，如何设计确定性的 <code>logical_state_sha256</code> 来校验逻辑增量链的完整性？”</li>
+          <li>“在 10 万级资产的 <code>RoaringBitmap</code> 倒排索引上，如果不仅按包名筛选、还想在位图阶段就把大版本号（如 <code>log4j 2.x</code> vs <code>1.x</code>）预先分桶，该怎么设计？”</li>
+          <li>“我已掌握离线分发与高并发索引设计，准备进入 Chapter 03 收官课：<strong>Lesson 0010（开源许可证合规引擎与传染性兼容性推理）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">← 上一课：Lesson 0008 · 版本区间语义引擎</a>
+      <a href="../reference/layer3-intel-and-version-matrix.html">配套速查卡：Ref 04 · L3 情报、版本与合规矩阵</a>
+      <a href="../index.html">返回课程总览 · 下一课 Lesson 0010（许可证合规引擎） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/vuln-index-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
