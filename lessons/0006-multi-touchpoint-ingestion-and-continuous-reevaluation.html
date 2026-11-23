@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lesson 0006：高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</title>
+  <title>Lesson 0006：高并发多触点采集架构：AI Agent、IDE、PR 门禁与异步持续重算</title>
   <link rel="stylesheet" href="../assets/tufte-course.css" />
 </head>
 <body>
@@ -26,19 +26,19 @@
         <span class="sep">/</span>
         <span>PHASE 1 · CH 02 多语言与全形态采集提取引擎（收官课）</span>
         <span class="sep">/</span>
-        <span>约 18 分钟</span>
+        <span>约 20 分钟</span>
       </div>
-      <h1>高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</h1>
-      <p class="subtitle">有了精准的解析器与镜像提取器，为什么商业化落地依然容易被研发投诉“卡死 IDE”“老漏洞卡死新 PR”，或者半夜 0-day 爆发时服务端拖垮 GitLab？本课把 Layer 1 能力装进一条<strong>兼顾毫秒级左移体验与万级并发稳态</strong>的多触点管道，完成 Chapter 02 工程闭环。</p>
+      <h1>高并发多触点采集架构：AI Agent、IDE、PR 门禁与异步持续重算</h1>
+      <p class="subtitle">在对话式 AI Coding Agent（Claude Code / Codex / T3 Code）盛行、甚至根本不开传统 IDE 的今天，只靠“编辑器红色波浪线”已拦不住幻觉投毒与自主安装；而在合并与服务端，又随时面临“老债卡死新 PR”“0-day 拖垮 GitLab”的挑战。本课完成 Chapter 02 工程闭环：把 Layer 1 装进<strong>兼顾 Agent/IDE 秒级左移与万级并发稳态</strong>的多触点管道。</p>
       <div class="meta-strip">
-        <span><strong>本课收获：</strong>掌握四大触点延迟预算、LSP 防抖缓存、PR 净新增图差算法、CAS 去重与 Hyades 双触发持续重算架构</span>
+        <span><strong>本课收获：</strong>掌握四大触点延迟预算、Single Go Core 三模入口（MCP + Hook + LSP）、PR 净新增图差、CAS 去重与 Hyades 双触发持续重算</span>
         <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> · <a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a></span>
       </div>
     </header>
 
     <div class="callout mission">
       <div class="callout-label">承上启下（对齐你的 Mission）</div>
-      <p>在 <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a>–<a href="./0005-container-image-os-and-artifact-extraction.html">0005</a> 中，我们攻克了源码解析陷阱、四大 Apache-2.0 提取底座编排和 OCI 分层合成。作为 <strong>CH 02 采集提取引擎收官课</strong>，今天解决最核心的工程调度问题：<strong>同一套 Layer 1 引擎和 Layer 2 IR，如何在 IDE、PR 门禁、CI 流水线与服务端持续重算这 4 个时空尺度完全不同的触点上协同工作？</strong></p>
+      <p>在 <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a>–<a href="./0005-container-image-os-and-artifact-extraction.html">0005</a> 中，我们攻克了源码解析陷阱、四大 Apache-2.0 提取底座编排和 OCI 分层合成。作为 <strong>CH 02 采集提取引擎收官课</strong>，今天解决最核心的工程调度问题：<strong>同一套 Layer 1 引擎和 Layer 2 IR，如何在 AI Agent/IDE 本地编码、PR 门禁、CI 流水线与服务端持续重算这 4 个时空尺度完全不同的触点上协同工作？</strong></p>
     </div>
 
     <!-- SECTION 1 -->
@@ -64,9 +64,9 @@
             <span>TOUCHPOINT 1</span>
             <span class="badge badge-ok">&le; 1.5s</span>
           </div>
-          <div class="ladder-step-title">IDE 本地实时提示（LSP）</div>
-          <p class="ladder-step-desc">仅监听打开与保存清单文件事件；纯本地跑 <strong>OSV-SCALIBR 静态提取</strong> + 内存 LRU 缓存，只向后端批量查询增量变更的 PURL 风险。</p>
-          <div class="ladder-step-meta">泳道 A（静态） · 标杆：<code>snyk-ls</code> (Apache-2.0)</div>
+          <div class="ladder-step-title">本地编码防线（Agent + IDE）</div>
+          <p class="ladder-step-desc">单一 Go 核心（<strong>OSV-SCALIBR</strong> + 缓存）同时输出 <strong>MCP / Hook / LSP</strong> 三入口：防 Agent 幻觉包本地安装，也兼容编辑器波浪线。</p>
+          <div class="ladder-step-meta">泳道 A（静态） · 标杆：<code>snyk mcp</code> / <code>snyk-ls</code> (Apache-2.0)</div>
         </article>
 
         <article class="ladder-step tier-2">
@@ -102,18 +102,24 @@
     </figure>
 
     <!-- SECTION 2 -->
-    <h2><span class="sec-num">02</span>左移双防线：IDE Language Server（LSP）与 PR 增量图差算法</h2>
+    <h2><span class="sec-num">02</span>左移双防线：Agentic Coding 本地防线与 PR 增量图差算法</h2>
 
-    <div class="prose-col">
-      <p>左移不等于把笨重的服务端全量扫描搬到开发者本机；它必须在<strong>秒级编辑器反馈</strong>与<strong>十秒级合并拦截</strong>之间守住两条工程防线。</p>
-      <h3 style="margin-top:0.85rem;">2.1 为何 IDE 必须采用 Language Server（LSP）单内核架构</h3>
-      <p>如果为 VS Code（TypeScript）、JetBrains IDEA（Kotlin/Java）、Eclipse 与 Neovim 分别手写解析和匹配逻辑，不出半年就会出现“IDEA 报红但 VS Code 绿灯”的规则分裂。</p>
-      <p>全球标杆 <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server（<code>snyk/snyk-ls</code>，Apache-2.0）</strong></a> 给出了标准答案——<strong>LSP 作为“后端即前端（BFF）”统一本地守护进程</strong>：各家编辑器客户端只保留极薄的 UI 胶水层，通过标准 JSON-RPC（<code>stdio</code>）与一个 Go 编译的后台进程通信，由它集中承接扫描并输出标准 <code>textDocument/publishDiagnostics</code>（波浪线）与 <code>CodeAction</code>（一键升级）。在 <code>snyk-ls</code> 的缓存范式上（本地缓存诊断直至收到 <code>didSave</code> 再失效重扫），我们自研的 <code>sca-ls</code> 进一步做细粒度增强：</p>
+    <div class="prose-col has-sidenote">
+      <p>左移不等于把笨重的服务端全量扫描搬到开发者本机；它必须在<strong>亚秒级本地自愈拦截</strong>与<strong>十秒级合并阻断</strong>之间守住两条工程防线。</p>
+      <h3>2.1 2026 代际跃迁：从「IDE LSP 单通道」到「Single Go Core &rarr; MCP + Hook + LSP」</h3>
+      <p>传统的左移教程常默认“开发者开着 VS Code 或 IDEA 写代码，靠 <code>LSP</code> 画红色波浪线提醒”。但在 <strong>Claude Code、Codex CLI、Cursor Agent、T3 Code</strong> 等对话式 AI Agent 盛行的工作流中，工程师往往<strong>根本不打开传统编辑器界面</strong>——LSP 要么没加载，要么提示没人看，而 Agent 会自主修改 <code>package.json</code> 并直接在本机执行 <code>npm install</code> / <code>uv add</code>。</p>
+      <p>这不仅没有淘汰触点 1，反而让它变成防线的生死关：Spracklen 等人在 <strong>USENIX Security（<a href="https://arxiv.org/abs/2406.10279" target="_blank" rel="noopener"><code>arXiv:2406.10279</code></a>）</strong>评测 16 个代码生成大模型、57.6 万份样本发现，LLM 推荐包名平均有 <strong>19.7% 属于不存在的幻觉包</strong>（商业模型约 <strong>5.2%</strong>，开源模型约 <strong>21.7%</strong>），且 <strong>43% 可稳定复现</strong>，催生了攻击者抢注幻觉包名的 <strong>Slopsquatting</strong> 投毒。等代码推到 PR 才拦，恶意 <code>postinstall</code> 早已在带私钥的本地终端跑完了。</p>
+      <p>全球标杆的演进路径极具启发性：Snyk 最初以 Go 编写的 <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><code>snyk/snyk-ls</code>（Apache-2.0）</a> 作为跨编辑器统一内核（BFF，<code>stdio</code> JSON-RPC + <code>didSave</code> 失效重扫）；进入 AI 时代后，又在 <a href="https://github.com/snyk/cli" target="_blank" rel="noopener"><code>snyk/cli</code>（Apache-2.0）</a> 中原生内置了 <strong>MCP Server（<code>snyk mcp -t stdio</code>）</strong>，向 Agent 暴露 <code>snyk_sca_scan</code> 与 <code>snyk_package_health_check</code>。对于我们的绿地平台，最优雅的设计是<strong>单核三模（Single Go Binary, 3 Protocol Adapters）</strong>：</p>
       <ul>
-        <li><strong>严格禁止 <code>didChange</code> 每次击键触发：</strong>编辑半成品 <code>package.json</code> 时 JSON 语法本身都不合法。必须仅在 <code>didOpen</code> 与 <code>didSave</code> 且文件路径命中 Manifest/Lockfile 白名单时触发扫描。</li>
-        <li><strong>文件哈希防抖 + PURL 差量查询：</strong><code>sca-ls</code> 在内存保留 <code>file_sha256 &rarr; extracted_purls</code> 与 <code>purl &rarr; advisory_verdict</code> 两级缓存。按 <code>Ctrl+S</code> 保存但依赖块未改时直接 0ms 返回；即便改了一行新包，也只把<strong>未命中本地缓存的 1–2 个增量 PURL</strong> 发往后端 <code>/v1/match/batch</code>，确保端到端延迟稳控在 <code>&lt; 300ms</code>。</li>
-        <li><strong>绝不在 IDE 热路径拉起构建器：</strong>没有 <code>package-lock.json</code> 或仅修改 <code>pom.xml</code> 时，本地只允许运行纯数据静态解析或只读轻量树（Tier 1/2），严禁在开发者本地后台偷偷启动 <code>mvn dependency:tree</code> 或 <code>npm install</code> 抢占 CPU 与修改工作区。</li>
+        <li><strong>底座不变（<code>sca-local</code> Go 单核）：</strong>内部嵌入 <code>OSV-SCALIBR</code>，维护 <code>file_sha256 &rarr; extracted_purls</code> 防抖与本地 <code>purl &rarr; verdict</code> LRU 缓存，只把未命中的增量 PURL 批量打给 <code>/v1/match/batch</code>（<code>&lt; 300ms</code>），绝不在本地热路径拉起完整 <code>mvn</code> / <code>gradle</code> 构建。</li>
+        <li><strong>模式一 <code>--mode=mcp</code>（事前主动防线，防 Slopsquatting）：</strong>通过 Model Context Protocol 暴露 <code>check_package_safety(purl)</code> 与 <code>scan_manifest(path)</code>。Agent 在执行 <code>install</code> 或改写依赖前主动查验包真实存在性、CVE 与许可证，把幻觉包与老版本扼杀在安装前。</li>
+        <li><strong>模式二 <code>--mode=hook</code>（事中强制兜底，Agent 自愈闭环）：</strong>大模型在长上下文压力下可能偷懒跳过 MCP 查询，因此必须挂载 Agent 生命周期钩子（如 <code>PostToolUse</code> 监听编辑清单文件或包管理器命令）与 Git <code>pre-commit</code>。一旦检出高危 CVE/GPL/可疑新包，直接向 stdout/stderr 吐出结构化修复建议并返回非零状态，<strong>驱动 Agent 当场自动改用安全版本</strong>。</li>
+        <li><strong>模式三 <code>--mode=lsp</code>（传统 IDE 兼容通道）：</strong>保留 <code>didOpen</code> / <code>didSave</code> 防抖（严禁 <code>didChange</code> 每次击键扫全树），服务仍习惯打开编辑器看波浪线与 <code>CodeAction</code> 的开发者。三种入口共享一套解析规则与缓存，零维护分裂。</li>
       </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">Agent 时代的交互范式反转</span>
+        给人类看的诊断追求“图表漂亮、不打断打字”；给 AI Agent 看的诊断追求<strong>“可机读、极简且自带安全目标版本”</strong>（如 <code>pkg:npm/axios@0.21.1 -&gt; upgrade &gt;=1.7.4</code>）。只要本地钩子在 1 秒内把这行提示喂回工具返回体，Agent 就能自动完成升级自愈，把安全修复成本压成零。
+      </aside>
     </div>
 
     <div class="prose-col has-sidenote">
@@ -243,7 +249,7 @@
       <script type="application/json" class="touchpoint-lab-data">
         {
           "title": "交互实验台：四大研发触点流转与 0-Day 异步持续重算（4 大场景 × 反模式对比）",
-          "intro": "点击上方标签切换 IDE LSP、PR 增量门禁、Monorepo CAS 去重与 Hyades 0-day 重算现场，并对比「反模式」与「推荐架构」的指令与指标流转。"
+          "intro": "点击上方标签切换 AI Agent/IDE 本地防线、PR 增量门禁、Monorepo CAS 去重与 Hyades 0-day 重算现场，并对比「反模式」与「推荐架构」的指令与指标流转。"
         }
       </script>
     </section>
@@ -253,35 +259,35 @@
       <script type="application/json" class="sandbox-data">
         {
           "title": "高并发多触点采集与持续重算架构评审沙盘（5 项核心拍板决策）",
-          "intro": "设定：你的商业 SCA 平台即将服务一家拥有 3000 名研发、120 模块 Monorepo 及数万运行镜像的大型企业，需定型端到端采集与重算管道。",
+          "intro": "设定：你的商业 SCA 平台即将服务一家拥有 3000 名研发（大量工程师直接使用 Claude Code / Codex CLI 等对话式 Agent 编程而不开传统 IDE）、120 模块 Monorepo 及数万运行镜像的大型企业。",
           "summary": {
-            "optimal": "全部 {optimal} 项多触点架构决策均精准无误！你已打通“毫秒级 IDE 左移体验 + 无噪音 PR 增量拦截 + CAS 省算力 CI 接入 + 事件驱动 0-day 秒级重算”完整闭环，正式具备迈向 Chapter 03 漏洞情报引擎的底座能力。",
-            "warning": "没有触发系统崩溃级红线，但有 {warning} 项在多编辑器维护成本、PR 基线容错或僵尸快照清理上存在效率隐患（标黄项），建议立即收口。",
-            "critical": "当前架构存在 {critical} 处会直接卡死开发体验、放行新增高危包或打垮服务端数据库的高危缺陷（标红项）！请先修正标红项。"
+            "optimal": "全部 {optimal} 项多触点架构决策均精准无误！你已打通“Agent/IDE 秒级左移自愈 + 无噪音 PR 增量拦截 + CAS 省算力 CI 接入 + 事件驱动 0-day 秒级重算”完整闭环，正式具备迈向 Chapter 03 漏洞情报引擎的底座能力。",
+            "warning": "没有触发系统崩溃级红线，但有 {warning} 项在 Agent 强制兜底、PR 基线容错或僵尸快照清理上存在盲区与效率隐患（标黄项），建议立即收口。",
+            "critical": "当前架构存在 {critical} 处会漏放幻觉包投毒、卡死研发体验或打垮服务端数据库的高危缺陷（标红项）！请先修正标红项。"
           },
           "modules": [
             {
-              "name": "IDE 本地插件架构与扫描触发时机设计",
-              "layer": "触点 1 · IDE 左移",
-              "context": "团队需要同时交付 VS Code、JetBrains IDEA 与 Cursor 三款插件，不能影响日常编码流畅度。",
+              "name": "对话式 AI Coding Agent 与传统 IDE 共存时代的本地左移防线（触点 1）",
+              "layer": "触点 1 · Agent + IDE 左移",
+              "context": "团队一半研发直接用终端/网页 AI Agent 自主改清单并执行 npm/uv 安装，根本不打开传统编辑器视图；另一半仍使用 VS Code 与 JetBrains。",
               "options": [
                 {
-                  "label": "采用 snyk-ls 模式：独立 Go LSP 后台进程统一承载本地提取，仅在 didOpen/didSave 防抖扫描并配合文件 Hash + 增量 PURL 缓存",
+                  "label": "打造单一 Go 本地引擎（OSV-SCALIBR + SHA 防抖 + PURL 缓存），对外同时提供 --mode=mcp（安装前校验）、--mode=hook（PostToolUse/pre-commit 强制自愈）与 --mode=lsp 三入口",
                   "status": "optimal",
-                  "verdictTitle": "单内核全编辑器复用，亚秒级响应且保护服务端接口配额",
-                  "feedback": "工业界标准解法！既消除多语言重写规则的维护灾难，又靠保存触发 + 差量缓存守住 1.5s 延迟红线。"
+                  "verdictTitle": "单核覆盖 AI Agent 与传统 IDE 全工作流，兼顾防 Slopsquatting 与自动自愈",
+                  "feedback": "紧贴 2026+ 真实研发形态的满分架构！事前 MCP 拦幻觉包、事中 Hook 逼迫 Agent 自动换版本、传统 IDE 用 LSP 兼容，且三者底层共享同一套引擎与缓存。"
                 },
                 {
-                  "label": "在 VS Code 用 TypeScript、IDEA 用 Kotlin 各自实现解析器，且在 didChange 每次键盘敲击时实时发请求扫全树",
+                  "label": "按传统套路只开发 VS Code / IDEA 插件（LSP-only）或按不同编辑器语言各写一套插件，在界面画红色波浪线提示人工修复",
                   "status": "critical",
-                  "verdictTitle": "双倍研发维护成本 + 敲半个 JSON 就打爆后端接口与卡死编辑器",
-                  "feedback": "规则必然漂移，且每次按键全量扫描会瞬间制造海量无意义报错与接口雪崩，研发会在一天内卸载插件。"
+                  "verdictTitle": "在对话式 AI Agent 场景完全失明，幻觉包与漏洞在终端直接落地",
+                  "feedback": "工程师不开编辑器时 LSP 根本不触发，也没人看波浪线；AI Agent 自主执行 npm/pip install 时若无 MCP/Hook 拦截，恶意 Slopsquatting 包已在带密钥的本机运行。"
                 },
                 {
-                  "label": "只写一个 LSP 进程，但每次保存强制在用户本机后台拉起完整 mvn dependency:tree / gradle dependencies",
+                  "label": "只暴露一个 MCP Server 给 Agent 自觉调用（不配 PostToolUse Hook），且每次调用都要在用户本机拉起完整 mvn dependency:tree",
                   "status": "warning",
-                  "verdictTitle": "本地拉起完整构建动辄耗时十余秒并锁死本地缓存",
-                  "feedback": "全量构建解析只适合 CI/沙箱，放进 IDE 热路径会抢占开发者本地 CPU/内存甚至污染 IDE 自己的 Gradle 守护进程。"
+                  "verdictTitle": "大模型经常跳过可选 MCP 工具导致漏检，且全量构建会拖慢 Agent 回合十余秒",
+                  "feedback": "MCP 属于建议性主动调用，必须有轻量的 PostToolUse / pre-commit Hook 兜底；本地热路径也严禁拉起重量级全量构建器。"
                 }
               ]
             },
@@ -394,25 +400,25 @@
     <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
 
     <div class="prose-col">
-      <p>以下 4 道高频架构设计题覆盖 <strong>IDE LSP 缓存触发、PR 净新增基线缺失、Monorepo CAS 去重与 Hyades 双触发持续重算</strong>。<strong>先凭记忆独立作答，再查看解析。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+      <p>以下 4 道高频架构设计题覆盖 <strong>Agentic Coding 本地三模防线、PR 净新增基线缺失、Monorepo CAS 去重与 Hyades 双触发持续重算</strong>。<strong>先凭记忆独立作答，再查看解析。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
     </div>
 
     <section class="widget-panel full-width" data-widget="quiz">
       <script type="application/json" class="quiz-data">
         {
           "title": "Lesson 0006 · 多触点采集架构与持续重算回忆测验",
-          "intro": "重点检验跨触点延迟控制、Diff 边界容错与服务端事件流持续重算。",
+          "intro": "重点检验 Agentic 左移演进、Diff 边界容错与服务端事件流持续重算。",
           "questions": [
             {
-              "prompt": "在设计类似 snyk-ls 的商业 SCA IDE 语言服务器（LSP）时，开发者每敲击一个字符修改 package.json，界面就出现明显卡顿并瞬间打满后端漏洞接口配额。按照低延迟本地架构原则，最合理的修复方案是？",
+              "prompt": "随着对话式 AI Coding Agent（如 Claude Code、Codex CLI 等）成为主流研发方式，许多工程师不再打开传统 IDE 编辑器界面。面对这一变化，设计现代化 SCA 平台的本地触点 1 时，最正确的架构演进方案是？",
               "options": [
-                "维持每次按键实时扫描策略，并把全量构建与服务端远程查询全部改为同步阻塞调用。",
-                "改在打开与保存文件时防抖触发本地静态提取，结合路径摘要缓存只增量查询变更包。",
-                "彻底移除编辑器内部所有实时漏洞诊断能力，强制要求开发者每次提交后去网页查看。",
-                "在各个编辑器客户端分别用不同语言重写一套规则引擎，绕过公共协议直连核心后端。"
+                "直接放弃所有本地客户端扫描能力，要求全公司等待代码推入远端门禁之后再拦截风险。",
+                "保持单一本地引擎内核，同时暴露前置工具协议、代理钩子与兼容编辑器协议三类入口。",
+                "继续只发布传统编辑器插件并依赖界面红色波浪线提示，同时禁止在终端使用代理工具。",
+                "完全取消全部前置安全校验与钩子策略，单靠大模型训练记忆去自行避开幻觉包与漏洞。"
               ],
               "answerIndex": 1,
-              "explanation": "LSP 架构（如 snyk/snyk-ls）应作为统一的本地后台进程承接所有编辑器 UI，并将扫描绑定在 didOpen 与 didSave（结合文件 SHA 防抖），在本地执行轻量静态提取并缓存未变化的 PURL 诊断结果，仅把新增/变动的少量 PURL 差量查询服务端，才能兼顾亚秒级体验与接口保护（B 正确）。"
+              "explanation": "对话式 Agent 编程下传统 IDE LSP 常未被打开，但 Agent 自主执行包安装会直接触发 Slopsquatting 幻觉投毒风险（USENIX 研究显示 LLM 平均存在 19.7% 包名幻觉）。正确架构是保持单一 Go 本地核心（OSV-SCALIBR + SHA/PURL 缓存），同时暴露 MCP（安装前主动查询）、Agent Hook / pre-commit（事中强制自愈）与 LSP（传统 IDE 兼容）三类入口（B 正确）。"
             },
             {
               "prompt": "在配置 PR 门禁增量对比（Dependency Diff）时，某仓库存在 80 个历史遗留漏洞，且目标主干分支在 merge-base 提交尚未留存 CI 扫描快照。此时如果开发者开了一个仅修改 README 的 PR，哪种工程处理策略完全正确？",
@@ -456,10 +462,11 @@
     <section class="lesson-footer-grid">
       <div class="footer-box">
         <h3>一手必读原典（Primary Source）</h3>
-        <p>落地 IDE、PR 门禁与服务端事件流引擎时，建议精读以下商用合规开源项目的核心架构文档与仓库：</p>
+        <p>落地 AI Agent/IDE 左移防线、PR 门禁与服务端事件流引擎时，建议精读以下研究论文与商用合规开源仓库：</p>
         <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://arxiv.org/abs/2406.10279" target="_blank" rel="noopener"><strong>Spracklen et al. (USENIX Security)</strong></a>：对 16 款 LLM / 57.6 万份样本的实证分析，揭示 19.7% 包幻觉率与 Slopsquatting 威胁成因。</li>
+          <li><a href="https://github.com/snyk/cli" target="_blank" rel="noopener"><strong>Snyk CLI MCP (<code>snyk/cli</code>)</strong></a> &amp; <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong><code>snyk/snyk-ls</code></strong></a>（Apache-2.0）：从传统 <code>didSave</code> IDE LSP 演进至原生 <code>snyk mcp -t stdio</code> 对接 AI Coding Agent 的架构参照。</li>
           <li><a href="https://github.com/DependencyTrack/dependency-track" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5 (Hyades 架构)</strong></a>（Apache-2.0）&amp; <a href="https://docs.dependencytrack.org/" target="_blank" rel="noopener">官方文档</a>：从 v4 单体内存队列到 Kafka + 微服务“一次采集、持续重算”的经典演进（原 <code>hyades</code> 孵化仓库已正式合入主仓库）。</li>
-          <li><a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server (<code>snyk/snyk-ls</code>)</strong></a>（Apache-2.0）：IDE 单一 Go LSP BFF 内核、<code>didSave</code> 失效重扫与本地诊断缓存范式。</li>
           <li><a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><strong>GitHub <code>dependency-review-action</code></strong></a>（MIT）&amp; <a href="https://docs.github.com/en/rest/dependency-graph/dependency-submission" target="_blank" rel="noopener"><strong>Dependency Submission API</strong></a>：基于 Commit SHA 的 PR 增量依赖图差比较与 <code>retry-on-snapshot-warnings</code> 快照等待机制。</li>
         </ul>
       </div>

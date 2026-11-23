@@ -25,55 +25,56 @@
 
   const DEFAULT_SCENARIOS = [
     {
-      id: "ide-lsp",
-      tabLabel: "1. IDE 本地反馈（LSP）",
-      contextTitle: "延迟预算 <= 1.5s · 开发者编辑 package.json / go.mod",
-      inspectTitle: "IDE 编辑器实时交互轨迹",
-      inspectTag: "VS Code / JetBrains -> sca-ls",
+      id: "agent-ide-local",
+      tabLabel: "1. AI Agent 与 IDE 本地防线",
+      contextTitle: "延迟预算 <= 1.5s · 对话式 Coding Agent 无 IDE 视图编程",
+      inspectTitle: "AI Coding Agent 会话实时流（未打开编辑器）",
+      inspectTag: "Claude / Codex / T3 -> sca-local",
       inspectTree: [
-        "[编辑器事件流]",
-        "  t=0.00s  didOpen(package.json)        -> 首次入库扫描",
-        "  t=0.40s  didChange(键入 '\"ax')         -> 编辑中（未合法 JSON）",
-        "  t=0.80s  didChange(键入 'ios\": \"0.21') -> 编辑中",
-        "  t=1.90s  didSave(package-lock.json)   -> 文件落盘 SHA 变更!",
+        "[对话式 Agent 任务: \"添加 Redis 限流与 HTTP 客户端\"]",
+        "  t=0.00s  Agent 规划引入: fast-ratelimit-redis (LLM 幻觉包!)",
+        "  t=0.35s  [MCP 事前校验] check_package_safety -> 404 不存在!",
+        "  t=0.90s  Agent 改选: rate-limiter-flexible + axios@0.21.1",
+        "  t=1.20s  Agent 编辑 package-lock.json 并准备执行 install",
+        "  t=1.35s  [PostToolUse Hook] sca-local --mode=hook 触发!",
         "",
-        "[本地状态与缓存]",
-        "  ├── 已缓存 PURL: pkg:npm/express@4.19.2 (TTL 命中, 0ms)",
-        "  └── 增量变更 PURL: pkg:npm/axios@0.21.1 (待匹配)"
+        "[本地 Go 内核与缓存]",
+        "  ├── SHA-256 防抖 + LRU 命中: 247/248 PURLs (0ms)",
+        "  └── 增量变更 PURL: pkg:npm/axios@0.21.1 (High CVE-2021-3749)"
       ].join("\n"),
       badges: [
-        { cls: "add", text: "didOpen / didSave 触发" },
-        { cls: "opq", text: "OSV-SCALIBR 本地静态提取" },
-        { cls: "del", text: "禁每次按键拉起 mvn/npm 构建" },
+        { cls: "add", text: "Single Go Core -> MCP + Hook + LSP" },
+        { cls: "opq", text: "防 Slopsquatting 幻觉投毒" },
+        { cls: "del", text: "禁只做 IDE 红色波浪线（无人看）" },
       ],
       modes: {
         naive: {
           status: "danger",
-          verdictLabel: "灾难：didChange 实时同步构建 + 在 VS Code/IDEA 各写一套逻辑",
-          verdictTitle: "编辑器卡死 18 秒 + 每分钟打爆后端匹配接口配额",
+          verdictLabel: "灾难：仅建 IDE LSP 插件（依赖人看红线）或仅靠模型自身记忆",
+          verdictTitle: "Agent 在无 IDE 界面下直接装入幻觉恶意包与老版本 CVE",
           summary:
-            "在每次按键（didChange）就触发完整依赖解析甚至拉起 npm/mvn 子进程，会导致半成品 JSON 报错、CPU 飙升卡死 IDE 线程；为多个编辑器各自维护原生插件逻辑，也会导致告警规则与 CI 严重漂移。",
+            "对话式编程时工程师压根不开 IDE，LSP 根本不会启动或没人看到波浪线；若只依赖大模型记忆，USENIX 实证显示平均 19.7% 推荐包名属于幻觉（Slopsquatting），一旦 Agent 本地运行 npm install 即直接在本机触发 postinstall 投毒。",
           irSnippet: [
-            "// 反模式：每次敲键盘发全量请求，无防抖与本地缓存",
-            "event=didChange -> spawn('mvn dependency:tree') // ❌ 18,400ms",
-            "POST /api/v1/scan/full { 248 packages }        // ❌ 全量重复查",
-            "UI 状态: 编辑器卡顿 · 28 次无效请求 · 规则与 CI 门禁漂移"
+            "// 反模式：只做了传统 IDE LSP（Agent 对话模式完全失明）",
+            "ide_lsp_attached: false,   // ❌ 无传统编辑器打开，LSP 未加载",
+            "agent_exec: \"npm i fast-ratelimit-redis axios@0.21.1\"",
+            "// ❌ 幻觉包已在带私钥的开发机触发 postinstall 载荷",
+            "// ❌ 高危 axios 直到推 PR 才被发现，浪费返工时间"
           ].join("\n"),
         },
         industrial: {
           status: "ok",
-          verdictLabel: "推荐架构：借鉴 snyk-ls（Go LSP + didSave 缓存 + 差量查）",
-          verdictTitle: "180ms 内精准标红 pkg:npm/axios@0.21.1，仅查询 1 个增量 PURL",
+          verdictLabel: "推荐架构：Single Go Core 三模入口（MCP + Hook + LSP）",
+          verdictTitle: "MCP 事前拦住幻觉包 + Hook 逼迫 Agent 180ms 内自动换成 1.7.4",
           summary:
-            "参考 snyk-ls 的 Go BFF 模式：IDE 插件只做薄 UI，通过 stdio JSON-RPC 对接后台 sca-ls。仅在 didOpen/didSave（叠加文件哈希防抖）运行泳道 A 本地静态提取，命中本地 PURL LRU 缓存直接渲染，仅把新增/变更 PURL 批量查询后端。",
+            "参考 Snyk CLI MCP 与 snyk-ls 的演进：同一 Go 二进制（OSV-SCALIBR + SHA 防抖 + PURL LRU 缓存）对外提供 --mode=mcp（安装前核验存在性与安全版本）、--mode=hook（PostToolUse/pre-commit 强制兜底）与 --mode=lsp。结构化错误直接打回 Agent 上下文实现自动自愈。",
           irSnippet: [
-            "// 推荐输出：LSP 后台异步执行 + PURL 差量查询",
-            "didSave(sha256 changed) -> local OSV-SCALIBR (62ms)",
-            "cache_hit: 247/248 -> delta_query: [\"pkg:npm/axios@0.21.1\"]",
-            "publishDiagnostics: {",
-            "  \"range\": \"line 14\", \"severity\": \"High\",",
-            "  \"codeAction\": \"Upgrade axios -> 1.7.4 (CVE-2021-3749)\"",
-            "}"
+            "// 推荐输出：MCP 事前拦截 + Hook 结构化自愈提示",
+            "mcp_precheck(\"fast-ratelimit-redis\"): \"NOT_FOUND (slopsquatting risk)\"",
+            "hook_post_edit(sha256_diff): {",
+            "  \"blocked\": \"pkg:npm/axios@0.21.1\", \"cve\": \"CVE-2021-3749\",",
+            "  \"remediation\": \"Upgrade to >= 1.7.4 (auto-fixable)\"",
+            "} // -> Agent 收到退出码 2 后自动重写为 axios@1.7.4"
           ].join("\n"),
         },
       },

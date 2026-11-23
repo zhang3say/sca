@@ -21,7 +21,7 @@
   - `0003` 源码依赖解析的底层真相：Manifest、Lockfile 与构建期解析陷阱（已发布）
   - `0004` 开源提取底座源码级拆解：OSV-SCALIBR、Syft、cdxgen 与 ORT 组合编排（已发布；配套 Ref 03 速查卡）
   - `0005` 容器镜像、OS 发行版与制品分层采集原理（已发布；已扩展 Ref 03 Section 05）
-  - `0006` 高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算（已发布；已扩展 Ref 03 Section 06）
+  - `0006` 高并发多触点采集架构：AI Agent、IDE、PR 门禁与异步持续重算（已发布；已扩展 Ref 03 Section 06）
 - **Ch 03 漏洞情报底座与精确匹配引擎（L3）**：
   - `0007` OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）（下一课 · ZPD）
   - `0008` 生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS

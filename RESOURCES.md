@@ -55,8 +55,10 @@
   高覆盖度的全能开源安全扫描器（OS/语言包、镜像、IaC、密钥、许可证）。用于：研究高并发 CLI 工程化、本地离线漏洞库分发格式（BoltDB/OCI）与多生态适配细节；同时作为「一体化扫描器不宜直接充当核心数据底座」的架构对照。
 - [Repo: OWASP Dependency-Track (`DependencyTrack/dependency-track`, Apache-2.0)](https://github.com/DependencyTrack/dependency-track) ([官方文档](https://docs.dependencytrack.org/))
   企业级 SBOM 持续监控平台参考架构：v5（原孵化代号 Project Hyades，现已并入主仓库）将 v4 单体内存队列拆分为无状态 HA `apiserver` + Kafka 事件流 + 独立扩缩容 `vulnerability-analyzer` / `notification-publisher` + PostgreSQL，示范「一次采集、持续重算」与十万级项目高并发入库设计。
-- [Repo: Snyk Language Server (`snyk/snyk-ls`, Apache-2.0)](https://github.com/snyk/snyk-ls)
-  跨编辑器统一安全语言服务器（BFF）：以单一 Go LSP 后台进程通过 `stdio` JSON-RPC 服务 VS Code/JetBrains/Neovim 等多端 IDE，示范 `textDocument/didSave` 触发缓存失效重扫与本地诊断缓存策略。
+- [Repo: Snyk Language Server (`snyk/snyk-ls`, Apache-2.0)](https://github.com/snyk/snyk-ls) & [Snyk CLI MCP (`snyk/cli`, Apache-2.0)](https://github.com/snyk/cli)
+  本地左移触点的两代演进参照：先以单一 Go LSP 后台进程（`snyk-ls`）通过 `stdio` JSON-RPC 与 `didSave` 缓存失效服务传统多端 IDE；再在 `snyk/cli` 中内置 `snyk mcp -t stdio`（提供 `snyk_sca_scan`、`snyk_package_health_check` 等工具）对接 Claude Code/Cursor 等对话式 AI Coding Agent。
+- [Paper: Spracklen et al. (USENIX Security) — *We Have a Package for You! A Comprehensive Analysis of Package Hallucinations by Code Generating LLMs* (`arXiv:2406.10279`)](https://arxiv.org/abs/2406.10279)
+  基于 16 款 LLM、57.6 万份代码样本的实证研究：揭示模型平均 **19.7%** 推荐包名属于幻觉（商业模型 5.2%、开源模型 21.7%），且 43% 可稳定复现（Slopsquatting）。用于：论证 AI Agent 时代本地触点必须从 `LSP-only` 演进为 `MCP + Hook + LSP` 三模事前/事中防线。
 - [Action & API: GitHub `actions/dependency-review-action` (MIT)](https://github.com/actions/dependency-review-action) & [Dependency Submission API](https://docs.github.com/en/rest/dependency-graph/dependency-submission)
   PR 增量依赖门禁事实参照：基于 commit SHA 提交构造期依赖快照，对比 `merge-base` 与 PR Head 图差仅拦截净新增风险，以及 `retry-on-snapshot-warnings` 快照等待机制。
 - [Service & Docs: Google Open Source Insights (`deps.dev`)](https://docs.deps.dev/)
@@ -84,4 +86,4 @@
 ## Gaps
 - **静态函数级可达性（Call Graph）跨语言评测基准**：尚缺经过学术界或第三方独立验证的跨语言（Java/JS/Python/Go）调用图精度/召回率对比论文与基准测试集（将在进入 Layer 4 专项前补齐）。
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
-- **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 `snyk/snyk-ls`、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
+- **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。

@@ -336,11 +336,11 @@
           </thead>
           <tbody>
             <tr>
-              <td><strong>IDE 本地（LSP）</strong><br/><a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><code>snyk/snyk-ls</code></a> (Apache-2.0)</td>
+              <td><strong>本地编码防线（Agent + IDE）</strong><br/><a href="https://github.com/snyk/cli" target="_blank" rel="noopener"><code>snyk mcp</code></a> / <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><code>snyk-ls</code></a> (Apache-2.0)</td>
               <td><code>&le; 1.5s</code></td>
-              <td>Go 单一后台 LSP（BFF）；仅在 <code>didOpen</code> / <code>didSave</code> 跑泳道 A 静态提取。</td>
-              <td>文件 SHA-256 防抖 + 本地 <code>purl &rarr; verdict</code> LRU 缓存，仅发增量 PURL 批量查询。</td>
-              <td>严禁每次按键 <code>didChange</code> 扫全树；严禁在编辑器热路径拉起完整构建器。</td>
+              <td>Single Go Core 暴露 <code>--mode=mcp</code>（安装前）、<code>--mode=hook</code>（<code>PostToolUse</code>）与 <code>--mode=lsp</code>（<code>didSave</code>）。</td>
+              <td>文件 SHA-256 防抖 + 本地 <code>purl &rarr; verdict</code> LRU 缓存；结构化反馈驱动 Agent 自主升级。</td>
+              <td>严禁只建传统 LSP（对话式 Agent 不开编辑器即失明）；防 Slopsquatting 幻觉包（USENIX <code>arXiv:2406.10279</code> 19.7% 幻觉率）；禁热路径拉起完整构建。</td>
             </tr>
             <tr>
               <td><strong>PR / MR 门禁</strong><br/><a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><code>dependency-review-action</code></a> (MIT)</td>
