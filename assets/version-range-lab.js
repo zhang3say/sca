@@ -639,9 +639,12 @@
   function naiveCompare(a, b) {
     const sa = parseSemver(a);
     const sb = parseSemver(b);
-    if (sa.valid && sb.valid && !sa.coerced && !sb.coerced) {
+    if (sa.valid && sb.valid) {
       const r = compareSemver(a, b);
-      return { cmp: r.cmp, method: "强行按 SemVer 2.0.0 比较" };
+      return {
+        cmp: r.cmp,
+        method: sa.coerced || sb.coerced ? "宽容 SemVer 补零强行比较" : "强行按 SemVer 2.0.0 比较",
+      };
     }
     return {
       cmp: String(a).trim() < String(b).trim() ? -1 : String(a).trim() > String(b).trim() ? 1 : 0,
@@ -718,12 +721,12 @@
       id: "maven-qualifier",
       label: "2. Maven 未知修饰符陷阱",
       eco: "maven",
-      verA: "1.0-redhat-00001",
-      verB: "1.0",
-      intro: "1.0",
+      verA: "1.0.0-redhat-00001",
+      verB: "1.0.0",
+      intro: "1.0.0",
       fixed: "1.0.1",
       lessonNote:
-        "在 Apache ComparableVersion 中，alpha/beta/rc/snapshot 小于正式版，sp 大于正式版，而 redhat-00001 等未知修饰符排在 sp 之后（1.0 < 1.0-sp < 1.0-redhat-00001 < 1.0.1）！若误用 SemVer 解析会把 -redhat-00001 当成 pre-release 判成小于 1.0。",
+        "在 Apache ComparableVersion 中，alpha/beta/rc/snapshot 小于正式版，sp 大于正式版，而 redhat-00001 等未知修饰符排在 sp 之后（1.0.0 < 1.0.0-sp < 1.0.0-redhat-00001 < 1.0.1）！若误用 SemVer 解析会把 -redhat-00001 当成 pre-release 判成小于 1.0.0，导致漏报。",
     },
     {
       id: "pep440-epoch",
@@ -752,11 +755,11 @@
       label: "5. RPM 脱字符 ^、~ 与 RHEL 9 Backport",
       eco: "rpm",
       verA: "1.0^20240701git",
-      verB: "1.0",
+      verB: "1.0.1",
       intro: "1.0~rc1",
       fixed: "1.0.1",
       lessonNote:
-        "rpmvercmp 中：~ 排在空串之前（1.0~rc1 < 1.0），而 ^ 排在空串之后（1.0 < 1.0^20240701git）；且当数字段遇上字母段时数字恒赢（1.0.1 > 1.0a），但前缀耗尽时较长串胜出（1.0a > 1.0）。而 RHEL 9 OpenSSH 8.7p1-38.el9_4.1 (RHSA-2024:4312) 必须通过 CSAF VEX 独立匹配。",
+        "rpmvercmp 中：~ 排在空串之前（1.0~rc1 < 1.0），而 ^ 排在空串之后且早于下一小版（1.0 < 1.0^20240701git < 1.0.1）；若退回 ASCII 比较，'^' (94) 大于 '.' (46) 会把快照误判成大于 1.0.1 导致漏报！RHEL 9 OpenSSH 8.7p1-38.el9_4.1 (RHSA-2024:4312) 则必须通过 CSAF VEX 独立匹配。",
     },
   ];
 
@@ -805,7 +808,9 @@
 
       const isCrossNamespaceBackport =
         (state.eco === "deb" || state.eco === "rpm" || state.eco === "apk") &&
-        (state.verB.indexOf("-") === -1 && !state.verB.includes(":") && (state.verA.includes("deb") || state.verA.includes("el") || state.verA.includes(":")));
+        state.verB.indexOf("-") === -1 &&
+        !state.verB.includes(":") &&
+        /(?:\+deb\d|deb\d+u\d|ubuntu|\.el\d|:|~bpo)/.test(state.verA);
 
       let html = `
         <div class="widget-header">

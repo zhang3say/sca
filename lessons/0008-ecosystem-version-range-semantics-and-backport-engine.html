@@ -53,7 +53,7 @@
       </ul>
       <aside class="sidenote">
         <span class="sidenote-title">Go 模块 <code>semver</code> 的两个细节</span>
-        Go 官方库 <a href="https://pkg.go.dev/golang.org/x/mod/semver" target="_blank" rel="noopener"><code>golang.org/x/mod/semver</code></a>（BSD-3-Clause）<strong>强制要求版本号带小写 <code>v</code> 前缀</strong>（如 <code>v1.2.3</code>），而 OSV <code>SEMVER</code> 规范恰好<strong>禁止</strong>带 <code>v</code> 前缀——适配器边界必须做统一校验补全。此外，按 <a href="https://go.dev/ref/mod#pseudo-versions" target="_blank" rel="noopener">Go Modules Reference</a>，伪版本（<code>v0.0.0-20200101000000-abcdef</code>）按 SemVer 预发布时间戳自然排序，<code>+incompatible</code> 则按构建元数据参与同路径比较但排序时忽略。
+        Go 官方库 <a href="https://pkg.go.dev/golang.org/x/mod/semver" target="_blank" rel="noopener"><code>golang.org/x/mod/semver</code></a>（BSD-3-Clause）<strong>强制要求版本号带小写 <code>v</code> 前缀</strong>（如 <code>v1.2.3</code>），而 OSV <code>SEMVER</code> 规范恰好<strong>禁止</strong>带 <code>v</code> 前缀——适配器边界必须做统一校验补全。此外，按 <a href="https://go.dev/ref/mod#pseudo-versions" target="_blank" rel="noopener">Go Modules Reference</a>，伪版本（<code>v0.0.0-20200101000000-abcdef</code>）按 SemVer 预发布时间戳自然排序，<code>+incompatible</code> 在 SemVer 排序中则等同构建元数据被忽略（<code>v2.0.0+incompatible == v2.0.0</code>），仅用于标识无 <code>go.mod</code> 的 <code>v2+</code> 仓库路径。
       </aside>
     </div>
 
@@ -69,7 +69,7 @@
       <p>没有“通用版本号算法”。不同包管理器的历史演化决定了它们对字母、标点、数字和修订后缀截然相反的排序哲学。任何试图用正则剥掉后缀再转成 <code>major.minor.patch</code> 比较的通用库，都会在下面的边界案例中全线翻车：</p>
       <aside class="sidenote">
         <span class="sidenote-title">Maven 未知后缀与 Debian vs RPM 反转</span>
-        同一个字符串 <code>1.0a</code> vs <code>1.0</code>：在 <strong>Debian <code>dpkg</code></strong> 中 <code>1.0 &lt; 1.0a</code>（空串早于字母）；在 <strong>RPM <code>rpmvercmp</code></strong> 中同样 <code>1.0 &lt; 1.0a</code>（前缀耗尽时较长者胜），但遇到 <code>1.0.beta</code> vs <code>1.0.1</code> 时 <strong>数字段永远压倒字母段</strong>（<code>1.0.beta &lt; 1.0.1</code>）；而在 <strong>Maven</strong> 中，<code>1.0-redhat-00001</code> 这类未知修饰符居然排在正式版 <code>1.0</code> <strong>之后</strong>！
+        同一组版本 <code>1.0.beta</code> vs <code>1.0.1</code>：在 <strong>RPM <code>rpmvercmp</code></strong> 中 <strong>数字段永远压倒字母段</strong>（<code>1.0.beta &lt; 1.0.1</code>），而在 <strong>Debian <code>dpkg</code></strong> 中空非数字段早于字母段（实测 <code>1.0.1 &lt; 1.0.beta</code>）！而在 <strong>Maven</strong> 中，<code>1.0.0-redhat-00001</code> 这类未知修饰符竟排在正式版 <code>1.0.0</code> <strong>之后</strong>！
       </aside>
     </div>
 
@@ -150,7 +150,7 @@
 
     <div class="prose-col has-sidenote">
       <h3>3.2 根除发行版 Backport 误报/漏报：为什么不能跨命名空间比对？</h3>
-      <p>以真实的高危漏洞 <strong>OpenSSH <code>CVE-2024-6387</code>（regreSSHion）</strong> 为例，上游源码受影响区间是 <code>[8.5p1, 9.8p1)</code>。看看如果直接把 Linux 发行版软件包拿去比对上游区间，会同时引爆多么荒谬的<strong>误报与漏报双重灾难</strong>：</p>
+      <p>以真实的高危漏洞 <strong>OpenSSH <code>CVE-2024-6387</code>（regreSSHion）</strong> 为例，该漏洞在 <code>8.5p1</code> 被重新引入、并于 <code>9.8p1</code> 修复（现代分支受影响区间为 <code>[8.5p1, 9.8p1)</code>）。看看如果直接把 Linux 发行版软件包拿去比对上游区间，会同时引爆多么荒谬的<strong>误报与漏报双重灾难</strong>：</p>
       <ul>
         <li><strong>陷阱 A · 剥离 Epoch 硬比上游（误报）：</strong>Debian 12 已在 <a href="https://www.debian.org/security/2024/dsa-5724" target="_blank" rel="noopener"><code>DSA-5724-1</code></a> 中将补丁回溯（Backport）合入 <code>1:9.2p1-2+deb12u3</code>；RHEL 9 已在 <a href="https://access.redhat.com/errata/RHSA-2024:4312" target="_blank" rel="noopener"><code>RHSA-2024:4312</code></a> 中修复至 <code>8.7p1-38.el9_4.1</code>。如果剥去发行后缀按上游版本比，<code>9.2p1 &lt; 9.8p1</code>、<code>8.7p1 &lt; 9.8p1</code>，所有已打补丁的容器全线误报！</li>
         <li><strong>陷阱 B · 带着 Epoch 硬比上游（灾难级漏报！）：</strong>Debian 的 <code>openssh</code> 带有 <code>Epoch = 1</code>（<code>1:9.2p1-2+deb12u1</code>，一个<strong>尚未修复</strong>的易受攻击老包），而上游 <code>9.8p1</code> 的隐式 Epoch 为 <code>0</code>。按 EVR 规则 <code>1:9.2p1 &gt; 0:9.8p1</code>——未修补的高危服务器会被静默放行！</li>
@@ -249,7 +249,7 @@
           </tr>
           <tr>
             <td><strong><a href="https://github.com/aboutcode-org/univers" target="_blank" rel="noopener"><code>aboutcode-org/univers</code></a></strong></td>
-            <td><span class="badge badge-ok">Apache-2.0 AND BSD-3 AND MIT</span></td>
+            <td><span class="badge badge-ok">Apache-2.0</span><br/><small>含 BSD-3 / MIT</small></td>
             <td>Python 库，完整实现了 <code>vers:</code> 语法解析、排序去重、连续区间化简及多生态映射。</td>
             <td><strong>VERS 算法蓝本</strong>：不直接进 Go 运行时，而是参考其区间合并算法自研 500 行纯 Go <code>vers</code> 规范化器。</td>
           </tr>
@@ -277,7 +277,7 @@
     <span class="tok-kw">var</span> hits []Finding
     <span class="tok-kw">for</span> _, r := <span class="tok-kw">range</span> rules {
         <span class="tok-kw">if</span> !r.IsEnabled || r.RuleScope != <span class="tok-str">"UPSTREAM_PKG"</span> { <span class="tok-kw">continue</span> }
-        <span class="tok-kw">if</span> evalOSVEvents(cmp, comp.Version, r.Events) { <span class="tok-cmt">// introduced <= v && (v < fixed || v <= last_affected)</span>
+        <span class="tok-kw">if</span> evalOSVEvents(cmp, comp.Version, r.Events) { <span class="tok-cmt">// introduced &lt;= v &amp;&amp; (v &lt; fixed || v &lt;= last_affected)</span>
             hits = append(hits, NewFinding(comp, r))
         }
     }
