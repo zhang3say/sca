@@ -13,8 +13,8 @@
   传统商业软件、OS 内核与硬件固件的平台枚举命名规范。用于：理解第一代 SCA 的 CPE 命名碰撞/误报成因，并在 Layer 2 IR 中以双标识（PURL 主键 + CPE 兼容槽位）承接闭源商业软件与传统审计。
 - [SDKs: PURL & SBOM 商用合规开源基础库](https://github.com/protobom/protobom)
   官方 MIT 协议 PURL 解析库（[`packageurl-go`](https://github.com/package-url/packageurl-go) / [`packageurl-java`](https://github.com/package-url/packageurl-java) / [`packageurl-python`](https://github.com/package-url/packageurl-python)）与 Apache-2.0 SBOM 序列化/互转库（[`CycloneDX/cyclonedx-go`](https://github.com/CycloneDX/cyclonedx-go)、[`CycloneDX/cyclonedx-core-java`](https://github.com/CycloneDX/cyclonedx-core-java)、OpenSSF [`protobom/protobom`](https://github.com/protobom/protobom)）。用于：避免手写低层解析器，把研发精力聚焦在自研 IR 规范化器与图谱存储上。
-- [Standard: OpenSSF OSV Schema (`ossf/osv-schema`)](https://github.com/ossf/osv-schema) ([osv.dev](https://osv.dev/))
-  面向开源生态的机器可读漏洞交换格式，以生态原生版本语义（SEMVER / ECOSYSTEM / GIT commit）替代模糊的 CPE 匹配。用于：设计自研漏洞情报底座的统一入库模型与版本匹配引擎。
+- [Standard: OpenSSF OSV Schema v1.7.0 (`ossf/osv-schema`)](https://ossf.github.io/osv-schema/) ([osv.dev](https://osv.dev/) / [`upstream` 字段设计博客](https://osv.dev/blog/posts/supporting-upstream-field/))
+  面向开源生态的机器可读漏洞交换格式（2025-03 发布 v1.7.0），以生态原生版本区间（`SEMVER` / `ECOSYSTEM` / `GIT`）替代模糊 CPE 匹配；严格区分 `aliases`（等价传递闭包）、`upstream`（v1.7.0 新增，用于 Debian DSA / Ubuntu USN 等 Backport 有向衍生关系防污染）与 `related`，并支持 `CVSS_V4`、`withdrawn` 撤销墓碑及 `ecosystem_specific` 函数符号扩展。用于：设计 Layer 3 统一入库模型与图谱去重契约。
 - [Standard: SLSA v1.2 Specification (`slsa.dev`)](https://slsa.dev/) & [OpenVEX (`openvex/spec`)](https://github.com/openvex/spec) & [FIRST EPSS (`first.org/epss`)](https://www.first.org/epss/)
   软件构建溯源与防篡改证明标准（SLSA v1.2 Build/Source Track、Provenance/VSA）、轻量级 SBOM 无关可利用性交换格式（OpenVEX）以及 30 天在野利用概率模型（EPSS API）。用于：Phase 2/3 智能降噪（VEX/EPSS）与构建可信溯源闭环。
 - [Framework: OWASP LLM Top 10 (`LLM03`) & Agentic Top 10 (`ASI04`)](https://owasp.org/)
@@ -63,6 +63,12 @@
   PR 增量依赖门禁事实参照：基于 commit SHA 提交构造期依赖快照，对比 `merge-base` 与 PR Head 图差仅拦截净新增风险，以及 `retry-on-snapshot-warnings` 快照等待机制。
 - [Service & Docs: Google Open Source Insights (`deps.dev`)](https://docs.deps.dev/)
   Google 提供的跨生态开源依赖图、版本关系与安全公告查询服务（HTTP/gRPC API）。用于：研究大规模传递依赖图预计算与元数据补全思路。
+- [Data & Architecture: Google `osv.dev` (`google/osv.dev`, Apache-2.0)](https://google.github.io/osv.dev/architecture/) ([数据源与许可表 `data/`](https://google.github.io/osv.dev/data/))
+  OSV 聚合后端参考架构（含 `relations` CronJob 自动维护 `aliases` / `upstream` / `related` 传递关系与 GCS `all.zip` 导出）。**商用合规关键事实**：OSV.dev 平台代码为 Apache-2.0，但**漏洞数据没有单一许可**，各源按上游继承（如 GHSA/Go/PyPA `CC-BY-4.0`、RustSec `CC0-1.0`、Ubuntu/Alpine 转换库 `CC-BY-SA-4.0`、Chainguard/Wolfi `CC-BY-NC-ND-4.0` / 商业扫描器受限条款），商业闭源产品严禁整包 `all.zip` 直接混卖。
+- [Feeds: `github/advisory-database` (`CC-BY-4.0`)](https://github.com/github/advisory-database) &amp; [`CVEProject/cvelistV5`](https://github.com/CVEProject/cvelistV5)
+  解决 2024+ NIST NVD 积压与大量新 CVE 缺 CPE 断点的双主键通道：GHSA 必须区分人工精校 `Reviewed` 与自动抓取 `Unreviewed`（且商业集成须保留 `CC-BY-4.0` 署名）；`cvelistV5` 须同时解析 `containers.cna` 与 `containers.adp`（如 `CISA-ADP` Vulnrichment 补充的 SSVC、KEV、CVSS 与 CPE）。
+- [Collector: Anchore Vunnel (`anchore/vunnel`, Apache-2.0)](https://github.com/anchore/vunnel)
+  多源漏洞数据采集 ETL 架构参照，以独立 `Provider`（NVD、GHSA、Debian、RHEL、Ubuntu、Alpine、Wolfi 等）解耦上游格式转换。用于：设计自研 Layer 3 采集架构并额外叠加商业 License Policy Gate 与分字段权威裁决。
 - [Repo: OpenSSF Malicious Packages (`ossf/malicious-packages`, Apache-2.0)](https://github.com/ossf/malicious-packages)
   采用 OSV 格式发布的开源恶意包情报聚合库。用于：在 Layer 3 快速冷启动恶意包基础拦截能力。
 - [Repo: AboutCode ScanCode-Toolkit (`aboutcode-org/scancode-toolkit`, Apache-2.0 / LicenseDB CC-BY-4.0)](https://github.com/aboutcode-org/scancode-toolkit)

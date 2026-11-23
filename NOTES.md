@@ -23,8 +23,8 @@
   - `0005` 容器镜像、OS 发行版与制品分层采集原理（已发布；已扩展 Ref 03 Section 05）
   - `0006` 高并发多触点采集架构：AI Agent、IDE、PR 门禁与异步持续重算（已发布；已扩展 Ref 03 Section 06）
 - **Ch 03 漏洞情报底座与精确匹配引擎（L3）**：
-  - `0007` OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）（下一课 · ZPD）
-  - `0008` 生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS
+  - `0007` OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）（已发布；已启 Ref 04 情报与许可矩阵）
+  - `0008` 生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS（下一课 · ZPD）
   - `0009` 离线/私有化漏洞库分发、增量更新与高并发匹配索引设计
   - `0010` 开源许可证合规引擎与传染性兼容性推理
 

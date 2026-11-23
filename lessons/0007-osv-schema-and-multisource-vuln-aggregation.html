@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0007：OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006 · 多触点与持续重算</a>
+        <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html" class="active">Lesson 0007 · 多源漏洞情报汇聚</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0007</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 03 漏洞情报底座与精确匹配引擎（开篇）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）</h1>
+      <p class="subtitle">在 Chapter 02 拿到高精度的 Layer 2 组件图谱后，如果 Layer 3 依然只接单一 NVD 源、直接打包整包 OSV 转储文件，或混淆 <code>aliases</code> 与发行版 <code>upstream</code> 关系，整个平台会在上线第一周就遭遇<strong>漏报、误报爆炸与商业合规违约</strong>。本课确立 Layer 3 情报底座的汇聚管道、图谱去重契约与多源分字段裁决标准。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握 OSV Schema v1.7.0 核心模型、<code>aliases / upstream / related</code> 边界、多源冲突裁决矩阵与数据许可隔离红线</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> 我们以 PURL 作为全平台唯一组件身份；在 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 我们建好了由 <code>intel.advisory.updated</code> 驱动的异步持续重算总线。今天正式切入 <strong>Layer 3 情报引擎开篇</strong>：对标 Google <code>osv.dev</code> / <code>deps.dev</code>、Anchore <code>vunnel</code> 与商业标杆 Snyk VulnDB，设计<strong>商用闭源完全合规</strong>的多源汇聚与去重内核。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么「单靠 NVD」已死，而「整包搬运 OSV」也会触法？</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>第一代 SCA 产品的漏洞底座设计极其朴素：同步一份 NIST NVD JSON Feed，把待扫组件猜成 CPE 字符串去碰版本区间。然而到了 2024–2026 年，这条单源路径已在技术与组织双维度彻底失效：</p>
+      <ul>
+        <li><strong>NVD 结构性滞后与 CPE 断点：</strong>自 2024 年初爆发积压危机以来，NIST NVD 转向风险优先级分诊——大量开源与常规漏洞长期处于 <code>Awaiting Analysis</code> 或直接标记为 <code>Not Scheduled</code>，导致<strong>超过半数新 CVE 长期缺失 CPE 与 CVSS 映射</strong>。纯靠 NVD 的扫描器会大面积静默漏报。</li>
+        <li><strong>CPE 命名失真：</strong>正如 Lesson 0002 拆解，CPE 缺乏生态命名空间（如无法区分 PyPI 包与同名商业软件），即使老漏洞补上了 CPE，也极易触发跨厂商碰撞误报。</li>
+      </ul>
+      <p>于是许多团队转向另一个极端：<em>“既然 Google 已经做好了 <a href="https://osv.dev/" target="_blank" rel="noopener">OSV.dev</a>，我直接把 <code>gs://osv-vulnerabilities/all.zip</code> 下载打包进商业产品里卖不就行了？”</em>——<strong>这是商业闭源产品极易踩中的法务深坑！</strong></p>
+      <aside class="sidenote">
+        <span class="sidenote-title">开源代码许可 &ne; 漏洞数据许可</span>
+        <code>google/osv.dev</code> 与 <code>anchore/vunnel</code> 的<strong>程序源码</strong>都是 <code>Apache-2.0</code>，但漏洞库里每一条记录的<strong>数据版权归属于各自上游源</strong>！根据 <a href="https://google.github.io/osv.dev/data/" target="_blank" rel="noopener">OSV.dev 官方数据源文档</a>，里面混杂着 <code>CC0</code>、<code>CC-BY-4.0</code>、<code>CC-BY-SA-4.0</code> 甚至严禁商业扫描器打包分发的 <code>CC-BY-NC-ND-4.0</code>！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:16%" />
+          <col style="width:24%" />
+          <col style="width:20%" />
+          <col style="width:20%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>上游情报源</th>
+            <th>原生数据格式</th>
+            <th>核心优势与盲区边界</th>
+            <th>数据许可（官方标注）</th>
+            <th>商业闭源准入策略</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/github/advisory-database" target="_blank" rel="noopener">GitHub Advisory DB (GHSA)</a></strong></td>
+            <td>OSV JSON</td>
+            <td>必须严格区分 <strong>Reviewed</strong>（安全团队人工精校、精确 PURL 与区间）与 <strong>Unreviewed</strong>（自动抓取 CVE，常缺精确区间）。</td>
+            <td><code>CC-BY-4.0</code></td>
+            <td><span class="badge badge-ok">准入（主源）</span><br/>须在产品 <code>NOTICE</code> / 界面履行署名</td>
+          </tr>
+          <tr>
+            <td><strong>语言生态原生库</strong><br/>Go VulnDB / PyPA / RustSec / OSS-Fuzz</td>
+            <td>OSV JSON</td>
+            <td>由语言官方团队维护，精确到 Go 符号路径（<code>imports</code>）或修补 Commit；覆盖面仅限各自生态。</td>
+            <td><code>CC-BY-4.0</code>（Go/PyPA/OSS-Fuzz）<br/><code>CC0-1.0</code>（RustSec）</td>
+            <td><span class="badge badge-ok">准入（最高权威）</span><br/>按许可登记署名账本</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/CVEProject/cvelistV5" target="_blank" rel="noopener">CVEProgram/cvelistV5</a></strong></td>
+            <td>CVE JSON 5.x</td>
+            <td>比 NVD 更快拿到 CNA 一手声明；<strong>必读 <code>adp</code> 容器</strong>（如 <code>CISA-ADP</code> Vulnrichment 补充的 SSVC、KEV 与 CPE）。</td>
+            <td>Public / CVE Terms of Use</td>
+            <td><span class="badge badge-ok">准入（零延迟主源）</span><br/>替代 NVD 首报通道</td>
+          </tr>
+          <tr>
+            <td><strong>NIST NVD (API 2.0)</strong> &amp; <strong>CISA KEV</strong></td>
+            <td>NVD JSON 2.0</td>
+            <td>非开源固件、商业软件、OS 内核老库与历史基线仍不可替代；2024+ 存在大面积分析滞后。</td>
+            <td><code>CC0 / US Gov Public Domain</code></td>
+            <td><span class="badge badge-ok">准入（兜底与基线）</span><br/>不可单独充当开源包主源</td>
+          </tr>
+          <tr>
+            <td><strong>OS 发行版跟踪器</strong><br/>Debian / Red Hat / Ubuntu / Alpine</td>
+            <td>OSV / CSAF / SecDB / JSON</td>
+            <td>掌握 Backport 安全补丁真值（Lesson 0005/0008 核心）；仅看上游 CVE 必误报。Red Hat OSV 为 <code>CC-BY-4.0</code>。</td>
+            <td>Red Hat: <code>CC-BY-4.0</code><br/>Ubuntu/Alpine (OSV.dev): <code>CC-BY-SA-4.0</code></td>
+            <td><span class="badge badge-warn">隔离处理</span><br/>避开直接二创分发 SA 衍生库，优先直连上游客观事实/CSAF</td>
+          </tr>
+          <tr>
+            <td><strong>Chainguard / Wolfi OSV Feed</strong></td>
+            <td>OSV JSON</td>
+            <td>Wolfi/Chainguard 容器专用最小化生态通告。</td>
+            <td><code>CC-BY-NC-ND-4.0</code> / Chainguard Commercial Scanner License</td>
+            <td><span class="badge badge-danger">严禁商业集成</span><br/>采集闸门直接硬拦截，绝不打入商业离线库</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>OpenSSF OSV Schema 1.7.0 拆解与「三元关系图」去重模型</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>尽管数据源许可需要隔离，<strong>数据格式标准化上必须坚定采纳 <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OpenSSF OSV Schema（v1.7.0，2025-03 发布）</a></strong> 作为平台 Layer 3 的统一入库契约。它用三条核心设计解决了 CVE/CPE 时代二十年的痛点：</p>
+      <ol>
+        <li><strong>直接锚定包坐标与版本事件流：</strong>每个 <code>affected[]</code> 元素直指 <code>package (ecosystem, name, purl)</code>，版本区间由按时间演进的 <code>ranges[].events[]</code>（<code>introduced</code> / <code>fixed</code> / <code>last_affected</code> / <code>limit</code>）配合 <code>SEMVER</code> / <code>ECOSYSTEM</code> / <code>GIT</code> 三类比较语义表达（<code>"introduced": "0"</code> 代表从创世首版起即受影响）。</li>
+        <li><strong>扩展隔离双槽位：</strong>标准之外的原生信号（如 Go 的受影响函数列表 <code>imports[].symbols</code>，这正是 Phase 2 可达性剪枝的燃料！）放入 <code>ecosystem_specific</code>；各库私有评分或审查标签放入 <code>database_specific</code>。</li>
+        <li><strong>显式撤销墓碑（<code>withdrawn</code>）：</strong>一旦某条 CVE 或虚假通告被撤销，上游保留记录并写入 RFC 3339 <code>withdrawn</code> 时间戳，而非静默删库——下游扫描器才能识别并收敛历史告警。</li>
+      </ol>
+      <aside class="sidenote">
+        <span class="sidenote-title">v1.7.0 必知新增字段</span>
+        OSV v1.7.0 除了支持 <code>CVSS_V4</code> 严重度向量外，最关键的架构升级是正式引入了 <strong><code>upstream[]</code></strong> 字段，专门解决发行版 Backport 通告与上游 CVE 的层次污染难题（见下文 2.1）。
+      </aside>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 去重命门：<code>aliases</code> vs <code>upstream</code> vs <code>related</code> 的严格语义边界</h3>
+      <p>同一件漏洞往往同时拥有 <code>CVE-2024-21626</code>、<code>GHSA-xxxx</code>、Debian <code>DSA-5616-1</code> 和 Ubuntu <code>USN-6620-1</code>。做多源汇聚时，初学者最常犯的致命错误，就是把所有关联编号全塞进一个 <code>aliases</code> 数组做等价聚类！</p>
+      <p>参考 <a href="https://osv.dev/blog/posts/supporting-upstream-field/" target="_blank" rel="noopener">OSV 官方 <code>upstream</code> 设计解析</a> 与 <a href="https://docs.deps.dev/" target="_blank" rel="noopener">Google <code>deps.dev</code></a> 图模型，Layer 3 必须将关系严格拆分为<strong>三种不同语义的图谱边</strong>：</p>
+      <ul>
+        <li><strong><code>aliases</code>（对称等价闭包，<code>ALIAS_OF</code>）：</strong>仅用于描述<strong>完全相同的底层漏洞、同一受影响源码体与同一上游补丁</strong>（如 <code>GHSA-2qrg-x229-3v8q &harr; CVE-2023-xxxx &harr; GO-2023-xxxx</code>）。等价组在报告层合并计数，也可共享未修区间校验。</li>
+        <li><strong><code>upstream</code>（有向衍生链，<code>UPSTREAM_OF</code>）：</strong>当下游发行版（如 Debian <code>DSA-5616-1</code>、Ubuntu <code>USN-6620-1</code>）针对旧版本做 Backport 修复时，<strong>修复版本号与上游截然不同</strong>（Debian 的 <code>1.1.5+ds1-1+deb12u1</code> 字符串上仍小于上游修复版 <code>1.1.12</code>！）。此时只能由发行版通告通过 <code>upstream</code> 指向根 CVE，<strong>绝对禁止写入 <code>aliases</code></strong>——否则等价传递闭包会把上游的 <code>&lt; 1.1.12</code> 规则传染给 Debian 容器，引爆海量误报！</li>
+        <li><strong><code>related</code>（弱关联参考，<code>RELATED_TO</code>）：</strong>同根因但独立影响不同组件或拆分为多补丁的关联条目（如同一批披露的多个 SSRF CVE），仅作 UI 关联跳转，既不合并计数也不共享版本区间。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">开源前车之鉴：Dependency-Track 与 Grype</span>
+        Dependency-Track 早期未分离强等价与弱关联时，若全盘同步 OSV 别名容易导致告警组异常膨胀（官方甚至默认谨慎开启 OSV 别名全同步）；而 Anchore Grype 的 <code>--by-cve</code> 早期在 Go Map 遍历合并相同 CVE 的 GHSA/NVD 记录时曾因缺少确定性权威排序出现结果摇摆。自研底座必须从第一天就用<strong>有向图边类型 + 确定性仲裁优先级</strong>封死这两个坑！
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>协议对照：OSV Schema v1.7.0 规范结构与 CVE JSON 5.x (CNA + ADP) 核心提取位点</strong>
+        <span>真实字段契约 · 支持可达性符号与多层区间</span>
+      </div>
+      <pre><code><span class="tok-cmt">// 1. 典型 OSV v1.7.0 发行版衍生记录（注意 upstream 与 aliases 的本质隔离）</span>
+{
+  <span class="tok-str">"schema_version"</span>: <span class="tok-str">"1.7.0"</span>,
+  <span class="tok-str">"id"</span>: <span class="tok-str">"DSA-5616-1"</span>,
+  <span class="tok-str">"modified"</span>: <span class="tok-str">"2024-02-05T14:12:00Z"</span>,
+  <span class="tok-str">"upstream"</span>: [<span class="tok-str">"CVE-2024-21626"</span>],          <span class="tok-cmt">// ✅ 有向溯源：展示层折叠归档，但匹配规则绝不继承上游 &lt;1.1.12！</span>
+  <span class="tok-str">"severity"</span>: [{ <span class="tok-str">"type"</span>: <span class="tok-str">"CVSS_V4"</span>, <span class="tok-str">"score"</span>: <span class="tok-str">"CVSS:4.0/AV:L/AC:L/AT:N/..."</span> }],
+  <span class="tok-str">"affected"</span>: [{
+    <span class="tok-str">"package"</span>: { <span class="tok-str">"ecosystem"</span>: <span class="tok-str">"Debian:12"</span>, <span class="tok-str">"name"</span>: <span class="tok-str">"runc"</span>, <span class="tok-str">"purl"</span>: <span class="tok-str">"pkg:deb/debian/runc?distro=debian-12"</span> },
+    <span class="tok-str">"ranges"</span>: [{
+      <span class="tok-str">"type"</span>: <span class="tok-str">"ECOSYSTEM"</span>,
+      <span class="tok-str">"events"</span>: [{ <span class="tok-str">"introduced"</span>: <span class="tok-str">"0"</span> }, { <span class="tok-str">"fixed"</span>: <span class="tok-str">"1.1.5+ds1-1+deb12u1"</span> }]
+    }],
+    <span class="tok-str">"ecosystem_specific"</span>: { <span class="tok-str">"urgency"</span>: <span class="tok-str">"high"</span> } <span class="tok-cmt">// 语言生态(如 Go)在此写入 imports[].symbols 供 L4 可达性消费</span>
+  }]
+}
+
+<span class="tok-cmt">// 2. CVEListV5 JSON 解析要点：必须同时扫描 cna 与 adp（如 CISA-ADP Vulnrichment）</span>
+<span class="tok-kw">containers.cna</span>.affected[*].{packageName, collectionURL, versions[{version, lessThan, status}]}
+<span class="tok-kw">containers.adp</span>[*].{metrics[*].cvssV3_1, metrics[*].other.content(SSVC/KEV), affected[*].cpes}</code></pre>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>自研 Layer 3 汇聚引擎：借鉴 Vunnel 解耦 + 分字段权威裁决矩阵</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>在开源参照上，<a href="https://github.com/anchore/vunnel" target="_blank" rel="noopener"><strong>Anchore Vunnel（Apache-2.0）</strong></a> 示范了极好的多源 ETL 解耦形态：每个上游源（NVD、GHSA、Debian、RHEL、Alpine 等）封装为独立的 <code>Provider</code> 插件拉取并落盘到隔离的 Workspace，再由下游构建器组装成匹配库。但直接拿 <code>vunnel</code> + <code>grype-db</code> 充当商业底座存在两点不足：① 默认没有商业闭源所需的<strong>数据许可准入闸门</strong>；② 缺少精细到<strong>字段级别</strong>的多源覆盖仲裁与持续重算事件通知。</p>
+      <p>因此我们的绿地架构采用<strong>「Provider 隔离采集（借鉴 Vunnel/OSV） + 自研 Layer 3 规范化与分字段裁决器（Arbiter）」</strong>四段流水线：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">黄金铁律：Raw 永不覆盖，Arbiter 分字段合成</span>
+        当同一个 <code>CVE-2024-XXXX</code> 同时来自 NVD、CVEListV5 与 GHSA 时，不要做“谁权重高就整条覆盖掉谁”。正确的做法是在 <code>raw_advisories</code> 表完整保留多源原始快照，然后由 Arbiter <strong>按字段维度独立取优</strong>合成一张干净的规范视图（Canonical Advisory）。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 3 多源漏洞汇聚、许可安检、图聚类与分字段权威裁决流水线</strong>
+        <span>上游多路异步入库，中间做许可闸门与图关系拆分，下游按领域权威合成唯一匹配规则并联动 Hyades 持续重算</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Stage 1 · 独立 Provider 采集与商用许可安检闸门（License Policy Gate）</span>
+            <span class="orch-stage-kicker">Source Isolation · CC-BY Attribution Ledger</span>
+          </div>
+          <p class="orch-stage-desc">
+            各源独立增量同步（GHSA GraphQL/Repo、OSV Bucket、<code>cvelistV5</code> Git、NVD API 2.0、Distro Tracker、<code>ossf/malicious-packages</code>）。入口闸门强制核验 <code>feed_license</code>：硬拦截 <code>NC/ND</code> 商业受限源（如 Chainguard 商业限制 feed），隔离 <code>CC-BY-SA</code> 衍生分发边界，对 <code>CC-BY-4.0</code> 源自动登记署名台账。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 保留不可变 raw_advisories 快照，折算为统一 OSV v1.7.0 内部结构 &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Stage 2 · 三元关系图构建（Graph Builder）</span>
+              <span class="badge badge-ok">连通分量聚类</span>
+            </div>
+            <ul>
+              <li><strong>等价簇（<code>ALIAS_OF</code>）：</strong>利用并查集（Union-Find）将互相 <code>aliases</code> 的 CVE / GHSA / GO / PYSEC 聚成一个 <code>canonical_group_id</code>（仅去重不污染发行版）。</li>
+              <li><strong>有向链（<code>UPSTREAM_OF</code> / <code>RELATED_TO</code>）：</strong>Debian DSA / Ubuntu USN / Red Hat RHSA 挂载在根 CVE 簇下游，UI 合并展示，<strong>匹配区间独立隔离</strong>。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Stage 3 · 分字段领域权威裁决（Field Arbiter）</span>
+              <span class="badge badge-build">Field-Level Merge</span>
+            </div>
+            <ul>
+              <li><strong>语言包版本区间 &amp; PURL：</strong><code>Go/PyPA/RustSec</code> &gt; <code>GHSA-Reviewed</code> &gt; <code>CVEListV5 CNA</code> &gt; <code>NVD</code> &gt; <code>GHSA-Unreviewed</code>。</li>
+              <li><strong>OS 发行版区间：</strong><code>Distro Native Tracker</code>（含 Backport）绝对胜过上游 CVE。</li>
+              <li><strong>严重度与利用风险：</strong>优先保留 <code>CISA-ADP SSVC/KEV</code> + <code>GHSA Reviewed CVSS</code> + <code>NVD CVSS v3.1/v4.0</code> 并集溯源。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 规则变更 Diff 检测（含 withdrawn 撤销墓碑） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Stage 4 · 编译匹配规则表并触发 Hyades 异步持续重算</span>
+            <span class="orch-stage-kicker">intel.advisory.updated &rarr; Lesson 0006</span>
+          </div>
+          <p class="orch-stage-desc">
+            仅当规范组的有效 <code>affected_match_rules</code>、<code>lifecycle_state (ACTIVE | WITHDRAWN)</code> 或高危利用状态发生实质变化时，才向 Kafka 发送 <code>intel.advisory.updated</code> 事件——精准唤醒活跃生产快照重算，防止上游无意义修改标点导致全网重算风暴。
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Layer 3 核心持久化 Schema（PostgreSQL）：原始快照隔离 + 关系图边 + 权威裁决匹配规则</strong>
+        <span>PostgreSQL · 兼顾多源回溯、许可审计与防误报隔离</span>
+      </div>
+      <pre><code><span class="tok-cmt">-- 1. 多源原始情报仓：绝不互相覆盖，强制绑定数据许可与审查等级</span>
+<span class="tok-kw">CREATE TABLE</span> raw_advisories (
+  source_id         <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'ghsa_reviewed' | 'ghsa_unreviewed' | 'nvd' | 'cvelistv5' | 'debian_dsa' | 'pypa'</span>
+  external_id       <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'GHSA-xxxx' | 'CVE-2025-41203' | 'DSA-5616-1'</span>
+  data_license      <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'CC0-1.0' | 'CC-BY-4.0' | 'CVE-TOU' (Gate 已拒绝 NC/ND)</span>
+  review_tier       <span class="tok-type">SMALLINT</span> <span class="tok-kw">NOT NULL</span>,      <span class="tok-cmt">-- 100=生态官方/Reviewed, 70=CNA/ADP, 50=NVD, 20=Unreviewed</span>
+  lifecycle_state   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'ACTIVE' | 'WITHDRAWN' | 'REJECTED'</span>
+  withdrawn_at      <span class="tok-type">TIMESTAMPTZ</span>,
+  osv_payload       <span class="tok-type">JSONB</span> <span class="tok-kw">NOT NULL</span>,         <span class="tok-cmt">-- 归一化为 OSV v1.7.0 JSON</span>
+  payload_sha256    <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+  <span class="tok-kw">PRIMARY KEY</span> (source_id, external_id)
+);
+
+<span class="tok-cmt">-- 2. 漏洞三元关系边：严禁把 UPSTREAM_OF 混入 ALIAS_OF 传递闭包</span>
+<span class="tok-kw">CREATE TABLE</span> advisory_edges (
+  src_id            <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+  dst_id            <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+  edge_type         <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span> <span class="tok-kw">CHECK</span> (edge_type <span class="tok-kw">IN</span> (<span class="tok-str">'ALIAS_OF'</span>, <span class="tok-str">'UPSTREAM_OF'</span>, <span class="tok-str">'RELATED_TO'</span>)),
+  evidence_source   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+  <span class="tok-kw">PRIMARY KEY</span> (src_id, dst_id, edge_type)
+);
+
+<span class="tok-cmt">-- 3. 裁决后编译的规范匹配规则（供 Lesson 0008 版本引擎与 0009 离线索引直接消费）</span>
+<span class="tok-kw">CREATE TABLE</span> canonical_match_rules (
+  rule_id           <span class="tok-type">UUID</span> <span class="tok-kw">PRIMARY KEY</span>,
+  canonical_group   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- ALIAS_OF 连通分量主 ID</span>
+  rule_scope        <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'UPSTREAM_PKG' | 'DISTRO_BACKPORT' | 'CPE_FALLBACK'</span>
+  base_purl         <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 如 'pkg:maven/org.apache.commons/commons-text'</span>
+  distro_qualifier  <span class="tok-type">TEXT</span> <span class="tok-kw">DEFAULT</span> <span class="tok-str">''</span>,        <span class="tok-cmt">-- 非空时仅匹配对应发行版（如 'debian-12'）</span>
+  range_type        <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'SEMVER' | 'ECOSYSTEM' | 'GIT'</span>
+  events_json       <span class="tok-type">JSONB</span> <span class="tok-kw">NOT NULL</span>,         <span class="tok-cmt">-- [{"introduced":"1.5"},{"fixed":"1.13.1"}]</span>
+  authority_source  <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 胜出权威源，用于追溯与审计</span>
+  is_enabled        <span class="tok-type">BOOLEAN</span> <span class="tok-kw">NOT NULL DEFAULT true</span> <span class="tok-cmt">-- WITHDRAWN 时置 false</span>
+);</code></pre>
+    </div>
+
+    <div class="callout tip">
+      <div class="callout-label">商业标杆 Snyk VulnDB 给我们的长期演进启发</div>
+      <p>为什么企业客户愿意为商业漏洞库付溢价？Snyk VulnDB 的核心差异化并不在于“搬运 CVE 更快”，而在于两点自研增值：① <strong>Non-CVE 早期情报与精准区间修复（Curation）</strong>——安全研究员把 NVD/GHSA 里写错的区间、缺失的包名修正，并补上非 CVE 的恶意/高危漏洞（<code>SNYK-*</code>）；② <strong>可消费的上下文字段</strong>——在每条记录上附带受影响函数签名与修复升级路径。我们今天搭好的 <code>raw_advisories &rarr; Field Arbiter &rarr; canonical_match_rules</code> 分层，未来只需在最高优先级增加一层 <code>internal_curation</code>（权重 <code>review_tier = 200</code>），就能平滑长出对标商业标杆的自研研究团队覆写能力，无需改动一行业务查询代码！</p>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在下方交互实验台切换体验 4 个典型 Layer 3 情报冲突与合规现场，对比“粗暴混库/直接搬运”与“许可隔离 + 图关系分离 + 分字段裁决”的结果差异，再完成 5 项情报底座架构拍板。</p>
+    </div>
+
+    <!-- INTERACTIVE VULN INTEL LAB -->
+    <section class="widget-panel full-width" data-widget="vuln-intel-lab">
+      <script type="application/json" class="vuln-intel-lab-data">
+        {
+          "title": "交互实验台：Layer 3 多源漏洞汇聚冲突、图谱关系与许可隔离（4 大现场）",
+          "intro": "点击切换 NVD 积压断层、aliases vs upstream 污染、Withdrawn 撤销传播与商业闭源许可雷区 4 大实战场景，观察反模式与推荐方案的裁决输出。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 3 漏洞情报底座架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为商业闭源 SCA 平台拍板 Layer 3 多源情报汇聚与离线分发架构，产品既要支持公有云 SaaS，也要向政企客户交付私有化离线漏洞包。",
+          "summary": {
+            "optimal": "全部 {optimal} 项 Layer 3 情报架构决策精准稳健！你已避开 NVD 盲区、DSA/USN 别名误报爆炸与 CC-BY-NC-ND/SA 商业合规雷区，具备进入 Lesson 0008 版本区间引擎的完整前提。",
+            "warning": "没有触发法务或全线崩盘红线，但在 {warning} 项上存在权威覆盖过粗、噪音重算风暴或审核滞后隐患（标黄项），建议立即收口。",
+            "critical": "当前架构存在 {critical} 处会引发商业合规违约、海量误报或大面积漏报的高危缺陷（标红项）！请修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "商业闭源产品使用 OSV.dev 多源数据的合规采集策略",
+              "layer": "合规红线 · License Gate",
+              "context": "团队调研发现 google/osv.dev 代码是 Apache-2.0 且提供 all.zip 打包下载，准备直接将其编译进商业闭源离线库向客户售卖。",
+              "options": [
+                {
+                  "label": "直接定期下载 OSV.dev 全量 all.zip 编译成私有二进制库打包售卖，在产品文档里写一句“使用开源情报”即可",
+                  "status": "critical",
+                  "verdictTitle": "触发 CC-BY-NC-ND 商业禁售违约、CC-BY 漏署名与 SA 边界纠纷",
+                  "feedback": "OSV.dev 平台代码虽是 Apache-2.0，但数据条目继承上游各自许可（含 Chainguard CC-BY-NC-ND 商业限制、Ubuntu/Alpine CC-BY-SA 与 GHSA CC-BY-4.0）。整包混卖直接触碰商业交付红线！"
+                },
+                {
+                  "label": "建立采集许可安检闸门：严禁 NC/ND 源入库，隔离 CC-BY-SA 衍生分发，对 CC-BY-4.0 源自动生成随包署名 NOTICE",
+                  "status": "optimal",
+                  "verdictTitle": "100% 满足商业闭源交付红线与多源版权合规义务",
+                  "feedback": "滴水不漏的商用架构！既吃透了 GHSA/Go/PyPA/RustSec/RedHat/CVEListV5 的高精度免费红利，又彻底绕开了商业禁用与衍生传染纠纷。"
+                },
+                {
+                  "label": "因为担心许可复杂，干脆完全放弃 OSV/GHSA/Go/PyPA，只保留 NIST NVD Public Domain 单一数据源",
+                  "status": "warning",
+                  "verdictTitle": "法务虽然安全了，但产品检出率因 NVD 积压与 CPE 失真而失去商业竞争力",
+                  "feedback": "因噎废食！CC0 与 CC-BY-4.0 数据明确允许商业闭源使用，只需在安装包和界面里规范保留版权署名清单即可合法享用顶级生态情报。"
+                }
+              ]
+            },
+            {
+              "name": "应对 NVD 积压与 CPE 缺失的多源接入组合",
+              "layer": "情报覆盖 · 消除漏报",
+              "context": "大量新公开 CVE 在 NVD 上连续数周处于 Awaiting Analysis（无 CPE、无 CVSS），但上游开发团队已公开修复版本。",
+              "options": [
+                {
+                  "label": "只接 NVD JSON 2.0 同步，发现没有 CPE 节点时用 CVE 英文描述里的关键词去模糊匹配包名",
+                  "status": "critical",
+                  "verdictTitle": "双输局面：未富化期间漏报，模糊匹配又制造海量跨包误报",
+                  "feedback": "英文描述经常提到无关依赖或样例包名，做全网模糊匹配会让研发每天收到几十个莫名其妙的虚假告警。"
+                },
+                {
+                  "label": "接入 GHSA Reviewed + 生态原生 OSV 源为主，同步直连 CVEListV5 解析 CNA 与 CISA-ADP 容器，NVD 退居 CPE 兜底",
+                  "status": "optimal",
+                  "verdictTitle": "当天跟进新漏洞、精准 PURL 匹配且不丢失 CISA-ADP/CVSS/KEV 富化信号",
+                  "feedback": "这正是现代化 SCA 摆脱 NVD 单点依赖的标准解法：cvelistV5 + 生态库保障时效与精度，NVD 继续服务非包类老资产。"
+                },
+                {
+                  "label": "把 GitHub Advisory 的 Unreviewed 自动抓取队列和 Reviewed 队列同等对待，无差别设为最高优先级",
+                  "status": "warning",
+                  "verdictTitle": "早期粗糙或错误抓取的 Unreviewed 区间会污染人工核验过的精确区间",
+                  "feedback": "Unreviewed 记录往往直接搬运粗糙的原始范围；在字段裁决矩阵中必须给 GHSA Reviewed 与生态原生库明显更高的权重。"
+                }
+              ]
+            },
+            {
+              "name": "CVE、GHSA 与 Linux 发行版补丁（DSA / USN）的图谱去重模型",
+              "layer": "图谱去重 · 防区间污染",
+              "context": "CVE-2024-21626 同时对应 GHSA-xxxx、Debian DSA-5616-1 与 Ubuntu USN-6620-1，其中发行版采用 Backport 修复。",
+              "options": [
+                {
+                  "label": "把 CVE、GHSA、DSA、USN 全部放进同一张 aliases 等价组并合并所有受影响版本区间",
+                  "status": "critical",
+                  "verdictTitle": "引爆灾难级 Backport 误报：已修补的 Debian 容器被上游区间判为高危",
+                  "feedback": "DSA/USN 修复的是发行版 Backport 版本（如 1.1.5+deb12u1），若通过 aliases 传递闭包混入上游 <1.1.12 规则，所有 Debian 镜像全军覆没！"
+                },
+                {
+                  "label": "完全不做任何别名与关联映射，一条缺陷分别作为 CVE、GHSA、DSA 独立报告 3 条告警",
+                  "status": "warning",
+                  "verdictTitle": "同一漏洞在看板和 PR 里重复炸出三倍告警，安全团队与研发被迫手动去重",
+                  "feedback": "不关联折叠会导致风险计数与工单数虚高三倍，严重损害产品专业度。"
+                },
+                {
+                  "label": "分离 ALIAS_OF（GHSA <-> CVE 等价聚类）与 UPSTREAM_OF（DSA/USN -> CVE 有向溯源），匹配按作用域隔离而展示层折叠",
+                  "status": "optimal",
+                  "verdictTitle": "严格对齐 OSV v1.7.0 语义：报告零重复，发行版与上游区间零串台",
+                  "feedback": "满分设计！UI 与工单把衍生条目归拢在同一个风险事件下，而底层匹配引擎严格按规则作用域隔离。"
+                }
+              ]
+            },
+            {
+              "name": "多源同名漏洞字段冲突（区间、严重度、描述）的合并策略",
+              "layer": "Arbiter · 字段裁决",
+              "context": "同一漏洞在 GHSA Reviewed、CVEListV5 CNA 与 NVD 三处都存在，且 NVD 的版本区间偏宽、CISA-ADP 多了 SSVC 标签。",
+              "options": [
+                {
+                  "label": "永远按入库时间 Last-Write-Wins：哪个源最后更新就用谁整条覆盖掉之前的记录",
+                  "status": "critical",
+                  "verdictTitle": "夜里 NVD 补录一条粗糙区间，瞬间把白天 GHSA 精校的结果冲刷破坏",
+                  "feedback": "Last-Write-Wins 会让结果在每次数据源刷新时随机抖动，是商业数据平台最忌讳的不可预测行为。"
+                },
+                {
+                  "label": "保留多源 raw_advisories 快照，按分字段权威矩阵合成规范视图（区间听生态/Reviewed，评分与 KEV 融合补充）",
+                  "status": "optimal",
+                  "verdictTitle": "确定性、可审计且为未来自研安全研究团队人工 Curation 留出最高权重槽位",
+                  "feedback": "分字段裁决让每个上游只贡献它最擅长的字段；未来加一层 internal_curation (tier=200) 即可平滑对标 Snyk VulnDB。"
+                },
+                {
+                  "label": "一旦收到 GHSA 记录就整条丢弃 NVD 和 CVEListV5 的所有字段，拒绝入库原始镜像",
+                  "status": "warning",
+                  "verdictTitle": "丢失 CISA-ADP 补充的 SSVC、KEV 或完整 CVSS 向量等上下文情报",
+                  "feedback": "不同数据源各有所长，保留原始表并在输出层分字段合成才是无损且灵活的做法。"
+                }
+              ]
+            },
+            {
+              "name": "虚假 CVE 被官方撤销（withdrawn）后的引擎与重算联动",
+              "layer": "状态生命周期 · 消警闭环",
+              "context": "某刚披露的 PyPI 漏洞在两天后被证实为误报，PYSEC 与 GHSA 均打上 withdrawn 时间戳，但 NVD 仍滞后显示有效。",
+              "options": [
+                {
+                  "label": "高权威源标记 withdrawn 即冻结整组匹配规则并留墓碑，经 Diff 后发事件触发活跃快照自动消警",
+                  "status": "optimal",
+                  "verdictTitle": "零误阻断、审计可回溯，且与 Layer 2 Hyades 持续重算流水线完美咬合",
+                  "feedback": "既防止滞后源“借尸还魂”，又让已经触发的 PR/工单在几分钟内自动收敛状态。"
+                },
+                {
+                  "label": "直接 DELETE 物理删掉数据库里所有历史匹配与原记录，假装这个漏洞从未出现过",
+                  "status": "warning",
+                  "verdictTitle": "破坏安全审计溯源链，无法解释“昨天为什么拦过一次构建”，且下次同步若遇滞后 NVD 还会复活",
+                  "feedback": "没有墓碑记录就挡不住延迟同步的 NVD 或 Unreviewed 源重新把已撤销漏洞写回来。"
+                },
+                {
+                  "label": "只要 NVD 还没正式改成 REJECT，就继续按高危阻断全公司流水线",
+                  "status": "critical",
+                  "verdictTitle": "为了一个官方已撤回的假洞把所有业务上线卡死数天",
+                  "feedback": "不能让全公司跟着 NVD 的同步延迟一起卡死，高权威生态源的撤销判定必须具备优先阻断权。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道核心决策题覆盖 <strong>NVD 积压应对、OSV v1.7.0 <code>aliases</code> vs <code>upstream</code>、商用数据许可隔离与 <code>withdrawn</code> 状态联动</strong>。<strong>先凭记忆独立作答，再查看解析。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0007 · Layer 3 多源漏洞汇聚与去重回忆测验",
+          "intro": "重点检验 OSV Schema 1.7.0、三元关系边界与商业闭源情报合规。",
+          "questions": [
+            {
+              "prompt": "2024 年起 NVD 出现严重积压且大量新 CVE 被标为 Not Scheduled 或长期缺失 CPE 映射。面对该结构性断点，商业 SCA 平台在设计 Layer 3 开源包漏洞情报源时，最稳健的架构策略是？",
+              "options": [
+                "坚持单接官方历史数据库流，遇到缺失标准字段时用包名执行模糊字符串匹配。",
+                "彻底屏蔽公开官方标准数据，仅保留各语言生态博客公告并用人工手工全录入。",
+                "直连多方审查库与生态为主，再将传统国家漏洞库降级为固件与未审查兜底源。",
+                "把未经过滤的自动导入流设为最高权威，并无条件覆盖语言生态原生版本区间。"
+              ],
+              "answerIndex": 2,
+              "explanation": "面对 NVD 长期积压和 CPE 断点，开源包匹配必须以 GHSA Reviewed、各生态原生 OSV（Go/PyPA/RustSec）与 CVEListV5（同时解析 CNA 与 CISA-ADP 容器）为主源；NVD 保留用于非包类商业软件/固件 CPE 兜底与历史基线；同时禁止模糊匹配和盲信未审查导入流（C 正确）。"
+            },
+            {
+              "prompt": "OSV Schema v1.7.0 正式引入了 upstream 字段来刻画 Debian DSA、Ubuntu USN 与上游 CVE 的关系。如果在汇聚图谱中误把 DSA-5682-1 放进 CVE-2024-XXXX 的 aliases 而不是 upstream，会造成什么严重生产故障？",
+              "options": [
+                "传递别名闭包会把上游未修区间传染给发行版已回溯修补包，瞬间引爆海量误报。",
+                "数据库引擎会彻底拒绝解析含发行前缀的所有告警条目，导致全线扫描出现漏报。",
+                "所有开源语言生态的版本区间比较算法都会被迫直接回退成基于文本的传统匹配。",
+                "原本相互等价的生态编号与通用漏洞编号会失去映射关联，令单一漏洞多次告警。"
+              ],
+              "answerIndex": 0,
+              "explanation": "aliases 具有对称与传递等价语义；如果把带 Backport 补丁的发行版通告（如 DSA/USN）放入 aliases，传递闭包会让同一组件在匹配时错误继承上游源码的高修复版本号区间，导致所有打了发行版安全补丁的容器包依然触发大规模误报。正确做法是用 upstream 建立有向衍生边（A 正确）。"
+            },
+            {
+              "prompt": "在自研商业闭源 SCA 平台（需向政企客户私有化分发离线漏洞库包）时，架构师打算直接打包下载 google/osv.dev 全量导出压缩包（all.zip）随产品售卖。该方案最大的合规致命伤是什么？",
+              "options": [
+                "统一数据格式受强传染性开源代码协议制约，所有商业软件读取均须对外全部开源。",
+                "官方导出全量压缩包中不包含版本修复区间，必须额外付费购买上游完整源码权限。",
+                "导出压缩包内含未公开漏洞利用脚本载荷，直接商业分发会触发软件安全出口管制。",
+                "汇总全量源无统一许可，混含非商业禁售与相同方式共享条款将触发分发合规违规。"
+              ],
+              "answerIndex": 3,
+              "explanation": "OSV Schema 与 osv.dev 源码虽开放（Apache-2.0），但 osv.dev 托管的漏洞数据按上游数据源保留各自许可：例如 GHSA/Go/PyPA 为 CC-BY-4.0（须署名）、Ubuntu/Alpine 转换源标注为 CC-BY-SA-4.0（相同方式共享边界），而 Chainguard/Wolfi 标注为 CC-BY-NC-ND / 商业扫描器限制条款。商业离线分发必须经过 License Policy Gate 严格筛选与署名管理（D 正确）。"
+            },
+            {
+              "prompt": "某开源库先前被恶意提交了一枚虚假 CVE，两周后上游仓库在 OSV 与 GHSA 中将该条目打上 withdrawn 时间戳撤销。你的 Layer 3 汇聚引擎与 Layer 2 平台台账应当如何响应？",
+              "options": [
+                "物理硬删除原始表及历史扫描审计记录，并等待次日夜间全量定时任务刷新状态。",
+                "保留墓碑并冻结该组件匹配规则，同步发布情报变更事件触发活跃快照自动收敛。",
+                "忽略撤销标记继续保持高危阻断告警，直到客户安全团队逐个工单手动点选忽略。",
+                "只在下次企业发布新版本拉取代码重扫时顺带消除告警，已上线生产镜像不处理。"
+              ],
+              "answerIndex": 1,
+              "explanation": "物理删除会丢失审计追踪并导致滞后未同步的 NVD Feed 在下次轮询时将假洞“复活”；等待人肉消警或重拉代码又会浪费研发精力与漏掉在跑镜像。正确闭环是在 raw_advisories 保留 withdrawn 墓碑并置 canonical_match_rules.is_enabled = false，再向 Hyades 总线发 intel.advisory.updated 事件自动收敛活跃项目告警（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地 Layer 3 多源漏洞情报管道时，建议精读以下规范与 Apache-2.0 工程实现：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener"><strong>OpenSSF OSV Schema v1.7.0</strong></a> &amp; <a href="https://osv.dev/blog/posts/supporting-upstream-field/" target="_blank" rel="noopener"><strong><code>upstream</code> 字段设计博客</strong></a>：完整字段契约与 <code>aliases</code> / <code>upstream</code> / <code>related</code> 边界详解。</li>
+          <li><a href="https://google.github.io/osv.dev/data/" target="_blank" rel="noopener"><strong>OSV.dev Data Sources &amp; Licenses</strong></a> &amp; <a href="https://google.github.io/osv.dev/architecture/" target="_blank" rel="noopener"><strong>OSV 后端架构文档</strong></a>：逐源许可矩阵与 <code>relations</code> 后台图谱同步设计。</li>
+          <li><a href="https://github.com/CVEProject/cvelistV5" target="_blank" rel="noopener"><strong><code>CVEProject/cvelistV5</code></strong></a> &amp; <a href="https://github.com/github/advisory-database" target="_blank" rel="noopener"><strong><code>github/advisory-database</code>（CC-BY-4.0）</strong></a>：CNA/CISA-ADP 双容器结构与 GitHub Reviewed/Unreviewed 分级机制。</li>
+          <li><a href="https://github.com/anchore/vunnel" target="_blank" rel="noopener"><strong>Anchore <code>vunnel</code>（Apache-2.0）</strong></a> &amp; <a href="https://docs.deps.dev/" target="_blank" rel="noopener"><strong>Google <code>deps.dev</code></strong></a>：Provider 解耦 ETL 模式与跨生态版本/通告 API 参照。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>完成第 7 课后，你的 Layer 3 情报入口已经筑牢。如果还有实战疑问，直接把问题带回对话：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“对于政企客户最刚需的 Ubuntu 与 Alpine 漏洞库，为了彻底规避 OSV.dev 转换包的 CC-BY-SA 争议，工程上怎么直接采集官方安全通告与 SecDB/UCT 元数据？”</li>
+          <li>“在自研平台里，针对 NVD 历史缺失 PURL 的 CVE，该如何像 OSV <code>nvd-cve-osv</code> 那样构建可控的 <code>cpe_to_purl</code> 映射表而不引入误报？”</li>
+          <li>“我已掌握多源情报汇聚与去重裁决，准备进入 <strong>Lesson 0008（生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">← 上一课：Lesson 0006 · 多触点与持续重算</a>
+      <a href="../reference/layer3-intel-and-version-matrix.html">配套速查卡：Ref 04 · L3 情报与许可矩阵</a>
+      <a href="../index.html">返回课程总览 · 下一课 Lesson 0008（版本区间与 Backport） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/vuln-intel-fusion-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
