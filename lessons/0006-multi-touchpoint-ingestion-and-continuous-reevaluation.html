@@ -105,12 +105,13 @@
     <h2><span class="sec-num">02</span>左移双防线：IDE Language Server（LSP）与 PR 增量图差算法</h2>
 
     <div class="prose-col">
-      <h3>2.1 为何 IDE 必须采用 Language Server（LSP）单内核架构</h3>
+      <p>左移不等于把笨重的服务端全量扫描搬到开发者本机；它必须在<strong>秒级编辑器反馈</strong>与<strong>十秒级合并拦截</strong>之间守住两条工程防线。</p>
+      <h3 style="margin-top:0.85rem;">2.1 为何 IDE 必须采用 Language Server（LSP）单内核架构</h3>
       <p>如果为 VS Code（TypeScript）、JetBrains IDEA（Kotlin/Java）、Eclipse 与 Neovim 分别手写解析和匹配逻辑，不出半年就会出现“IDEA 报红但 VS Code 绿灯”的规则分裂。</p>
-      <p>全球标杆 <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server（<code>snyk/snyk-ls</code>，Apache-2.0）</strong></a> 给出了标准答案——<strong>LSP 作为“后端即前端（BFF）”统一本地守护进程</strong>：各家编辑器客户端只保留极薄的 UI 胶水层，通过标准 JSON-RPC（<code>stdio</code>）与一个独立 Go 编译的 <code>sca-ls</code> 后台进程通信，由 <code>sca-ls</code> 复用与服务端一致的 Layer 1 静态解析器（OSV-SCALIBR）并吐出标准 <code>textDocument/publishDiagnostics</code>（波浪线）与 <code>CodeAction</code>（一键升级版本）。</p>
+      <p>全球标杆 <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server（<code>snyk/snyk-ls</code>，Apache-2.0）</strong></a> 给出了标准答案——<strong>LSP 作为“后端即前端（BFF）”统一本地守护进程</strong>：各家编辑器客户端只保留极薄的 UI 胶水层，通过标准 JSON-RPC（<code>stdio</code>）与一个 Go 编译的后台进程通信，由它集中承接扫描并输出标准 <code>textDocument/publishDiagnostics</code>（波浪线）与 <code>CodeAction</code>（一键升级）。在 <code>snyk-ls</code> 的缓存范式上（本地缓存诊断直至收到 <code>didSave</code> 再失效重扫），我们自研的 <code>sca-ls</code> 进一步做细粒度增强：</p>
       <ul>
         <li><strong>严格禁止 <code>didChange</code> 每次击键触发：</strong>编辑半成品 <code>package.json</code> 时 JSON 语法本身都不合法。必须仅在 <code>didOpen</code> 与 <code>didSave</code> 且文件路径命中 Manifest/Lockfile 白名单时触发扫描。</li>
-        <li><strong>文件哈希防抖 + PURL 差量查询：</strong><code>sca-ls</code> 在内存保留 <code>file_sha256 &rarr; extracted_purls</code> 与 <code>purl &rarr; advisory_verdict (TTL 15min)</code> 两级缓存。按 <code>Ctrl+S</code> 保存但依赖块未改时直接 0ms 返回；即便改了一行新包，也只把<strong>未命中本地缓存的 1–2 个增量 PURL</strong> 发往后端 <code>/v1/match/batch</code>，确保端到端延迟稳控在 <code>&lt; 300ms</code>。</li>
+        <li><strong>文件哈希防抖 + PURL 差量查询：</strong><code>sca-ls</code> 在内存保留 <code>file_sha256 &rarr; extracted_purls</code> 与 <code>purl &rarr; advisory_verdict</code> 两级缓存。按 <code>Ctrl+S</code> 保存但依赖块未改时直接 0ms 返回；即便改了一行新包，也只把<strong>未命中本地缓存的 1–2 个增量 PURL</strong> 发往后端 <code>/v1/match/batch</code>，确保端到端延迟稳控在 <code>&lt; 300ms</code>。</li>
         <li><strong>绝不在 IDE 热路径拉起构建器：</strong>没有 <code>package-lock.json</code> 或仅修改 <code>pom.xml</code> 时，本地只允许运行纯数据静态解析或只读轻量树（Tier 1/2），严禁在开发者本地后台偷偷启动 <code>mvn dependency:tree</code> 或 <code>npm install</code> 抢占 CPU 与修改工作区。</li>
       </ul>
     </div>
@@ -135,7 +136,7 @@
 
     <div class="prose-col has-sidenote">
       <p>把视角拉到平台服务端。早期的 OWASP Dependency-Track v4 曾遇到非常典型的规模瓶颈：API Server 把所有分析任务塞进 JVM 进程内的 <code>ExecutorService</code> 内存队列，把检索索引写在本地磁盘。一旦企业接入数千个项目、CI 高峰期同时推送上万份 CycloneDX BOM，或者半夜导入新 NVD 漏洞库触发全量重算，API 网关立刻 OOM 崩溃且无法做多副本无状态高可用（Active-Active HA）。</p>
-      <p>为此，官方在 <a href="https://github.com/DependencyTrack/hyades" target="_blank" rel="noopener"><strong>Dependency-Track v5（Project Hyades，Apache-2.0）</strong></a> 中完成了彻底的事件驱动微服务拆分：<strong>无状态 <code>apiserver</code> + Kafka 事件骨干 + 独立扩缩容的 <code>vulnerability-analyzer</code> / <code>notification-publisher</code> Worker + PostgreSQL 持久化</strong>。</p>
+      <p>为此，官方在 <a href="https://github.com/DependencyTrack/dependency-track" target="_blank" rel="noopener"><strong>Dependency-Track v5（原孵化代号 Project Hyades，现已合并入主仓库，Apache-2.0）</strong></a> 中完成了彻底的事件驱动微服务拆分：<strong>无状态 <code>apiserver</code> + Kafka 事件骨干 + 独立扩缩容的 <code>vulnerability-analyzer</code> / <code>notification-publisher</code> Worker + PostgreSQL 持久化</strong>。</p>
       <aside class="sidenote">
         <span class="sidenote-title">架构复用自检</span>
         我们可以在平台自研核心管道直接采纳 Hyades 的事件拆分思想（Go/Rust 微服务 + Kafka/NATS + PostgreSQL），甚至在需要快速验证企业级台账时以 Apache-2.0 协议借鉴其 Topic 拆分模型与数据处理流水线。
@@ -200,24 +201,29 @@
 
     <div class="code-block full-width">
       <div class="code-block-head">
-        <strong>架构契约示例：PostgreSQL CAS 指针重绑定 &amp; 0-Day 倒排索引活跃窗口查询（Pseudo-SQL / Go）</strong>
-        <span>一次采集 · 持续重算的核心存储边界</span>
+        <strong>架构契约示例：PostgreSQL CAS 指针重绑定 &amp; 0-Day 倒排索引活跃窗口查询</strong>
+        <span>PostgreSQL · 一次采集与持续重算的核心存储边界</span>
       </div>
-      <pre><code><span class="tok-cmt">// 1. CI 内容寻址去重（CAS Probe）：Monorepo 120 个服务改 1 行 README 时避免 119 次重复解析</span>
+      <pre><code><span class="tok-cmt">-- 1. CI 内容寻址去重（CAS Probe）：Monorepo 120 个服务改 1 行 README 时避免 119 次重复解析</span>
 <span class="tok-kw">SELECT</span> snapshot_id <span class="tok-kw">FROM</span> dependency_snapshots
 <span class="tok-kw">WHERE</span> cas_digest = $1 <span class="tok-kw">AND</span> extractor_profile_ver = $2 <span class="tok-kw">LIMIT</span> 1;
-<span class="tok-cmt">-- 命中后仅执行零拷贝指针绑定（保留完整 Commit 追溯与分支历史，无需重传 15MB BOM）：</span>
-<span class="tok-kw">INSERT INTO</span> commit_snapshot_refs (project_id, branch, commit_sha, snapshot_id, is_active_head)
-<span class="tok-kw">VALUES</span> ($1, $2, $3, $4, <span class="tok-kw">true</span>) <span class="tok-kw">ON CONFLICT</span> (project_id, branch) <span class="tok-kw">DO UPDATE SET</span> ...;
 
-<span class="tok-cmt">// 2. 凌晨 0-Day 情报突发：按 PURL 包名倒排索引反查受影响【活跃】快照（跳过海量历史废弃 PR 快照）</span>
-<span class="tok-kw">SELECT DISTINCT</span> sc.snapshot_id, csr.project_id, csr.branch
+<span class="tok-cmt">-- 命中后写入不可变 Commit 审计记录，并原子更新分支活跃头指针（无需重传 15MB BOM）：</span>
+<span class="tok-kw">INSERT INTO</span> commit_snapshot_refs (project_id, branch, commit_sha, snapshot_id)
+<span class="tok-kw">VALUES</span> ($1, $2, $3, $4) <span class="tok-kw">ON CONFLICT</span> (project_id, commit_sha) <span class="tok-kw">DO NOTHING</span>;
+
+<span class="tok-kw">INSERT INTO</span> branch_active_heads (project_id, branch, commit_sha, snapshot_id, is_active_head, deployed_in_prod)
+<span class="tok-kw">VALUES</span> ($1, $2, $3, $4, <span class="tok-kw">true</span>, <span class="tok-kw">false</span>)
+<span class="tok-kw">ON CONFLICT</span> (project_id, branch) <span class="tok-kw">DO UPDATE SET</span> commit_sha = $3, snapshot_id = $4, updated_at = now();
+
+<span class="tok-cmt">-- 2. 凌晨 0-Day 情报突发：按 PURL 倒排索引反查受影响【活跃】分支/生产快照（豁免历史僵尸快照）</span>
+<span class="tok-kw">SELECT DISTINCT</span> sc.snapshot_id, bah.project_id, bah.branch
 <span class="tok-kw">FROM</span> snapshot_components sc
-<span class="tok-kw">JOIN</span> commit_snapshot_refs csr <span class="tok-kw">ON</span> sc.snapshot_id = csr.snapshot_id
+<span class="tok-kw">JOIN</span> branch_active_heads bah <span class="tok-kw">ON</span> sc.snapshot_id = bah.snapshot_id
 <span class="tok-kw">WHERE</span> sc.canonical_type = <span class="tok-str">'maven'</span>
   <span class="tok-kw">AND</span> sc.canonical_namespace = <span class="tok-str">'org.apache.logging.log4j'</span>
   <span class="tok-kw">AND</span> sc.canonical_name = <span class="tok-str">'log4j-core'</span>
-  <span class="tok-kw">AND</span> (csr.is_active_head = <span class="tok-kw">true</span> <span class="tok-kw">OR</span> csr.deployed_in_prod = <span class="tok-kw">true</span>); <span class="tok-cmt">-- 关键：剪除僵尸快照，省下 85%+ 无效 IOPS</span></code></pre>
+  <span class="tok-kw">AND</span> (bah.is_active_head = <span class="tok-kw">true</span> <span class="tok-kw">OR</span> bah.deployed_in_prod = <span class="tok-kw">true</span>); <span class="tok-cmt">-- 关键：剪除已关闭临时分支，省下 85%+ IOPS</span></code></pre>
     </div>
 
     <div class="callout warning">
@@ -452,9 +458,9 @@
         <h3>一手必读原典（Primary Source）</h3>
         <p>落地 IDE、PR 门禁与服务端事件流引擎时，建议精读以下商用合规开源项目的核心架构文档与仓库：</p>
         <ul style="margin-bottom:0.5rem;">
-          <li><a href="https://github.com/DependencyTrack/hyades" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5 (Project Hyades)</strong></a>（Apache-2.0）&amp; <a href="https://docs.dependencytrack.org/" target="_blank" rel="noopener">官方文档</a>：从 v4 单体内存队列到 Kafka + 微服务“一次采集、持续重算”的经典演进。</li>
-          <li><a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server (<code>snyk/snyk-ls</code>)</strong></a>（Apache-2.0）：IDE 单一 LSP BFF 内核、<code>didSave</code> 防抖触发与本地诊断缓存范式。</li>
-          <li><a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><strong>GitHub <code>dependency-review-action</code></strong></a>（MIT）&amp; <a href="https://docs.github.com/en/rest/dependency-graph/dependency-submission" target="_blank" rel="noopener"><strong>Dependency Submission API</strong></a>：基于 Snapshot SHA 的 PR 增量依赖图差设计与缺失基线容错逻辑。</li>
+          <li><a href="https://github.com/DependencyTrack/dependency-track" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5 (Hyades 架构)</strong></a>（Apache-2.0）&amp; <a href="https://docs.dependencytrack.org/" target="_blank" rel="noopener">官方文档</a>：从 v4 单体内存队列到 Kafka + 微服务“一次采集、持续重算”的经典演进（原 <code>hyades</code> 孵化仓库已正式合入主仓库）。</li>
+          <li><a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server (<code>snyk/snyk-ls</code>)</strong></a>（Apache-2.0）：IDE 单一 Go LSP BFF 内核、<code>didSave</code> 失效重扫与本地诊断缓存范式。</li>
+          <li><a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><strong>GitHub <code>dependency-review-action</code></strong></a>（MIT）&amp; <a href="https://docs.github.com/en/rest/dependency-graph/dependency-submission" target="_blank" rel="noopener"><strong>Dependency Submission API</strong></a>：基于 Commit SHA 的 PR 增量依赖图差比较与 <code>retry-on-snapshot-warnings</code> 快照等待机制。</li>
         </ul>
       </div>
 

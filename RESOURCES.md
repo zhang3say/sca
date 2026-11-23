@@ -53,12 +53,12 @@
   Linux 基金会 ACT 旗下 Kotlin/JVM 企业级依赖与合规管线，核心链条为 `Analyzer` → `PackageManager`（Maven Resolver / `GradleInspector`）→ 全局去重 `DependencyGraph`（按 `Scope` 精确分离 `runtime` / `test`）→ `OrtResult`，默认 `allowDynamicVersions=false` 严守构建可复现性。用于：隔离/CI Hook 跑复杂 JVM 有效图与高精度许可证合规。
 - [Repo: Aqua Trivy (`aquasecurity/trivy`, Apache-2.0)](https://github.com/aquasecurity/trivy)
   高覆盖度的全能开源安全扫描器（OS/语言包、镜像、IaC、密钥、许可证）。用于：研究高并发 CLI 工程化、本地离线漏洞库分发格式（BoltDB/OCI）与多生态适配细节；同时作为「一体化扫描器不宜直接充当核心数据底座」的架构对照。
-- [Repo: OWASP Dependency-Track (`DependencyTrack/dependency-track`, Apache-2.0)](https://github.com/DependencyTrack/dependency-track) & [Project Hyades / v5 (`DependencyTrack/hyades`, Apache-2.0)](https://github.com/DependencyTrack/hyades) ([官方文档](https://docs.dependencytrack.org/))
-  企业级 SBOM 持续监控平台参考架构：从 v4 单体内存队列演进至 v5（Hyades）无状态 HA `apiserver` + Kafka 事件流 + 独立扩缩容 `vulnerability-analyzer` / `notification-publisher`，示范「一次采集、持续重算」与十万级项目高并发入库设计。
+- [Repo: OWASP Dependency-Track (`DependencyTrack/dependency-track`, Apache-2.0)](https://github.com/DependencyTrack/dependency-track) ([官方文档](https://docs.dependencytrack.org/))
+  企业级 SBOM 持续监控平台参考架构：v5（原孵化代号 Project Hyades，现已并入主仓库）将 v4 单体内存队列拆分为无状态 HA `apiserver` + Kafka 事件流 + 独立扩缩容 `vulnerability-analyzer` / `notification-publisher` + PostgreSQL，示范「一次采集、持续重算」与十万级项目高并发入库设计。
 - [Repo: Snyk Language Server (`snyk/snyk-ls`, Apache-2.0)](https://github.com/snyk/snyk-ls)
-  跨编辑器统一安全语言服务器（BFF）：以单一 Go LSP 后台进程通过 JSON-RPC 服务 VS Code/JetBrains/Neovim 等多端 IDE，示范 `didOpen`/`didSave` 事件防抖、本地静态提取调用与诊断缓存策略。
+  跨编辑器统一安全语言服务器（BFF）：以单一 Go LSP 后台进程通过 `stdio` JSON-RPC 服务 VS Code/JetBrains/Neovim 等多端 IDE，示范 `textDocument/didSave` 触发缓存失效重扫与本地诊断缓存策略。
 - [Action & API: GitHub `actions/dependency-review-action` (MIT)](https://github.com/actions/dependency-review-action) & [Dependency Submission API](https://docs.github.com/en/rest/dependency-graph/dependency-submission)
-  PR 增量依赖门禁事实参照：基于 commit SHA 提交构造期依赖快照，对比 `merge-base` 与 PR Head 图差仅拦截净新增风险，以及基线缺失时的重试/兜底边界。
+  PR 增量依赖门禁事实参照：基于 commit SHA 提交构造期依赖快照，对比 `merge-base` 与 PR Head 图差仅拦截净新增风险，以及 `retry-on-snapshot-warnings` 快照等待机制。
 - [Service & Docs: Google Open Source Insights (`deps.dev`)](https://docs.deps.dev/)
   Google 提供的跨生态开源依赖图、版本关系与安全公告查询服务（HTTP/gRPC API）。用于：研究大规模传递依赖图预计算与元数据补全思路。
 - [Repo: OpenSSF Malicious Packages (`ossf/malicious-packages`, Apache-2.0)](https://github.com/ossf/malicious-packages)

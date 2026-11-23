@@ -54,22 +54,22 @@
           summary:
             "在每次按键（didChange）就触发完整依赖解析甚至拉起 npm/mvn 子进程，会导致半成品 JSON 报错、CPU 飙升卡死 IDE 线程；为多个编辑器各自维护原生插件逻辑，也会导致告警规则与 CI 严重漂移。",
           irSnippet: [
-            "// 反模式：每次敲键盘发一次全量请求，无本地缓存与防抖",
-            "event=didChange -> spawn('mvn dependency:tree')  // ❌ 耗时 18,400ms",
-            "POST /api/v1/scan/full  payload={ 248 packages }  // ❌ 重复全量查询",
-            "UI 状态: 卡顿阻塞 · 28 次无效请求 · 规则与 CI 门禁不一致"
+            "// 反模式：每次敲键盘发全量请求，无防抖与本地缓存",
+            "event=didChange -> spawn('mvn dependency:tree') // ❌ 18,400ms",
+            "POST /api/v1/scan/full { 248 packages }        // ❌ 全量重复查",
+            "UI 状态: 编辑器卡顿 · 28 次无效请求 · 规则与 CI 门禁漂移"
           ].join("\n"),
         },
         industrial: {
           status: "ok",
-          verdictLabel: "推荐架构：snyk-ls 模式（Go 独立 LSP + 防抖 + 差量缓存）",
+          verdictLabel: "推荐架构：借鉴 snyk-ls（Go LSP + didSave 缓存 + 差量查）",
           verdictTitle: "180ms 内精准标红 pkg:npm/axios@0.21.1，仅查询 1 个增量 PURL",
           summary:
-            "IDE 插件只做薄 UI，统一通过 stdio JSON-RPC 对接 Go 编写的 sca-ls 后台进程。仅在 didOpen/didSave（带 Manifest 文件哈希校验）异步执行泳道 A 本地静态提取，命中本地 PURL LRU 缓存直接渲染，仅把新增/变更 PURL 打包批量查询后端。",
+            "参考 snyk-ls 的 Go BFF 模式：IDE 插件只做薄 UI，通过 stdio JSON-RPC 对接后台 sca-ls。仅在 didOpen/didSave（叠加文件哈希防抖）运行泳道 A 本地静态提取，命中本地 PURL LRU 缓存直接渲染，仅把新增/变更 PURL 批量查询后端。",
           irSnippet: [
             "// 推荐输出：LSP 后台异步执行 + PURL 差量查询",
-            "trigger: didSave(sha256 changed) -> local OSV-SCALIBR (62ms)",
-            "cache_hit: 247/248 PURLs -> delta_query: [\"pkg:npm/axios@0.21.1\"] (95ms)",
+            "didSave(sha256 changed) -> local OSV-SCALIBR (62ms)",
+            "cache_hit: 247/248 -> delta_query: [\"pkg:npm/axios@0.21.1\"]",
             "publishDiagnostics: {",
             "  \"range\": \"line 14\", \"severity\": \"High\",",
             "  \"codeAction\": \"Upgrade axios -> 1.7.4 (CVE-2021-3749)\"",
@@ -86,13 +86,13 @@
       inspectTag: "PR #418 (feat/pay -> main)",
       inspectTree: [
         "[Base 分支 (main @ merge-base 7a9f2c)]",
-        "  ├── 历史存量旧债: 42 个 CVE (含 legacy-xml@1.0.2 High)",
+        "  ├── 历史存量旧债: 42 个 CVE (legacy-xml@1.0.2 High)",
         "  └── CI 状态: ⚠️ 主干最后一次完整快照落后或缺失!",
         "",
         "[Head 分支 (feat/pay @ e3c10b)]",
         "  ├── 保留全部 42 个历史旧债 (本 PR 未触碰)",
-        "  ├── 新增直接依赖: pkg:npm/lodash@4.17.15 (scope=runtime, CVE-2021-23337)",
-        "  └── 作用域变更: pkg:npm/junit-helper (test -> runtime, 含旧 High CVE)"
+        "  ├── 新增直接依赖: pkg:npm/lodash@4.17.15 (runtime)",
+        "  └── 作用域变更: junit-helper (test -> runtime)"
       ].join("\n"),
       badges: [
         { cls: "add", text: "Net-New = Risk(Head) - Risk(Base)" },
@@ -109,23 +109,23 @@
           irSnippet: [
             "// 反模式：拿全量存量清单做门禁判断",
             '"pr_gate_decision": "BLOCKED",',
-            '"blocking_count": 43, // ❌ 把 42 个与本 PR 无关的老洞算在开发者头上',
-            '"if_base_missing": "PASS_WITH_SKIP" // ❌ 基线缺失时直接放行高危新包'
+            '"blocking_count": 43, // ❌ 42 个老洞算在开发头上',
+            '"if_base_missing": "PASS_WITH_SKIP" // ❌ 缺失基线直接放行'
           ].join("\n"),
         },
         industrial: {
           status: "ok",
           verdictLabel: "推荐架构：基于 Layer 2 IR 的增量图差 + 同步静态基线兜底",
-          verdictTitle: "精确拦截 2 项净新增风险（新包 + test->runtime 提权），8.2s 放行说明",
+          verdictTitle: "精确拦截 2 项净新增风险（新包 + test->runtime 提权），8.2s 返回",
           summary:
             "当 merge-base 的权威快照缺失时，门禁 Worker 同步抽取 merge-base 的清单文件在内存跑 Tier 1 静态解析生成 G_base_fallback（耗时 ~2s）。随后按 (vuln_id, canonical_purl, scope_class, subpath) 计算集合差，精准识别新增组件及由 test 提升为 runtime 的生产暴露风险。",
           irSnippet: [
-            "// 推荐输出：Net-New Delta Report (PR Check 8.2s 完成)",
-            '"base_resolution": "tier1_static_fallback (merge_base=7a9f2c)",',
+            "// 推荐输出：Net-New Delta Report (8.2s 完成)",
+            '"base_resolution": "tier1_static_fallback (7a9f2c)",',
             '"legacy_debt_ignored": 42,',
             '"net_new_blockers": [',
-            '  { "type": "NEW_PKG", "purl": "pkg:npm/lodash@4.17.15", "cve": "CVE-2021-23337" },',
-            '  { "type": "SCOPE_ESCALATION", "purl": "pkg:npm/junit-helper@2.1", "from": "test", "to": "runtime" }',
+            '  { "type": "NEW_PKG", "purl": "pkg:npm/lodash@4.17.15" },',
+            '  { "type": "SCOPE_UP", "pkg": "junit-helper", "to": "runtime" }',
             "]"
           ].join("\n"),
         },
@@ -174,11 +174,11 @@
             "CI 插件先为每个模块计算归一化依赖输入哈希与构建环境指纹，通过 /v1/snapshots/probe 探测服务端 CAS 索引。命中历史快照的服务零提取直接生成一条 commit_sha -> snapshot_id 绑定记录；未命中的 services/auth 才执行 Tier 3 构建并上传增量快照。",
           irSnippet: [
             "// 推荐输出：CAS Skip-Scan + 完整 Commit 审计溯源",
-            '"cas_probe_summary": { "total_modules": 120, "cas_hit": 119, "re_extracted": 1 },',
-            '"pointer_rebinds": "119 commits -> existing snapshot_ids (15ms, 0 bytes BOM)",',
-            '"new_snapshot_uploaded": {',
+            '"cas_probe": { "total": 120, "hit": 119, "re_run": 1 },',
+            '"rebinds": "119 commits -> old snapshot_ids (15ms)",',
+            '"new_snapshot": {',
             '  "module": "services/auth", "commit": "91d4e8",',
-            '  "cas_key": "sha256:ccc999...", "tier": "Tier 3 (cdxgen/ORT)"',
+            '  "cas_key": "sha256:ccc999...", "tier": "Tier 3"',
             "}"
           ].join("\n"),
         },
@@ -193,13 +193,13 @@
       inspectTree: [
         "[Layer 3 漏洞情报流到达]",
         "  Event: intel.advisory.updated",
-        "  PURL Range: pkg:maven/org.apache.logging.log4j/log4j-core [<2.24.0]",
+        "  PURL: pkg:maven/org.apache.logging.log4j/log4j-core",
         "",
         "[PostgreSQL 倒排索引状态 (30,000 个项目快照)]",
-        "  ├── 命中该 PURL 的总快照数: 18,400 份",
-        "  │     ├── 历史废弃 Feature 分支 / 已关闭 PR 快照: 16,200 份 (TTL 归档)",
-        "  │     └── 活跃主干 / 生产在跑容器镜像快照:     2,200 份 (Active Scope!)",
-        "  └── 源码 Git 仓库: 无需重新 clone（Layer 2 IR 已完整持久化）"
+        "  ├── 命中组件的总快照: 18,400 份",
+        "  │     ├── 已关闭 PR / 过期临时分支: 16,200 份 (TTL 归档)",
+        "  │     └── 活跃主干 / 生产在跑镜像:  2,200 份 (Active!)",
+        "  └── Git 源码仓库: 零重新 clone（Layer 2 IR 已持久化）"
       ].join("\n"),
       badges: [
         { cls: "add", text: "一次采集 · 持续重算" },
@@ -228,10 +228,10 @@
             "借鉴 Dependency-Track v5 (Hyades) 架构：情报入库后发送事件到低优先级 Bulk Kafka Topic（绝不阻塞白天的 PR 交互通道），vuln-analyzer 通过 PURL 倒排索引仅捞出 2,200 份活跃主干与生产镜像快照分批重算，并由 notification-publisher 推送精准负责人。",
           irSnippet: [
             "// 推荐输出：事件驱动双触发持续重算流水线",
-            "trigger: \"intel.advisory.updated\" -> reverse_purl_lookup (180ms)",
-            "active_window_filter: \"18,400 matched -> pruned to 2,200 active prod/main\"",
-            "kafka_topic: \"sca.reeval.bulk\" (48 partitions, isolated from PR lane)",
-            "elapsed: \"42.6s -> 2,200 snapshots evaluated, 318 impacted services alerted\""
+            "trigger: \"intel.advisory.updated\" -> reverse_purl (180ms)",
+            "active_filter: \"18,400 matched -> 2,200 active prod/main\"",
+            "kafka_topic: \"sca.reeval.bulk\" (isolated from PR lane)",
+            "elapsed: \"42.6s -> 2,200 active snapshots, 318 alerted\""
           ].join("\n"),
         },
       },
