@@ -27,51 +27,51 @@
     {
       id: "nvd-backlog-vs-ghsa",
       tabLabel: "1. NVD 积压断层与 CPE 误配",
-      contextTitle: "2024+ NVD 分级滞后 · CVEListV5 (CNA/ADP) + GHSA Reviewed 补位",
+      contextTitle: "NVD 披露滞后窗口模拟 · CVEListV5 (CNA/ADP) + GHSA Reviewed 补位",
       rawRecords: [
         {
           id: "nvd-raw",
-          source: "NIST NVD Feed (API 2.0)",
+          source: "NIST NVD Feed (披露初期窗口模拟)",
           tierBadge: "Status: Awaiting Analysis",
           tierClass: "tier-low",
-          identifier: "CVE-2025-41203 (CC0 / Public Domain)",
-          note: "发布 21 天仍标为 Not Scheduled / Awaiting Analysis：无 CPE 节点、无 CVSS 向量，仅有一段 CNA 英文摘要。",
+          identifier: "CVE-2026-22039 (CC0 / Public Domain)",
+          note: "模拟新 CVE 披露后滞留 NVD Awaiting Analysis / Not Scheduled 队列：尚无 CPE 节点、无 CVSS 向量，仅有一段摘要。",
         },
         {
           id: "cvelist-v5",
           source: "CVEProgram/cvelistV5 (CNA + CISA-ADP)",
           tierBadge: "CNA Affected + ADP SSVC",
           tierClass: "tier-mid",
-          identifier: "CVE-2025-41203 (containers.cna + adp)",
-          note: "CNA 容器已声明 pkg/版本区间，CISA-ADP（Vulnrichment）容器已补充 CWE-79、CVSS v3.1 与 SSVC Act 决策点。",
+          identifier: "CVE-2026-22039 (containers.cna + adp)",
+          note: "CNA 容器已声明 <1.15.3 与 >=1.16.0, <1.16.3；CISA-ADP（Vulnrichment）容器已补充 SSVC（Exploitation: poc, Technical Impact: total）。",
         },
         {
           id: "ghsa-reviewed",
           source: "GitHub Advisory DB (Reviewed)",
           tierBadge: "生态原生权威 · conf 0.96",
           tierClass: "tier-high",
-          identifier: "GHSA-9x4m-7q2p-r8vw (CC-BY-4.0)",
-          note: "GitHub 安全团队人工核验：精准锚定 pkg:maven/org.apache.commons/commons-text [1.5, 1.13.1) 并列 aliases: [CVE-2025-41203]。",
+          identifier: "GHSA-cvq5-hhx3-f99p (CC-BY-4.0)",
+          note: "GitHub 安全团队人工核验：精准锚定 pkg:golang/github.com/kyverno/kyverno 区间并列 aliases: [CVE-2026-22039]。",
         },
       ],
       modes: {
         naive: {
           status: "danger",
           verdictLabel: "灾难：仅接 NVD 或拿摘要字符串硬猜包名",
-          verdictTitle: "新 CVE 长达数周全线漏报，模糊匹配又引爆跨项目误报",
+          verdictTitle: "高危 CVE 在分析滞后期全线漏报，模糊匹配又引爆跨项目误报",
           summary:
             "传统架构只拉取 NVD 同步库且依赖 CPE 字符串匹配：在 NVD 积压未分配 CPE 期间，所有新披露漏洞全部静默漏报；若粗暴用产品名做模糊文本匹配，又会把同名无关组件拖进误报泥潭。",
           itemTags: {
-            "nvd-raw": { cls: "ghost", text: "无 CPE · 漏报 21 天" },
+            "nvd-raw": { cls: "ghost", text: "无 CPE · 窗口期漏报" },
             "cvelist-v5": { cls: "dropped", text: "未接 CVEListV5" },
             "ghsa-reviewed": { cls: "dropped", text: "未接生态库" },
           },
           irSnippet: [
             "// 反模式：纯 NVD CPE 驱动管线输出",
-            '"cve_id": "CVE-2025-41203",',
+            '"cve_id": "CVE-2026-22039",',
             '"nvd_vuln_status": "Awaiting Analysis",',
             '"cpe_configurations": [], // ❌ 匹配规则为空，全公司静默漏报',
-            '"fallback_fuzzy_match": "commons-text* -> 误命中 unrelated-text-cli"'
+            '"fallback_fuzzy_match": "kyverno* -> 误命中 unrelated-kyverno-helper"'
           ].join("\n"),
         },
         industrial: {
@@ -87,11 +87,11 @@
           },
           irSnippet: [
             "// Layer 3 归一化裁决输出 (Canonical Group)",
-            '"canonical_group_id": "VGRP-2025-41203",',
-            '"aliases": ["CVE-2025-41203", "GHSA-9x4m-7q2p-r8vw"],',
-            '"range_authority": "ghsa-reviewed (pkg:maven/org.apache.commons/commons-text)",',
-            '"events": [{ "introduced": "1.5" }, { "fixed": "1.13.1" }],',
-            '"enrichment": { "cvss_v3": 7.5, "ssvc_source": "CISA-ADP" }'
+            '"canonical_group_id": "VGRP-2026-22039",',
+            '"aliases": ["CVE-2026-22039", "GHSA-cvq5-hhx3-f99p"],',
+            '"range_authority": "ghsa-reviewed (pkg:golang/github.com/kyverno/kyverno)",',
+            '"events": [{ "introduced": "1.16.0" }, { "fixed": "1.16.3" }],',
+            '"enrichment": { "cvss_v3": 9.9, "ssvc_source": "CISA-ADP" }'
           ].join("\n"),
         },
       },
@@ -103,18 +103,18 @@
       rawRecords: [
         {
           id: "ghsa-cve",
-          source: "Upstream CVE / GHSA",
+          source: "Upstream CVE / GHSA / Go VulnDB",
           tierBadge: "同一上游缺陷 · aliases",
           tierClass: "tier-high",
-          identifier: "GHSA-xxxx-1111 <-> CVE-2024-21626",
-          note: "指向完全相同的上游 runc 源码缺陷与官方修复版本 fixed: 1.1.12。",
+          identifier: "GHSA-xr7r-f8xq-vfvv <-> CVE-2024-21626 <-> GO-2024-2491",
+          note: "指向完全相同的上游 opencontainers/runc 源码缺陷与官方修复版本 fixed: 1.1.12。",
         },
         {
           id: "debian-dsa",
           source: "Debian Security Tracker (DSA)",
           tierBadge: "发行版 Backport · upstream",
           tierClass: "tier-mid",
-          identifier: "DSA-5616-1 (affected: pkg:deb/debian/runc)",
+          identifier: "DSA-5615-1 (affected: pkg:deb/debian/runc)",
           note: "Debian 12 向旧主版本回溯打补丁：fixed: 1.1.5+ds1-1+deb12u1（版本号仍低于 1.1.12！）。",
         },
         {
@@ -122,8 +122,8 @@
           source: "Ubuntu Security Notice (USN)",
           tierBadge: "发行版 Backport · upstream",
           tierClass: "tier-mid",
-          identifier: "USN-6620-1 (affected: pkg:deb/ubuntu/runc)",
-          note: "Ubuntu 22.04 独立维护 Backport 补丁与差异化的受影响状态，在 OSV v1.7.0 中通过 upstream 指向 CVE-2024-21626。",
+          identifier: "USN-6619-1 (affected: pkg:deb/ubuntu/runc)",
+          note: "Ubuntu 22.04 独立维护 Backport 补丁 1.1.7-0ubuntu1~22.04.2，在 OSV v1.7.0 中通过 upstream 指向 CVE-2024-21626。",
         },
       ],
       modes: {
@@ -132,7 +132,7 @@
           verdictLabel: "灾难：把 DSA / USN 全部塞进 aliases 做等价传递闭包",
           verdictTitle: "上游 <1.1.12 未修区间误传染给 Debian 已修补包，引爆大规模误报",
           summary:
-            "若忽略 aliases（对称等价）与 upstream（有向衍生）的语义界线，把 DSA-5616-1 与 CVE-2024-21626 合并成同一等价组并共享 affected 区间，会导致已打上 Backport 补丁的 Debian 1.1.5+ds1-1+deb12u1 依然命中上游 <1.1.12 规则！",
+            "若忽略 aliases（对称等价）与 upstream（有向衍生）的语义界线，把 DSA-5615-1 与 CVE-2024-21626 合并成同一等价组并共享 affected 区间，会导致已打上 Backport 补丁的 Debian 1.1.5+ds1-1+deb12u1 依然命中上游 <1.1.12 规则！",
           itemTags: {
             "ghsa-cve": { cls: "kept", text: "混入同一等价组" },
             "debian-dsa": { cls: "ghost", text: "误继承 <1.1.12 误报!" },
@@ -140,7 +140,7 @@
           },
           irSnippet: [
             "// 反模式：DSA 被错误归入 aliases 传递闭包",
-            '"bad_alias_group": ["CVE-2024-21626", "GHSA-xxxx-1111", "DSA-5616-1"],',
+            '"bad_alias_group": ["CVE-2024-21626", "GHSA-xr7r-f8xq-vfvv", "DSA-5615-1"],',
             '"merged_affected_rules": [',
             '  { "purl": "pkg:deb/debian/runc", "fixed": "1.1.5+ds1-1+deb12u1" },',
             '  { "purl": "pkg:deb/debian/runc", "fixed": "1.1.12" } // ❌ 污染 Debian 12 匹配!',
@@ -152,7 +152,7 @@
           verdictLabel: "推荐架构：严格分离等价边（ALIASES）与衍生边（UPSTREAM_OF）",
           verdictTitle: "报告计数合并降噪，而版本匹配规则按发行版作用域严格隔离",
           summary:
-            "遵循 OSV Schema v1.7.0：仅在 GHSA <-> CVE 间建立对称 ALIAS_OF 边；对 Debian DSA / Ubuntu USN 建立有向 UPSTREAM_OF -> CVE-2024-21626 边。Layer 3 匹配时发行版组件只认发行版作用域区间，展示层则沿 UPSTREAM_OF 折叠进同一张漏洞工单。",
+            "遵循 OSV Schema v1.7.0：仅在 GHSA <-> CVE <-> GO 间建立对称 ALIAS_OF 边；对 Debian DSA / Ubuntu USN 建立有向 UPSTREAM_OF -> CVE-2024-21626 边。Layer 3 匹配时发行版组件只认发行版作用域区间，展示层则沿 UPSTREAM_OF 折叠进同一张漏洞工单。",
           itemTags: {
             "ghsa-cve": { cls: "kept", text: "ALIAS_OF (对称等价)" },
             "debian-dsa": { cls: "coexist", text: "UPSTREAM_OF · 独立匹配" },
@@ -161,8 +161,9 @@
           irSnippet: [
             "// Layer 3 关系图边模型 (advisory_edges) + 作用域匹配隔离",
             '"edges": [',
-            '  { "src": "GHSA-xxxx-1111", "type": "ALIAS_OF", "dst": "CVE-2024-21626" },',
-            '  { "src": "DSA-5616-1", "type": "UPSTREAM_OF", "dst": "CVE-2024-21626" }',
+            '  { "src": "GHSA-xr7r-f8xq-vfvv", "type": "ALIAS_OF", "dst": "CVE-2024-21626" },',
+            '  { "src": "GO-2024-2491",        "type": "ALIAS_OF", "dst": "CVE-2024-21626" },',
+            '  { "src": "DSA-5615-1",          "type": "UPSTREAM_OF", "dst": "CVE-2024-21626" }',
             "],",
             '"match_eval(deb/debian/runc@1.1.5+ds1-1+deb12u1?distro=debian-12)": "NOT_AFFECTED"'
           ].join("\n"),
@@ -172,14 +173,14 @@
     {
       id: "arbiter-and-withdrawn",
       tabLabel: "3. 冲突裁决与 Withdrawn 撤销",
-      contextTitle: "Unreviewed 噪音 vs Reviewed 精校 + 虚假 CVE 撤销墓碑事件",
+      contextTitle: "教学模拟场景 · Unreviewed 噪音 vs Reviewed 精校 + 虚假 CVE 撤销墓碑事件",
       rawRecords: [
         {
           id: "ghsa-unrev",
           source: "GitHub Advisory (Unreviewed)",
           tierBadge: "自动导入 · conf 0.40",
           tierClass: "tier-low",
-          identifier: "GHSA-unrev-0002 (CVE-2025-9901)",
+          identifier: "GHSA-xxxx-unrev-demo (CVE-2026-XXXXX 模拟)",
           note: "早期自动脚本从刚申请的 CVE 抓取：把受影响范围错误写成全版本 <99.0.0。",
         },
         {
@@ -187,7 +188,7 @@
           source: "PyPA Advisory DB (Canonical)",
           tierBadge: "官方审查 · withdrawn",
           tierClass: "tier-high",
-          identifier: "PYSEC-2025-44 (withdrawn: 2025-11-18T08:00Z)",
+          identifier: "PYSEC-2026-XXXX (withdrawn: 2026-05-26T00:00Z)",
           note: "Python 包维护者联合 PyPA 确认该报告为恶意刷 CVE 误报，正式打上 withdrawn 墓碑时间戳撤销！",
         },
         {
@@ -195,7 +196,7 @@
           source: "NVD / CVEListV5",
           tierBadge: "状态同步中 · 滞后",
           tierClass: "tier-mid",
-          identifier: "CVE-2025-9901 (State: PUBLISHED -> REJECTED)",
+          identifier: "CVE-2026-XXXXX (State: PUBLISHED -> REJECTED)",
           note: "MITRE/NVD 尚未完成 REJECTED 同步，NVD Feed 在未来 48 小时内仍显示为有效漏洞。",
         },
       ],
@@ -231,8 +232,8 @@
           },
           irSnippet: [
             "// Layer 3 裁决状态机 + Lesson 0006 事件联动",
-            '"canonical_group_id": "VGRP-2025-9901",',
-            '"lifecycle_state": "WITHDRAWN", "withdrawn_at": "2025-11-18T08:00:00Z",',
+            '"canonical_group_id": "VGRP-2026-XXXXX",',
+            '"lifecycle_state": "WITHDRAWN", "withdrawn_at": "2026-05-26T00:00:00Z",',
             '"matcher_rule_enabled": false,',
             '"kafka_event_emitted": "intel.advisory.updated -> auto-resolve active findings"'
           ].join("\n"),
@@ -249,7 +250,7 @@
           source: "RustSec / NVD / CVEListV5",
           tierBadge: "CC0-1.0 / Public Domain",
           tierClass: "tier-high",
-          identifier: "RUSTSEC-2025-0018 (CC0-1.0)",
+          identifier: "RUSTSEC-2025-XXXX (CC0-1.0 示例)",
           note: "公有领域或等效免署名许可，可自由纳入商业闭源产品与离线私有化分发包。",
         },
         {
@@ -257,7 +258,7 @@
           source: "GHSA / PyPA / Go VulnDB / OSS-Fuzz",
           tierBadge: "CC-BY-4.0 (须署名)",
           tierClass: "tier-mid",
-          identifier: "GHSA-3w8c-xxxx (CC-BY-4.0)",
+          identifier: "GHSA-xxxx-xxxx-xxxx (CC-BY-4.0 示例)",
           note: "允许商业闭源使用与分发，但必须在产品界面、API 文档或离线包 NOTICE 中明确履行署名与变更声明。",
         },
         {

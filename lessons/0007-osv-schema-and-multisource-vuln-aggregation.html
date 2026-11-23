@@ -140,11 +140,11 @@
 
     <div class="prose-col has-sidenote">
       <h3>2.1 去重命门：<code>aliases</code> vs <code>upstream</code> vs <code>related</code> 的严格语义边界</h3>
-      <p>同一件漏洞往往同时拥有 <code>CVE-2024-21626</code>、<code>GHSA-xxxx</code>、Debian <code>DSA-5616-1</code> 和 Ubuntu <code>USN-6620-1</code>。做多源汇聚时，初学者最常犯的致命错误，就是把所有关联编号全塞进一个 <code>aliases</code> 数组做等价聚类！</p>
+      <p>同一件漏洞往往同时拥有 <code>CVE-2024-21626</code>、<code>GHSA-xr7r-f8xq-vfvv</code>、<code>GO-2024-2491</code>、Debian <code>DSA-5615-1</code> 和 Ubuntu <code>USN-6619-1</code>。做多源汇聚时，初学者最常犯的致命错误，就是把所有关联编号全塞进一个 <code>aliases</code> 数组做等价聚类！</p>
       <p>参考 <a href="https://osv.dev/blog/posts/supporting-upstream-field/" target="_blank" rel="noopener">OSV 官方 <code>upstream</code> 设计解析</a> 与 <a href="https://docs.deps.dev/" target="_blank" rel="noopener">Google <code>deps.dev</code></a> 图模型，Layer 3 必须将关系严格拆分为<strong>三种不同语义的图谱边</strong>：</p>
       <ul>
-        <li><strong><code>aliases</code>（对称等价闭包，<code>ALIAS_OF</code>）：</strong>仅用于描述<strong>完全相同的底层漏洞、同一受影响源码体与同一上游补丁</strong>（如 <code>GHSA-2qrg-x229-3v8q &harr; CVE-2023-xxxx &harr; GO-2023-xxxx</code>）。等价组在报告层合并计数，也可共享未修区间校验。</li>
-        <li><strong><code>upstream</code>（有向衍生链，<code>UPSTREAM_OF</code>）：</strong>当下游发行版（如 Debian <code>DSA-5616-1</code>、Ubuntu <code>USN-6620-1</code>）针对旧版本做 Backport 修复时，<strong>修复版本号与上游截然不同</strong>（Debian 的 <code>1.1.5+ds1-1+deb12u1</code> 字符串上仍小于上游修复版 <code>1.1.12</code>！）。此时只能由发行版通告通过 <code>upstream</code> 指向根 CVE，<strong>绝对禁止写入 <code>aliases</code></strong>——否则等价传递闭包会把上游的 <code>&lt; 1.1.12</code> 规则传染给 Debian 容器，引爆海量误报！</li>
+        <li><strong><code>aliases</code>（对称等价闭包，<code>ALIAS_OF</code>）：</strong>仅用于描述<strong>完全相同的底层漏洞、同一受影响源码体与同一上游补丁</strong>（如 <code>GHSA-xr7r-f8xq-vfvv &harr; CVE-2024-21626 &harr; GO-2024-2491</code>）。等价组在报告层合并计数，也可共享未修区间校验。</li>
+        <li><strong><code>upstream</code>（有向衍生链，<code>UPSTREAM_OF</code>）：</strong>当下游发行版（如 Debian <code>DSA-5615-1</code>、Ubuntu <code>USN-6619-1</code>）针对旧版本做 Backport 修复时，<strong>修复版本号与上游截然不同</strong>（Debian 的 <code>1.1.5+ds1-1+deb12u1</code> 字符串上仍小于上游修复版 <code>1.1.12</code>！）。此时只能由发行版通告通过 <code>upstream</code> 指向根 CVE，<strong>绝对禁止写入 <code>aliases</code></strong>——否则等价传递闭包会把上游的 <code>&lt; 1.1.12</code> 规则传染给 Debian 容器，引爆海量误报！</li>
         <li><strong><code>related</code>（弱关联参考，<code>RELATED_TO</code>）：</strong>同根因但独立影响不同组件或拆分为多补丁的关联条目（如同一批披露的多个 SSRF CVE），仅作 UI 关联跳转，既不合并计数也不共享版本区间。</li>
       </ul>
       <aside class="sidenote">
@@ -158,13 +158,13 @@
         <strong>协议对照：OSV Schema v1.7.0 规范结构与 CVE JSON 5.x (CNA + ADP) 核心提取位点</strong>
         <span>真实字段契约 · 支持可达性符号与多层区间</span>
       </div>
-      <pre><code><span class="tok-cmt">// 1. 典型 OSV v1.7.0 发行版衍生记录（注意 upstream 与 aliases 的本质隔离）</span>
+      <pre><code><span class="tok-cmt">// 1. 典型 OSV v1.7.0 发行版衍生记录（以 Debian runc 通告与 CVSS_V4 语法为例）</span>
 {
   <span class="tok-str">"schema_version"</span>: <span class="tok-str">"1.7.0"</span>,
-  <span class="tok-str">"id"</span>: <span class="tok-str">"DSA-5616-1"</span>,
-  <span class="tok-str">"modified"</span>: <span class="tok-str">"2024-02-05T14:12:00Z"</span>,
+  <span class="tok-str">"id"</span>: <span class="tok-str">"DSA-5615-1"</span>,
+  <span class="tok-str">"modified"</span>: <span class="tok-str">"2024-02-04T20:00:00Z"</span>,
   <span class="tok-str">"upstream"</span>: [<span class="tok-str">"CVE-2024-21626"</span>],          <span class="tok-cmt">// ✅ 有向溯源：展示层折叠归档，但匹配规则绝不继承上游 &lt;1.1.12！</span>
-  <span class="tok-str">"severity"</span>: [{ <span class="tok-str">"type"</span>: <span class="tok-str">"CVSS_V4"</span>, <span class="tok-str">"score"</span>: <span class="tok-str">"CVSS:4.0/AV:L/AC:L/AT:N/..."</span> }],
+  <span class="tok-str">"severity"</span>: [{ <span class="tok-str">"type"</span>: <span class="tok-str">"CVSS_V4"</span>, <span class="tok-str">"score"</span>: <span class="tok-str">"CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H"</span> }],
   <span class="tok-str">"affected"</span>: [{
     <span class="tok-str">"package"</span>: { <span class="tok-str">"ecosystem"</span>: <span class="tok-str">"Debian:12"</span>, <span class="tok-str">"name"</span>: <span class="tok-str">"runc"</span>, <span class="tok-str">"purl"</span>: <span class="tok-str">"pkg:deb/debian/runc?distro=debian-12"</span> },
     <span class="tok-str">"ranges"</span>: [{
@@ -257,7 +257,7 @@
       <pre><code><span class="tok-cmt">-- 1. 多源原始情报仓：绝不互相覆盖，强制绑定数据许可与审查等级</span>
 <span class="tok-kw">CREATE TABLE</span> raw_advisories (
   source_id         <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'ghsa_reviewed' | 'ghsa_unreviewed' | 'nvd' | 'cvelistv5' | 'debian_dsa' | 'pypa'</span>
-  external_id       <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'GHSA-xxxx' | 'CVE-2025-41203' | 'DSA-5616-1'</span>
+  external_id       <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'GHSA-cvq5-hhx3-f99p' | 'CVE-2026-22039' | 'DSA-5615-1'</span>
   data_license      <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'CC0-1.0' | 'CC-BY-4.0' | 'CVE-TOU' (Gate 已拒绝 NC/ND)</span>
   review_tier       <span class="tok-type">SMALLINT</span> <span class="tok-kw">NOT NULL</span>,      <span class="tok-cmt">-- 100=生态官方/Reviewed, 70=CNA/ADP, 50=NVD, 20=Unreviewed</span>
   lifecycle_state   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'ACTIVE' | 'WITHDRAWN' | 'REJECTED'</span>
@@ -281,10 +281,10 @@
   rule_id           <span class="tok-type">UUID</span> <span class="tok-kw">PRIMARY KEY</span>,
   canonical_group   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- ALIAS_OF 连通分量主 ID</span>
   rule_scope        <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'UPSTREAM_PKG' | 'DISTRO_BACKPORT' | 'CPE_FALLBACK'</span>
-  base_purl         <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 如 'pkg:maven/org.apache.commons/commons-text'</span>
+  base_purl         <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 如 'pkg:golang/github.com/kyverno/kyverno'</span>
   distro_qualifier  <span class="tok-type">TEXT</span> <span class="tok-kw">DEFAULT</span> <span class="tok-str">''</span>,        <span class="tok-cmt">-- 非空时仅匹配对应发行版（如 'debian-12'）</span>
   range_type        <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 'SEMVER' | 'ECOSYSTEM' | 'GIT'</span>
-  events_json       <span class="tok-type">JSONB</span> <span class="tok-kw">NOT NULL</span>,         <span class="tok-cmt">-- [{"introduced":"1.5"},{"fixed":"1.13.1"}]</span>
+  events_json       <span class="tok-type">JSONB</span> <span class="tok-kw">NOT NULL</span>,         <span class="tok-cmt">-- [{"introduced":"1.16.0"},{"fixed":"1.16.3"}]</span>
   authority_source  <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,          <span class="tok-cmt">-- 胜出权威源，用于追溯与审计</span>
   is_enabled        <span class="tok-type">BOOLEAN</span> <span class="tok-kw">NOT NULL DEFAULT true</span> <span class="tok-cmt">-- WITHDRAWN 时置 false</span>
 );</code></pre>
@@ -377,7 +377,7 @@
             {
               "name": "CVE、GHSA 与 Linux 发行版补丁（DSA / USN）的图谱去重模型",
               "layer": "图谱去重 · 防区间污染",
-              "context": "CVE-2024-21626 同时对应 GHSA-xxxx、Debian DSA-5616-1 与 Ubuntu USN-6620-1，其中发行版采用 Backport 修复。",
+              "context": "CVE-2024-21626 同时对应 GHSA-xr7r-f8xq-vfvv、GO-2024-2491、Debian DSA-5615-1 与 Ubuntu USN-6619-1，其中发行版采用 Backport 修复。",
               "options": [
                 {
                   "label": "把 CVE、GHSA、DSA、USN 全部放进同一张 aliases 等价组并合并所有受影响版本区间",
@@ -479,7 +479,7 @@
               "explanation": "面对 NVD 长期积压和 CPE 断点，开源包匹配必须以 GHSA Reviewed、各生态原生 OSV（Go/PyPA/RustSec）与 CVEListV5（同时解析 CNA 与 CISA-ADP 容器）为主源；NVD 保留用于非包类商业软件/固件 CPE 兜底与历史基线；同时禁止模糊匹配和盲信未审查导入流（C 正确）。"
             },
             {
-              "prompt": "OSV Schema v1.7.0 正式引入了 upstream 字段来刻画 Debian DSA、Ubuntu USN 与上游 CVE 的关系。如果在汇聚图谱中误把 DSA-5682-1 放进 CVE-2024-XXXX 的 aliases 而不是 upstream，会造成什么严重生产故障？",
+              "prompt": "OSV Schema v1.7.0 正式引入了 upstream 字段来刻画 Debian DSA、Ubuntu USN 与上游 CVE 的关系。如果在汇聚图谱中误把 DSA-5615-1 放进 CVE-2024-21626 的 aliases 而不是 upstream，会造成什么严重生产故障？",
               "options": [
                 "传递别名闭包会把上游未修区间传染给发行版已回溯修补包，瞬间引爆海量误报。",
                 "数据库引擎会彻底拒绝解析含发行前缀的所有告警条目，导致全线扫描出现漏报。",
