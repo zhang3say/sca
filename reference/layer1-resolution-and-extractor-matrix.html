@@ -12,9 +12,10 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="../index.html">课程首页 · 全局路线图</a>
-        <a href="../lessons/0003-source-dependency-resolution-traps.html">Lesson 0003 · 源码解析真相</a>
-        <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004 · 开源提取底座拆解</a>
-        <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">Lesson 0005 · 镜像与制品采集</a>
+        <a href="../lessons/0003-source-dependency-resolution-traps.html">Lesson 0003</a>
+        <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a>
+        <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a>
+        <a href="../lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a>
         <a href="./layer1-resolution-and-extractor-matrix.html" class="active">Ref 03 · 解析与提取器矩阵</a>
       </div>
     </div>
@@ -31,7 +32,7 @@
       <p class="subtitle">供 Layer 1 采集路由设计、RFC 评审与反腐败适配器（ACL）开发时随时翻阅：覆盖 6 大生态裁决规则、四大 Apache-2.0 底座源码级接口、场景选型路由与多源置信度融合铁律。</p>
       <div class="meta-strip">
         <span><strong>适用范围：</strong>商业闭源 SCA 平台 Layer 1 采集引擎</span>
-        <span><strong>关联课程：</strong><a href="../lessons/0003-source-dependency-resolution-traps.html">Lesson 0003</a> · <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> · <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a></span>
+        <span><strong>关联课程：</strong><a href="../lessons/0003-source-dependency-resolution-traps.html">Lesson 0003</a> · <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> · <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a> · <a href="../lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a></span>
       </div>
     </header>
 
@@ -312,9 +313,64 @@
       </div>
     </section>
 
+    <!-- SECTION 6: MULTI-TOUCHPOINT & CONTINUOUS RE-EVALUATION -->
+    <section class="full-width">
+      <h2><span class="sec-num">06</span>多触点延迟预算、CAS 去重与持续重算架构矩阵（Lesson 0006）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:17%" />
+            <col style="width:13%" />
+            <col style="width:24%" />
+            <col style="width:23%" />
+            <col style="width:23%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>触点名称与标杆</th>
+              <th>延迟预算</th>
+              <th>允许泳道与触发策略</th>
+              <th>核心去重 / 增量算法</th>
+              <th>架构红线与容错兜底</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>IDE 本地（LSP）</strong><br/><a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><code>snyk/snyk-ls</code></a> (Apache-2.0)</td>
+              <td><code>&le; 1.5s</code></td>
+              <td>Go 单一后台 LSP（BFF）；仅在 <code>didOpen</code> / <code>didSave</code> 跑泳道 A 静态提取。</td>
+              <td>文件 SHA-256 防抖 + 本地 <code>purl &rarr; verdict</code> LRU 缓存，仅发增量 PURL 批量查询。</td>
+              <td>严禁每次按键 <code>didChange</code> 扫全树；严禁在编辑器热路径拉起完整构建器。</td>
+            </tr>
+            <tr>
+              <td><strong>PR / MR 门禁</strong><br/><a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><code>dependency-review-action</code></a> (MIT)</td>
+              <td><code>5s – 30s</code></td>
+              <td>计算 <code>G_head - G_base</code> 增量图差；高优 Kafka 车道保障并发不被大任务饿死。</td>
+              <td>对齐 <code>(vuln_id, canonical_purl, scope_class, subpath)</code>；捕获新增与 <code>test&rarr;runtime</code> 提权。</td>
+              <td>严禁用历史老债阻断无关 PR；<code>G_base</code> 缺失时同步抽取 <code>merge-base</code> 清单跑 Tier 1 静态兜底，禁 Fail-Open。</td>
+            </tr>
+            <tr>
+              <td><strong>CI / CD 权威快照</strong><br/>GitHub Submission API</td>
+              <td><code>1m – 5m</code></td>
+              <td>允许沙箱 Tier 3（ORT/Maven）与 Tier 4（Syft 镜像/制品）权威提取。</td>
+              <td><code>cas_digest = sha256(lockfiles + env + ver)</code>；CAS 命中跳过解析，仅写入 <code>commit_sha &rarr; snapshot_id</code> 指针。</td>
+              <td>只跳过不写指针会导致按 Commit/Tag 追溯断点；按 <code>project_id</code> 分区保证快照有序入库。</td>
+            </tr>
+            <tr>
+              <td><strong>服务端持续重算</strong><br/><a href="https://github.com/DependencyTrack/hyades" target="_blank" rel="noopener"><code>Hyades v5</code></a> (Apache-2.0)</td>
+              <td><code>秒 ~ 分钟级</code></td>
+              <td>无状态 HA 网关 + Kafka 解耦 + 独立 <code>vuln-analyzer</code> 双触发异步重算。</td>
+              <td>情报更新走 PURL 倒排索引反查受影响节点；<code>is_active_head</code> / <code>deployed_in_prod</code> 过滤僵尸分支。</td>
+              <td>严禁定时重拉 Git 仓库；严禁在网关内存线程池排队；过期 PR 快照定期冷存归档。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">← 返回 Lesson 0004</a>
-      <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">返回 Lesson 0005 · 镜像与制品采集</a>
+      <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">← 返回 Lesson 0005</a>
+      <a href="../lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">返回 Lesson 0006 · 多触点与持续重算</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>
   </main>

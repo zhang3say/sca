@@ -53,8 +53,12 @@
   Linux 基金会 ACT 旗下 Kotlin/JVM 企业级依赖与合规管线，核心链条为 `Analyzer` → `PackageManager`（Maven Resolver / `GradleInspector`）→ 全局去重 `DependencyGraph`（按 `Scope` 精确分离 `runtime` / `test`）→ `OrtResult`，默认 `allowDynamicVersions=false` 严守构建可复现性。用于：隔离/CI Hook 跑复杂 JVM 有效图与高精度许可证合规。
 - [Repo: Aqua Trivy (`aquasecurity/trivy`, Apache-2.0)](https://github.com/aquasecurity/trivy)
   高覆盖度的全能开源安全扫描器（OS/语言包、镜像、IaC、密钥、许可证）。用于：研究高并发 CLI 工程化、本地离线漏洞库分发格式（BoltDB/OCI）与多生态适配细节；同时作为「一体化扫描器不宜直接充当核心数据底座」的架构对照。
-- [Repo: OWASP Dependency-Track (`DependencyTrack/dependency-track`, Apache-2.0)](https://github.com/DependencyTrack/dependency-track)
-  企业级 SBOM 持续监控平台参考架构，原生支持 CycloneDX 摄入、多漏洞源关联、VEX 决策与策略门禁。用于：研究平台侧异步摄入、持续重算（Continuous Re-evaluation）与资产台账架构。
+- [Repo: OWASP Dependency-Track (`DependencyTrack/dependency-track`, Apache-2.0)](https://github.com/DependencyTrack/dependency-track) & [Project Hyades / v5 (`DependencyTrack/hyades`, Apache-2.0)](https://github.com/DependencyTrack/hyades) ([官方文档](https://docs.dependencytrack.org/))
+  企业级 SBOM 持续监控平台参考架构：从 v4 单体内存队列演进至 v5（Hyades）无状态 HA `apiserver` + Kafka 事件流 + 独立扩缩容 `vulnerability-analyzer` / `notification-publisher`，示范「一次采集、持续重算」与十万级项目高并发入库设计。
+- [Repo: Snyk Language Server (`snyk/snyk-ls`, Apache-2.0)](https://github.com/snyk/snyk-ls)
+  跨编辑器统一安全语言服务器（BFF）：以单一 Go LSP 后台进程通过 JSON-RPC 服务 VS Code/JetBrains/Neovim 等多端 IDE，示范 `didOpen`/`didSave` 事件防抖、本地静态提取调用与诊断缓存策略。
+- [Action & API: GitHub `actions/dependency-review-action` (MIT)](https://github.com/actions/dependency-review-action) & [Dependency Submission API](https://docs.github.com/en/rest/dependency-graph/dependency-submission)
+  PR 增量依赖门禁事实参照：基于 commit SHA 提交构造期依赖快照，对比 `merge-base` 与 PR Head 图差仅拦截净新增风险，以及基线缺失时的重试/兜底边界。
 - [Service & Docs: Google Open Source Insights (`deps.dev`)](https://docs.deps.dev/)
   Google 提供的跨生态开源依赖图、版本关系与安全公告查询服务（HTTP/gRPC API）。用于：研究大规模传递依赖图预计算与元数据补全思路。
 - [Repo: OpenSSF Malicious Packages (`ossf/malicious-packages`, Apache-2.0)](https://github.com/ossf/malicious-packages)
@@ -80,4 +84,4 @@
 ## Gaps
 - **静态函数级可达性（Call Graph）跨语言评测基准**：尚缺经过学术界或第三方独立验证的跨语言（Java/JS/Python/Go）调用图精度/召回率对比论文与基准测试集（将在进入 Layer 4 专项前补齐）。
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
-- **多语言依赖解析器（Lockfile vs Build-time）、四大引擎与镜像制品采集（已收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课及 Ref 03 补齐 OSV-SCALIBR / Syft / cdxgen / ORT 四大引擎源码级接口与融合架构对比，并于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 包数据库（含 Distroless `status.d/*` 与 RPM SQLite）及 Java/Go/Rust 二进制制品内嵌元数据提取细节。
+- **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 `snyk/snyk-ls`、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。

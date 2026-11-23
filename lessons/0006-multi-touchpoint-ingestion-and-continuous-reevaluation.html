@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0006：高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005 · 镜像与制品采集</a>
+        <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html" class="active">Lesson 0006 · 多触点与持续重算</a>
+        <a href="../reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0006</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 02 多语言与全形态采集提取引擎（收官课）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</h1>
+      <p class="subtitle">有了精准的解析器与镜像提取器，为什么商业化落地依然容易被研发投诉“卡死 IDE”“老漏洞卡死新 PR”，或者半夜 0-day 爆发时服务端拖垮 GitLab？本课把 Layer 1 能力装进一条<strong>兼顾毫秒级左移体验与万级并发稳态</strong>的多触点管道，完成 Chapter 02 工程闭环。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握四大触点延迟预算、LSP 防抖缓存、PR 净新增图差算法、CAS 去重与 Hyades 双触发持续重算架构</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> · <a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a>–<a href="./0005-container-image-os-and-artifact-extraction.html">0005</a> 中，我们攻克了源码解析陷阱、四大 Apache-2.0 提取底座编排和 OCI 分层合成。作为 <strong>CH 02 采集提取引擎收官课</strong>，今天解决最核心的工程调度问题：<strong>同一套 Layer 1 引擎和 Layer 2 IR，如何在 IDE、PR 门禁、CI 流水线与服务端持续重算这 4 个时空尺度完全不同的触点上协同工作？</strong></p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>四大触点的物理约束与延迟预算：一套参数打不了天下</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>初代商业 SCA 产品的经典失败路径，是把“全量克隆 + 构建期解析 + 全量漏洞扫描”同一套脚本硬塞给所有研发触点：装到 IDE 里卡死编辑器；放到 PR 里动辄跑 15 分钟且拿 3 年前的老漏洞卡住今天的业务修 Bug；到了服务端则靠每晚定时 Cron 重新拉取全公司代码仓。</p>
+      <p><strong>延迟预算（Latency Budget）与真相层级（Tier）之间存在刚性反比</strong>。总架构师必须先拍板四个触点的职责边界与技术约束：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">算一笔并发账：为何禁定时重克隆？</span>
+        假设客户有 10,000 个活跃仓库，夜间定时 Task 哪怕平均每个仓库拉取 + 解析耗时 10 秒，也要吃掉 <strong>27.7 核·小时</strong> 的 Git 网络和沙箱算力，高峰期直接打挂内网 GitLab；更致命的是，0-day 漏洞通常在白天或凌晨突发，定时扫存在长达数小时至 24 小时的盲窗期。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 现代化 SCA 四大研发触点的延迟预算、允许泳道与职责边界矩阵</strong>
+        <span>从左侧秒级左移防线，平滑过渡到右侧高置信度快照与零克隆持续重算闭环</span>
+      </figcaption>
+      <div class="ladder-grid">
+        <article class="ladder-step tier-1">
+          <div class="ladder-step-head">
+            <span>TOUCHPOINT 1</span>
+            <span class="badge badge-ok">&le; 1.5s</span>
+          </div>
+          <div class="ladder-step-title">IDE 本地实时提示（LSP）</div>
+          <p class="ladder-step-desc">仅监听打开与保存清单文件事件；纯本地跑 <strong>OSV-SCALIBR 静态提取</strong> + 内存 LRU 缓存，只向后端批量查询增量变更的 PURL 风险。</p>
+          <div class="ladder-step-meta">泳道 A（静态） · 标杆：<code>snyk-ls</code> (Apache-2.0)</div>
+        </article>
+
+        <article class="ladder-step tier-2">
+          <div class="ladder-step-head">
+            <span>TOUCHPOINT 2</span>
+            <span class="badge badge-blue">5s – 30s</span>
+          </div>
+          <div class="ladder-step-title">PR / MR 增量门禁（Diff）</div>
+          <p class="ladder-step-desc">对比目标分支 <code>G_base</code> 与当前提交 <code>G_head</code> 的 Layer 2 图差，<strong>仅阻断净新增（Net-New）高危漏洞与违规协议</strong>，忽略未触碰的存量债务。</p>
+          <div class="ladder-step-meta">增量图差 · 标杆：GitHub Dependency Review (MIT)</div>
+        </article>
+
+        <article class="ladder-step tier-3">
+          <div class="ladder-step-head">
+            <span>TOUCHPOINT 3</span>
+            <span class="badge badge-warn">1m – 5m</span>
+          </div>
+          <div class="ladder-step-title">CI / CD 权威快照与 CAS 去重</div>
+          <p class="ladder-step-desc">允许进沙箱跑构建期解析（Tier 3 ORT/Maven）与镜像产物采集（Tier 4 Syft）。先算 <strong>CAS 内容摘要</strong>跳过未变模块，写入不可变快照。</p>
+          <div class="ladder-step-meta">Tier 3/4 真值 · Monorepo 指针重绑</div>
+        </article>
+
+        <article class="ladder-step tier-4">
+          <div class="ladder-step-head">
+            <span>TOUCHPOINT 4</span>
+            <span class="badge badge-build">秒~分钟级触发</span>
+          </div>
+          <div class="ladder-step-title">服务端异步持续重算</div>
+          <p class="ladder-step-desc"><strong>绝不回拉代码或重解镜像</strong>。当 OSV/GHSA 情报更新时，直接基于入库 IR 与 PURL 倒排索引筛选活跃分支快照异步并发重算。</p>
+          <div class="ladder-step-meta">事件流 · 标杆：Dependency-Track v5 Hyades (Apache-2.0)</div>
+        </article>
+      </div>
+    </figure>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>左移双防线：IDE Language Server（LSP）与 PR 增量图差算法</h2>
+
+    <div class="prose-col">
+      <h3>2.1 为何 IDE 必须采用 Language Server（LSP）单内核架构</h3>
+      <p>如果为 VS Code（TypeScript）、JetBrains IDEA（Kotlin/Java）、Eclipse 与 Neovim 分别手写解析和匹配逻辑，不出半年就会出现“IDEA 报红但 VS Code 绿灯”的规则分裂。</p>
+      <p>全球标杆 <a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server（<code>snyk/snyk-ls</code>，Apache-2.0）</strong></a> 给出了标准答案——<strong>LSP 作为“后端即前端（BFF）”统一本地守护进程</strong>：各家编辑器客户端只保留极薄的 UI 胶水层，通过标准 JSON-RPC（<code>stdio</code>）与一个独立 Go 编译的 <code>sca-ls</code> 后台进程通信，由 <code>sca-ls</code> 复用与服务端一致的 Layer 1 静态解析器（OSV-SCALIBR）并吐出标准 <code>textDocument/publishDiagnostics</code>（波浪线）与 <code>CodeAction</code>（一键升级版本）。</p>
+      <ul>
+        <li><strong>严格禁止 <code>didChange</code> 每次击键触发：</strong>编辑半成品 <code>package.json</code> 时 JSON 语法本身都不合法。必须仅在 <code>didOpen</code> 与 <code>didSave</code> 且文件路径命中 Manifest/Lockfile 白名单时触发扫描。</li>
+        <li><strong>文件哈希防抖 + PURL 差量查询：</strong><code>sca-ls</code> 在内存保留 <code>file_sha256 &rarr; extracted_purls</code> 与 <code>purl &rarr; advisory_verdict (TTL 15min)</code> 两级缓存。按 <code>Ctrl+S</code> 保存但依赖块未改时直接 0ms 返回；即便改了一行新包，也只把<strong>未命中本地缓存的 1–2 个增量 PURL</strong> 发往后端 <code>/v1/match/batch</code>，确保端到端延迟稳控在 <code>&lt; 300ms</code>。</li>
+        <li><strong>绝不在 IDE 热路径拉起构建器：</strong>没有 <code>package-lock.json</code> 或仅修改 <code>pom.xml</code> 时，本地只允许运行纯数据静态解析或只读轻量树（Tier 1/2），严禁在开发者本地后台偷偷启动 <code>mvn dependency:tree</code> 或 <code>npm install</code> 抢占 CPU 与修改工作区。</li>
+      </ul>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.2 PR / MR 门禁的净新增图差（Net-New Diff）与基线缺失陷阱</h3>
+      <p>借鉴 <a href="https://docs.github.com/en/rest/dependency-graph/dependency-submission" target="_blank" rel="noopener">GitHub Dependency Submission API</a> 与 <a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><code>actions/dependency-review-action</code>（MIT）</a> 的设计哲学：PR 门禁阻断的不是“仓库历史有多烂”，而是<strong>“这次合并请求是否让风险变坏了”</strong>。</p>
+      <p>利用 Lesson 0002 建立的 Layer 2 IR，PR Diff 引擎计算的是目标分支基准提交（<code>merge-base</code>）图谱 <code>G_base</code> 与当前 PR Head 图谱 <code>G_head</code> 之间的<strong>风险实体差集</strong>，而不仅仅是组件名对比：</p>
+      <ul>
+        <li><strong>精准对齐键：</strong>以 <code>(vuln_id, canonical_purl, scope_class, install_subpath)</code> 为最小对比单元。如果是 npm 多版本共存，PR 在子目录新引入一份 <code>lodash@4.17.15</code> 哪怕根路径已有其他版本，仍属于 <code>Net-New</code> 净新增！</li>
+        <li><strong>作用域提权（Scope Escalation）捕获：</strong>若 <code>G_base</code> 中某高危组件仅处于 <code>dev/test</code> 作用域被豁免，而本次 PR 把它挪进了 <code>runtime</code> 生产依赖，虽然组件版本号一字未改，依然必须作为净新增风险拦截！</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">高频生产故障：Base Snapshot Missing</span>
+        实际落地时，经常遇到 <code>main</code> 分支最新的 <code>merge-base</code> 提交<strong>还没有完成 CI 扫描</strong>（例如新接入仓库首个 PR，或连续合并时上一次 CI 队列尚未写完库）。<br/>
+        <strong>绝对不可 Fail-Open 跳过扫描</strong>，也不可直接把 <code>G_base</code> 当成空集 <code>&empty;</code>（否则把老洞全算到当前 PR 头上）。正解是在门禁 Worker 内按 <code>git show &lt;merge_base_sha&gt;:&lt;manifest&gt;</code> 同步抽取变更前清单文件，用泳道 A 耗时 1–3 秒在内存合成临时静态基线 <code>G_base_fallback</code> 再算差集！
+      </aside>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>右移终局：CAS 内容寻址去重与 Hyades（Dependency-Track v5）持续重算</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>把视角拉到平台服务端。早期的 OWASP Dependency-Track v4 曾遇到非常典型的规模瓶颈：API Server 把所有分析任务塞进 JVM 进程内的 <code>ExecutorService</code> 内存队列，把检索索引写在本地磁盘。一旦企业接入数千个项目、CI 高峰期同时推送上万份 CycloneDX BOM，或者半夜导入新 NVD 漏洞库触发全量重算，API 网关立刻 OOM 崩溃且无法做多副本无状态高可用（Active-Active HA）。</p>
+      <p>为此，官方在 <a href="https://github.com/DependencyTrack/hyades" target="_blank" rel="noopener"><strong>Dependency-Track v5（Project Hyades，Apache-2.0）</strong></a> 中完成了彻底的事件驱动微服务拆分：<strong>无状态 <code>apiserver</code> + Kafka 事件骨干 + 独立扩缩容的 <code>vulnerability-analyzer</code> / <code>notification-publisher</code> Worker + PostgreSQL 持久化</strong>。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">架构复用自检</span>
+        我们可以在平台自研核心管道直接采纳 Hyades 的事件拆分思想（Go/Rust 微服务 + Kafka/NATS + PostgreSQL），甚至在需要快速验证企业级台账时以 Apache-2.0 协议借鉴其 Topic 拆分模型与数据处理流水线。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 2 · 高并发内容寻址接入（CAS）与双触发器异步持续重算架构（借鉴 Hyades v5）</strong>
+        <span>CI 上报走 CAS 短路去重与优先级隔离；0-day 爆发走倒排索引 + 活跃窗口剪枝，零代码克隆秒级触达</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">1. 无状态接入网关与 CAS 内容寻址探针（Stateless API Gateway, Active-Active HA）</span>
+            <span class="orch-stage-kicker">Skip-Scan &amp; Zero-Copy Pointer Rebind</span>
+          </div>
+          <p class="orch-stage-desc">
+            CI Runner 上传前先算模块归一化摘要 <code>cas_key = sha256(lockfiles + build_env_fingerprint + extractor_ver)</code>（容器镜像则直接取 OCI <code>manifest_digest</code>）。调用 <code>POST /v1/snapshots/probe</code> 命中已有快照时，<strong>跳过全部 Layer 1 提取与图谱重写</strong>，仅生成一条 <code>commit_sha &rarr; snapshot_id</code> 指针绑定（&lt;20ms）即可返回；未命中再进入异步入库队列。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 按优先级隔离拆道投入 Kafka / NATS JetStream（防止批量重算饿死白天的 PR 门禁） &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">触发器 A · 资产变更流（<code>sca.ir.committed</code>）</span>
+              <span class="badge badge-ok">实时高优通道</span>
+            </div>
+            <ul>
+              <li><strong>分区键：</strong>按 <code>project_id</code> Hash 分区，保证同一分支的快照写入与覆盖顺序严格串行一致。</li>
+              <li><strong>处理动作：</strong><code>IR Normalizer</code> 执行第 4 课融合铁律落库 <code>snapshot_nodes / edges</code>，唤醒 <code>vuln-analyzer</code> 完成本快照首次漏洞匹配与 PR 回调。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">触发器 B · 情报变更流（<code>intel.advisory.updated</code>）</span>
+              <span class="badge badge-warn">低优批量异步通道</span>
+            </div>
+            <ul>
+              <li><strong>零克隆反查：</strong>当 OSV/GHSA 推入新 0-day，不拉 Git 仓也不解镜像，直接查 <code>snapshot_components</code> 的 <strong>PURL 前缀/名称倒排索引</strong>定位受影响组件。</li>
+              <li><strong>活跃窗口剪枝：</strong>过滤掉已合并/关闭超过 TTL（如 14 天）的僵尸 Feature 分支，<strong>仅重算生产运行态镜像与主干活跃分支</strong>，将影响面投递通知网关。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 统一落盘 Layer 2 IR 与 Findings 证据链 &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">2. 独立决策与通知发布器（Policy Engine &amp; <code>notification-publisher</code>）</span>
+            <span class="orch-stage-kicker">Idempotent Fan-Out &amp; SCM Writeback</span>
+          </div>
+          <p class="orch-stage-desc">
+            重算产生的新增风险（且未命中 Layer 4 VEX 豁免）按 <code>(project_id, commit_sha, vuln_id)</code> 幂等去重后，异步回写 GitHub/GitLab PR Check 评论、触发飞书/Slack 应急路由或更新企业合规看板，彻底与高负载扫描计算隔离。
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>架构契约示例：PostgreSQL CAS 指针重绑定 &amp; 0-Day 倒排索引活跃窗口查询（Pseudo-SQL / Go）</strong>
+        <span>一次采集 · 持续重算的核心存储边界</span>
+      </div>
+      <pre><code><span class="tok-cmt">// 1. CI 内容寻址去重（CAS Probe）：Monorepo 120 个服务改 1 行 README 时避免 119 次重复解析</span>
+<span class="tok-kw">SELECT</span> snapshot_id <span class="tok-kw">FROM</span> dependency_snapshots
+<span class="tok-kw">WHERE</span> cas_digest = $1 <span class="tok-kw">AND</span> extractor_profile_ver = $2 <span class="tok-kw">LIMIT</span> 1;
+<span class="tok-cmt">-- 命中后仅执行零拷贝指针绑定（保留完整 Commit 追溯与分支历史，无需重传 15MB BOM）：</span>
+<span class="tok-kw">INSERT INTO</span> commit_snapshot_refs (project_id, branch, commit_sha, snapshot_id, is_active_head)
+<span class="tok-kw">VALUES</span> ($1, $2, $3, $4, <span class="tok-kw">true</span>) <span class="tok-kw">ON CONFLICT</span> (project_id, branch) <span class="tok-kw">DO UPDATE SET</span> ...;
+
+<span class="tok-cmt">// 2. 凌晨 0-Day 情报突发：按 PURL 包名倒排索引反查受影响【活跃】快照（跳过海量历史废弃 PR 快照）</span>
+<span class="tok-kw">SELECT DISTINCT</span> sc.snapshot_id, csr.project_id, csr.branch
+<span class="tok-kw">FROM</span> snapshot_components sc
+<span class="tok-kw">JOIN</span> commit_snapshot_refs csr <span class="tok-kw">ON</span> sc.snapshot_id = csr.snapshot_id
+<span class="tok-kw">WHERE</span> sc.canonical_type = <span class="tok-str">'maven'</span>
+  <span class="tok-kw">AND</span> sc.canonical_namespace = <span class="tok-str">'org.apache.logging.log4j'</span>
+  <span class="tok-kw">AND</span> sc.canonical_name = <span class="tok-str">'log4j-core'</span>
+  <span class="tok-kw">AND</span> (csr.is_active_head = <span class="tok-kw">true</span> <span class="tok-kw">OR</span> csr.deployed_in_prod = <span class="tok-kw">true</span>); <span class="tok-cmt">-- 关键：剪除僵尸快照，省下 85%+ 无效 IOPS</span></code></pre>
+    </div>
+
+    <div class="callout warning">
+      <div class="callout-label">高并发持久化暗坑：快照生命周期与表膨胀治理</div>
+      <p>很多团队在上线持续重算 3 个月后遭遇 PostgreSQL 写入退化：每个开发分支每次 Push 都生成一张包含数千条边的新快照，却从未做冷热分离。工程上必须建立<strong>两级生命周期</strong>：① <strong>Active Head / Prod Snapshots</strong> 常驻热索引表并参与实时 0-day 重算；② <strong>Closed PR / 陈旧临时快照</strong>超过 TTL（如 14–30 天）自动将明细边压缩归档至对象存储（S3/MinIO Parquet 或压缩 JSON）并从热索引摘除——既保留合规审计取证能力，又把持续重算引擎的索引体积稳定在可控常数级。</p>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在下方交互实验台切换体验 4 个典型触点高并发场景，对比“粗暴一刀切”与“工业级事件解耦”的延迟与资源差异，再完成 5 项多触点采集与持续重算架构拍板。</p>
+    </div>
+
+    <!-- INTERACTIVE TOUCHPOINT LAB -->
+    <section class="widget-panel full-width" data-widget="touchpoint-lab">
+      <script type="application/json" class="touchpoint-lab-data">
+        {
+          "title": "交互实验台：四大研发触点流转与 0-Day 异步持续重算（4 大场景 × 反模式对比）",
+          "intro": "点击上方标签切换 IDE LSP、PR 增量门禁、Monorepo CAS 去重与 Hyades 0-day 重算现场，并对比「反模式」与「推荐架构」的指令与指标流转。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "高并发多触点采集与持续重算架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你的商业 SCA 平台即将服务一家拥有 3000 名研发、120 模块 Monorepo 及数万运行镜像的大型企业，需定型端到端采集与重算管道。",
+          "summary": {
+            "optimal": "全部 {optimal} 项多触点架构决策均精准无误！你已打通“毫秒级 IDE 左移体验 + 无噪音 PR 增量拦截 + CAS 省算力 CI 接入 + 事件驱动 0-day 秒级重算”完整闭环，正式具备迈向 Chapter 03 漏洞情报引擎的底座能力。",
+            "warning": "没有触发系统崩溃级红线，但有 {warning} 项在多编辑器维护成本、PR 基线容错或僵尸快照清理上存在效率隐患（标黄项），建议立即收口。",
+            "critical": "当前架构存在 {critical} 处会直接卡死开发体验、放行新增高危包或打垮服务端数据库的高危缺陷（标红项）！请先修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "IDE 本地插件架构与扫描触发时机设计",
+              "layer": "触点 1 · IDE 左移",
+              "context": "团队需要同时交付 VS Code、JetBrains IDEA 与 Cursor 三款插件，不能影响日常编码流畅度。",
+              "options": [
+                {
+                  "label": "采用 snyk-ls 模式：独立 Go LSP 后台进程统一承载本地提取，仅在 didOpen/didSave 防抖扫描并配合文件 Hash + 增量 PURL 缓存",
+                  "status": "optimal",
+                  "verdictTitle": "单内核全编辑器复用，亚秒级响应且保护服务端接口配额",
+                  "feedback": "工业界标准解法！既消除多语言重写规则的维护灾难，又靠保存触发 + 差量缓存守住 1.5s 延迟红线。"
+                },
+                {
+                  "label": "在 VS Code 用 TypeScript、IDEA 用 Kotlin 各自实现解析器，且在 didChange 每次键盘敲击时实时发请求扫全树",
+                  "status": "critical",
+                  "verdictTitle": "双倍研发维护成本 + 敲半个 JSON 就打爆后端接口与卡死编辑器",
+                  "feedback": "规则必然漂移，且每次按键全量扫描会瞬间制造海量无意义报错与接口雪崩，研发会在一天内卸载插件。"
+                },
+                {
+                  "label": "只写一个 LSP 进程，但每次保存强制在用户本机后台拉起完整 mvn dependency:tree / gradle dependencies",
+                  "status": "warning",
+                  "verdictTitle": "本地拉起完整构建动辄耗时十余秒并锁死本地缓存",
+                  "feedback": "全量构建解析只适合 CI/沙箱，放进 IDE 热路径会抢占开发者本地 CPU/内存甚至污染 IDE 自己的 Gradle 守护进程。"
+                }
+              ]
+            },
+            {
+              "name": "PR / MR 门禁阻断标准与 Base 分支快照缺失时的处理逻辑",
+              "layer": "触点 2 · PR 增量门禁",
+              "context": "某历史老仓自带 60 个存量旧漏洞；新 PR 引入了 1 个新漏洞，而此时 main 分支 merge-base 的 CI 快照刚好尚未入库。",
+              "options": [
+                {
+                  "label": "不管有没有 Base 快照，直接把当前分支扫出的全部 61 个漏洞列为阻断项，逼着开发把旧债顺手清完",
+                  "status": "critical",
+                  "verdictTitle": "引发全公司业务开发抵制，最终导致安全门禁被管理层强行关闭",
+                  "feedback": "让改一行文案的开发者背锅修复 60 个陈年老包在现实组织中完全不可行，这是商业 SCA 落地最常见的翻车原因。"
+                },
+                {
+                  "label": "发现 Base 快照缺失时直接返回绿色通过（Fail-Open），并在日志里打印一行警告",
+                  "status": "critical",
+                  "verdictTitle": "形成可被利用的安全绕过旁路，新引入的高危组件长驱直入主干",
+                  "feedback": "如果主干排队或新项目首开 PR 就直接放行，PR 门禁等于在最脆弱的冷启动阶段完全失效。"
+                },
+                {
+                  "label": "优先查已入库的 G_base；缺失时同步抽取 merge-base 清单跑 Tier 1 静态解析生成临时基线，仅阻断净新增漏洞与作用域提权",
+                  "status": "optimal",
+                  "verdictTitle": "零老债噪音且在基线缺失时守住“不放行净新增风险”底线",
+                  "feedback": "满分平衡术！既保证老项目平滑接入、几秒出结果，又防止基线缺失漏洞绕过并能揪出 test->runtime 作用域提权。"
+                }
+              ]
+            },
+            {
+              "name": "高并发 CI 接入 Monorepo（120 个微服务）的去重与带宽优化",
+              "layer": "触点 3 · CI 流水线",
+              "context": "研发每日提交上千次 Commit，每次改动平均只涉及 1–2 个子服务或纯业务代码文件。",
+              "options": [
+                {
+                  "label": "CI 上传前先计算归一化依赖输入哈希与环境指纹做 CAS 探针，命中则秒级指针重绑定跳过重算，仅对变更模块跑解析",
+                  "status": "optimal",
+                  "verdictTitle": "节省 90%+ CI 构建算力与图谱写入 IOPS，同时保持 Commit 审计链完整",
+                  "feedback": "Content-Addressable Skip-Scan 是应对 Monorepo 与高频空提交的杀手锏，既省钱提速又让每个 Commit 都有准确快照指向。"
+                },
+                {
+                  "label": "在 CI 脚本里简单用 git diff 只看上一条 Commit，如果锁文件没改就不向服务端上报任何记录",
+                  "status": "warning",
+                  "verdictTitle": "平台台账会出现大量缺失 Commit 指针的断点，无法追溯发布版本",
+                  "feedback": "只跳过而不给服务端发一条轻量 Pointer Rebind 记录，会导致后续按 release commit 或 tag 溯源时查不到对应快照。"
+                },
+                {
+                  "label": "为了绝对保险，每次 CI 触发强制关闭缓存对全部 120 个服务重新运行 ORT 并上传 120 份完整 BOM",
+                  "status": "critical",
+                  "verdictTitle": "CI Runner 严重排队堵塞且数据库充斥 98% 完全重复的边数据",
+                  "feedback": "无差别重复跑构建解析会在几个月内把集群算力与 PostgreSQL 存储成本推高一个数量级。"
+                }
+              ]
+            },
+            {
+              "name": "服务端高并发入库与漏洞匹配吞吐解耦架构（参考 Hyades v5）",
+              "layer": "触点 4 · 平台底座架构",
+              "context": "客户早晚高峰每小时推入数万份 CycloneDX BOM，同时安全人员也在白天下发规则更新或调 API 查看板。",
+              "options": [
+                {
+                  "label": "模仿旧版单体架构，在无状态 API Server 进程内存里用线程池排队处理上传 BOM、解析图谱和匹配全部 CVE",
+                  "status": "critical",
+                  "verdictTitle": "BOM 浪涌瞬间打爆 API 进程内存（OOM），同时拖拽前端交互界面卡死",
+                  "feedback": "这正是 Dependency-Track v4 演进为 v5 (Hyades) 重点解决的历史包袱：绝不能把重计算任务留在在线网关进程内。"
+                },
+                {
+                  "label": "采用无状态 API 网关 + Kafka 按优先级隔离快慢通道（PR 交互高优 vs 批量重算低优）+ 独立可水平扩展的分析 Worker",
+                  "status": "optimal",
+                  "verdictTitle": "读写分离、削峰填谷且天然支持 K8s Active-Active 高可用",
+                  "feedback": "稳健的生产级架构！白天哪怕后台在消化大型批量任务，PR 门禁的高优车道也能稳定保证在十秒级返回结果。"
+                },
+                {
+                  "label": "引入 Kafka 做队列缓冲，但所有业务只混用一个单分区 Topic，让 PR 门禁和大批量历史重算排队等同一消费线程",
+                  "status": "warning",
+                  "verdictTitle": "批量积压时会出现“队头阻塞”，PR 门禁延迟飙升至数十分钟",
+                  "feedback": "混用单队列无法隔离突发流量。按场景拆出高优实时 Topic 与低优批量 Topic 是起码的 SLA 隔离原则。"
+                }
+              ]
+            },
+            {
+              "name": "凌晨 0-Day 漏洞入库后的全企影响面刷新与快照存储治理",
+              "layer": "触点 4 · 一次采集持续重算",
+              "context": "平台累计保存了 30 万份历史快照（其中 85% 是已关闭的功能分支/陈旧 PR），此时一条高危 CVE 刚同步进 Layer 3。",
+              "options": [
+                {
+                  "label": "情报更新后触发后台任务重新 git clone 全部活跃仓库并拉起沙箱重跑一遍全量扫描",
+                  "status": "critical",
+                  "verdictTitle": "重拉源码压垮内网 Git 服务，0-day 响应退化成数小时灾难",
+                  "feedback": "Layer 2 IR 已经持久化了完整的依赖图与 PURL，再回过头重拉源码是最典型的资源浪费与架构返祖。"
+                },
+                {
+                  "label": "按 PURL 倒排索引反查受影响组件，再过滤出活跃主干/生产部署快照异步重算；过期临时分支按 TTL 归档冷存",
+                  "status": "optimal",
+                  "verdictTitle": "零源码拉取分钟级定位全企生产影响面，且数据库体积恒定可控",
+                  "feedback": "这才是“Collect Once, Evaluate Continuously”的完全体：靠倒排索引直击靶心，靠冷热分层保住数据库长期性能。"
+                },
+                {
+                  "label": "使用 PURL 倒排索引免克隆重算，但从不归档或区分已关闭 PR 快照，每次 0-day 都重算历史全库 30 万份快照",
+                  "status": "warning",
+                  "verdictTitle": "85% 以上算力白白消耗在半年前已废弃的临时分支上",
+                  "feedback": "虽然省去了克隆代码，但不做活跃窗口过滤和冷热归档会让重算延迟随时间线性恶化，并且制造大量无效告警噪音。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道高频架构设计题覆盖 <strong>IDE LSP 缓存触发、PR 净新增基线缺失、Monorepo CAS 去重与 Hyades 双触发持续重算</strong>。<strong>先凭记忆独立作答，再查看解析。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0006 · 多触点采集架构与持续重算回忆测验",
+          "intro": "重点检验跨触点延迟控制、Diff 边界容错与服务端事件流持续重算。",
+          "questions": [
+            {
+              "prompt": "在设计类似 snyk-ls 的商业 SCA IDE 语言服务器（LSP）时，开发者每敲击一个字符修改 package.json，界面就出现明显卡顿并瞬间打满后端漏洞接口配额。按照低延迟本地架构原则，最合理的修复方案是？",
+              "options": [
+                "维持每次按键实时扫描策略，并把全量构建与服务端远程查询全部改为同步阻塞调用。",
+                "改在打开与保存文件时防抖触发本地静态提取，结合路径摘要缓存只增量查询变更包。",
+                "彻底移除编辑器内部所有实时漏洞诊断能力，强制要求开发者每次提交后去网页查看。",
+                "在各个编辑器客户端分别用不同语言重写一套规则引擎，绕过公共协议直连核心后端。"
+              ],
+              "answerIndex": 1,
+              "explanation": "LSP 架构（如 snyk/snyk-ls）应作为统一的本地后台进程承接所有编辑器 UI，并将扫描绑定在 didOpen 与 didSave（结合文件 SHA 防抖），在本地执行轻量静态提取并缓存未变化的 PURL 诊断结果，仅把新增/变动的少量 PURL 差量查询服务端，才能兼顾亚秒级体验与接口保护（B 正确）。"
+            },
+            {
+              "prompt": "在配置 PR 门禁增量对比（Dependency Diff）时，某仓库存在 80 个历史遗留漏洞，且目标主干分支在 merge-base 提交尚未留存 CI 扫描快照。此时如果开发者开了一个仅修改 README 的 PR，哪种工程处理策略完全正确？",
+              "options": [
+                "因为缺少主干基线快照就直接按空基线处理，把历史全部八十个旧漏洞全部算作本次净新增并阻断。",
+                "只要遇到主干分支历史快照缺失的情况就直接默认放行，跳过本次合并请求的全部合规与安全门禁。",
+                "立即在门禁节点同步拉起完整镜像构建并扫描全量历史提交，要求当前开发者先修完旧债才能合入。",
+                "同步对基线提交的清单文件执行轻量静态提取生成临时基线，仅拦截当前分支净新增的漏洞与协议。"
+              ],
+              "answerIndex": 3,
+              "explanation": "当 merge-base 的权威快照因队列延迟或首次接入缺失时：当成空基线会拿 80 个历史债务错杀无关 PR（排除 A）；直接 Fail-Open 跳过会产生安全绕过洞（排除 B）；在 PR 节点重跑全量构建会超时卡死（排除 C）。正解是按 merge-base 提交抽取清单跑快速 Tier 1 静态基线兜底后再算净新增差集（D 正确）。"
+            },
+            {
+              "prompt": "某大型企业拥有包含 120 个微服务的 Monorepo，每次只修改前端文案提交代码都会在 CI 触发 120 次 ORT/cdxgen 全量依赖解析，导致流水线排队超过 20 分钟。要消除冗余解析并同时保留每个提交的审计追溯链，应采用什么机制？",
+              "options": [
+                "以归一化锁文件哈希与构建环境指纹作内容寻址键，命中缓存则跳过解析仅把提交指针绑至旧快照。",
+                "直接关闭所有合并进主干前后的自动化采集任务，改为每季度末由人工抽取代表服务执行抽样检查。",
+                "为每个微服务单独部署一套独立的漏洞库副本，并将所有微服务的依赖关系强制降级为仅扫根清单。",
+                "完全忽略提交哈希与分支指针的映射关系，只要发现锁文件未改就直接丢弃这次构建全部审计记录。"
+              ],
+              "answerIndex": 0,
+              "explanation": "通过内容寻址去重（CAS）：CI 先为每个服务计算归一化清单/锁文件哈希 + 构建环境指纹 + 提取器版本，在服务端探针命中历史快照时即可跳过耗时的 Layer 1 构建解析与巨型 BOM 上传，但必须插入一条轻量 commit_sha -> snapshot_id 绑定记录以保持版本审计溯源完整（A 正确）。"
+            },
+            {
+              "prompt": "凌晨两点，OSV/GHSA 新披露了一个影响 log4j-core 的严重 0-day。平台目前托管了 3 万个微服务的依赖图谱快照，其中包含大量半年前已关闭的废弃 PR 快照。参考 Dependency-Track v5（Hyades）架构，平台如何在数分钟内精准预警全企生产影响面？",
+              "options": [
+                "立即在后台调度上千台临时机器重新克隆全部三万个代码仓库，从源码开始逐一重跑完整构建解析。",
+                "严格等待次日凌晨例行全量定时任务触发时再把所有历史快照逐条全盘比对，期间暂不发任何告警。",
+                "由情报更新事件触发漏洞分析器按组件索引反查，仅针对活跃主干与运行态快照执行异步并发重算。",
+                "将所有历史废弃分支与当前生产分支全部混在一起同步阻塞重算，直接锁死在线网关与数据库写入。"
+              ],
+              "answerIndex": 2,
+              "explanation": "这正是“一次采集、持续重算”与 Hyades 事件驱动微服务的威力所在：情报入库直接发事件给独立的 vuln-analyzer，通过已持久化的 Layer 2 组件 PURL 倒排索引反查受影响节点（无需重拉源码或重解镜像），同时用活跃分支/生产运行态过滤剪除历史僵尸 PR 快照，在低优批量 Topic 中几分钟内完成预警（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地 IDE、PR 门禁与服务端事件流引擎时，建议精读以下商用合规开源项目的核心架构文档与仓库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/DependencyTrack/hyades" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5 (Project Hyades)</strong></a>（Apache-2.0）&amp; <a href="https://docs.dependencytrack.org/" target="_blank" rel="noopener">官方文档</a>：从 v4 单体内存队列到 Kafka + 微服务“一次采集、持续重算”的经典演进。</li>
+          <li><a href="https://github.com/snyk/snyk-ls" target="_blank" rel="noopener"><strong>Snyk Language Server (<code>snyk/snyk-ls</code>)</strong></a>（Apache-2.0）：IDE 单一 LSP BFF 内核、<code>didSave</code> 防抖触发与本地诊断缓存范式。</li>
+          <li><a href="https://github.com/actions/dependency-review-action" target="_blank" rel="noopener"><strong>GitHub <code>dependency-review-action</code></strong></a>（MIT）&amp; <a href="https://docs.github.com/en/rest/dependency-graph/dependency-submission" target="_blank" rel="noopener"><strong>Dependency Submission API</strong></a>：基于 Snapshot SHA 的 PR 增量依赖图差设计与缺失基线容错逻辑。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>至此 <strong>Chapter 02（Layer 1 多语言与全形态采集提取引擎）全部 4 课已圆满收官</strong>！带着你的疑问或思考回到对话中：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“如果我们要在自研平台里实现 PR 增量 Diff，如何与 GitLab MR Webhook 和私有 GitHub Enterprise 的 Commit Status / Check Run API 对接？”</li>
+          <li>“冷热快照分离时，如果合规部门突发要求追溯半年前某个已归档 Feature 分支是否中过某个老 CVE，按需恢复机制怎么设计？”</li>
+          <li>“我已吃透 Chapter 02 采集底座全貌，准备进入 <strong>Chapter 03 · Lesson 0007（OSV Schema 与多源漏洞汇聚去重架构）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0005-container-image-os-and-artifact-extraction.html">← 上一课：Lesson 0005 · 镜像与制品采集</a>
+      <a href="../reference/layer1-resolution-and-extractor-matrix.html">配套速查卡：Ref 03 · CH 02 全套速查矩阵</a>
+      <a href="../index.html">返回课程总览 · 下一章 Lesson 0007（OSV 多源漏洞汇聚） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/touchpoint-pipeline-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

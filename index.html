@@ -12,7 +12,7 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="./index.html" class="active">课程首页 · 全局路线图</a>
-        <a href="./lessons/0005-container-image-os-and-artifact-extraction.html">当前课程 · Lesson 0005</a>
+        <a href="./lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">当前课程 · Lesson 0006</a>
         <a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
         <a href="./reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 字典</a>
         <a href="./reference/sca-oss-landscape-and-4layer-map.html">Ref 01 · 四层与协议矩阵</a>
@@ -33,8 +33,8 @@
       <div class="hero-stats">
         <div class="stat-card">
           <div class="stat-label">课程进度</div>
-          <div class="stat-value">5 / 22 课</div>
-          <div class="stat-sub">已发布 5 课 · 下一课 0006</div>
+          <div class="stat-value">6 / 22 课</div>
+          <div class="stat-sub">已发布 6 课 · 下一课 0007</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">当前主攻阶段</div>
@@ -54,7 +54,7 @@
       </div>
 
       <div class="hero-actions">
-        <a class="btn-link-primary" href="./lessons/0005-container-image-os-and-artifact-extraction.html">进入当前课程：Lesson 0005 →</a>
+        <a class="btn-link-primary" href="./lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">进入当前课程：Lesson 0006 →</a>
         <a class="btn-link-secondary" href="./reference/layer1-resolution-and-extractor-matrix.html">打开最新速查卡：Ref 03 提取器与解析矩阵</a>
       </div>
     </header>
@@ -221,19 +221,21 @@
           </div>
         </li>
 
-        <li class="lesson-row is-next" data-phase="p1" data-layer="L1,SYS" data-status="next">
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L1,SYS" data-status="ready">
           <div class="lesson-num">0006</div>
           <div>
-            <div class="lesson-main-title">高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</div>
-            <p class="lesson-desc">打通开发者本地、PR 增量 Diff 扫描、CI 缓存加速与服务端“一次采集、持续重算”事件流水线（深度借鉴 OWASP Dependency-Track 与 Snyk 工作流架构）。</p>
+            <div class="lesson-main-title">
+              <a href="./lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</a>
+            </div>
+            <p class="lesson-desc">打通开发者本地（LSP）、PR 增量 Diff 扫描（含基线缺失兜底）、Monorepo CAS 去重与服务端“一次采集、持续重算”事件流水线（深度借鉴 Dependency-Track v5 Hyades 与 Snyk <code>snyk-ls</code>）。</p>
             <div class="lesson-tags">
               <span class="tag-chip">L1 + 全局</span>
-              <span class="tag-chip">Dependency-Track · 增量 Diff</span>
+              <span class="tag-chip">Hyades v5 · snyk-ls · CAS 去重</span>
               <span class="tag-chip">多触点体验</span>
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="badge badge-ok">已发布 · 可学习</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>
@@ -250,7 +252,7 @@
         <span class="badge badge-warn">4 课 · L3 情报</span>
       </div>
       <ul class="lesson-list">
-        <li class="lesson-row" data-phase="p1" data-layer="L3" data-status="planned">
+        <li class="lesson-row is-next" data-phase="p1" data-layer="L3" data-status="next">
           <div class="lesson-num">0007</div>
           <div>
             <div class="lesson-main-title">OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）</div>
@@ -262,7 +264,7 @@
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-blue">规划中</span>
+            <span class="badge badge-build">下一课 · ZPD</span>
             <span class="lesson-duration">~20 min</span>
           </div>
         </li>
@@ -597,7 +599,7 @@
           <div>
             <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
             <h4><a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 多语言依赖解析陷阱与开源提取器能力矩阵</a></h4>
-            <p style="margin-top:0.35rem;">Maven/Gradle/npm/PyPI/Go/Rust 解析边界对比与 OSV-SCALIBR / Syft / cdxgen / ORT 选型路由与融合铁律。</p>
+            <p style="margin-top:0.35rem;">覆盖 CH 02 全 4 课精华：6 大生态解析、四大引擎接口融合、OCI/OS/二进制制品提取、及四大触点延迟预算与持续重算矩阵。</p>
           </div>
           <div style="font-size:0.8rem;"><a href="./reference/layer1-resolution-and-extractor-matrix.html">打开速查卡 →</a></div>
         </div>
@@ -615,7 +617,7 @@
 
     <footer class="lesson-end-nav">
       <span>工作区指南：可在对话中随时输入 <code>/teach</code> 继续下一课、点播任意章节，或调整学习目标</span>
-      <a href="./lessons/0005-container-image-os-and-artifact-extraction.html">开始 / 继续 Lesson 0005 →</a>
+      <a href="./lessons/0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">开始 / 继续 Lesson 0006 →</a>
     </footer>
   </main>
 
