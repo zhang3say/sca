@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查参考 03：多语言依赖解析陷阱与开源提取器能力矩阵</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="../lessons/0003-source-dependency-resolution-traps.html">Lesson 0003 · 源码解析真相</a>
+        <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004 · 开源提取底座拆解</a>
+        <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">Lesson 0005 · 镜像与制品采集</a>
+        <a href="./layer1-resolution-and-extractor-matrix.html" class="active">Ref 03 · 解析与提取器矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>REFERENCE CARD 03</span>
+        <span class="sep">/</span>
+        <span>PRINT-READY LAYER 1 CHEAT SHEET</span>
+      </div>
+      <h1>多语言依赖解析陷阱与开源提取器能力矩阵</h1>
+      <p class="subtitle">供 Layer 1 采集路由设计、RFC 评审与反腐败适配器（ACL）开发时随时翻阅：覆盖 6 大生态裁决规则、四大 Apache-2.0 底座源码级接口、场景选型路由与多源置信度融合铁律。</p>
+      <div class="meta-strip">
+        <span><strong>适用范围：</strong>商业闭源 SCA 平台 Layer 1 采集引擎</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0003-source-dependency-resolution-traps.html">Lesson 0003</a> · <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> · <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a></span>
+      </div>
+    </header>
+
+    <!-- SECTION 1: 6 ECOSYSTEM RESOLUTION TRAPS -->
+    <section class="full-width">
+      <h2 style="margin-top:0;"><span class="sec-num">01</span>主流 6 大生态源码依赖解析规则与头号暗坑速查表</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:14%" />
+            <col style="width:19%" />
+            <col style="width:24%" />
+            <col style="width:15%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>语言生态</th>
+              <th>清单 vs 确定性锁/真源</th>
+              <th>冲突裁决算法</th>
+              <th>共存语义</th>
+              <th>头号红线暗坑与 Layer 1 铁律</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Java · Maven</strong></td>
+              <td><code>pom.xml</code>（无锁；靠 Effective POM / <code>dependency:tree</code>）</td>
+              <td><strong>Nearest Definition</strong>（最短路径优先）+ 同深 First Declaration；<code>dependencyManagement</code> / BOM 优先级最高。</td>
+              <td>单版本（同一 Classpath 仅存 1 份）</td>
+              <td>严禁用版本号大小猜结果；不展开父 POM <code>${var}</code> 与 <code>&lt;scope&gt;import&lt;/scope&gt;</code> BOM 必算错版本。</td>
+            </tr>
+            <tr>
+              <td><strong>Java/Kotlin · Gradle</strong></td>
+              <td><code>build.gradle(.kts)</code> / <code>libs.versions.toml</code> + 可选 <code>gradle.lockfile</code></td>
+              <td>默认 <strong>Highest Version Wins</strong>；支持 <code>strictly</code>/约束干预；按 Configuration 独立求解。</td>
+              <td>单版本（按 Configuration 隔离）</td>
+              <td>与 Maven 规则完全相反；无锁动态范围（<code>31.+</code>）与图灵完备 DSL 只能靠 CI Hook/ORT/沙箱还原。</td>
+            </tr>
+            <tr>
+              <td><strong>JS/TS · npm / pnpm</strong></td>
+              <td><code>package.json</code> + <code>package-lock.json</code> v3 / <code>pnpm-lock.yaml</code></td>
+              <td>子树嵌套共存；npm 做 <strong>Hoisting 提升</strong>；pnpm 用 <code>importers</code> + <code>snapshots</code> 软链隔离。</td>
+              <td><strong>多版本合法共存</strong>（按路径区分实例）</td>
+              <td>必须在 L2 IR 按 <code>install_subpath</code> 保留独立 <code>bom-ref</code>；警惕 npm 幽灵依赖与 Monorepo <code>workspace:*</code>。</td>
+            </tr>
+            <tr>
+              <td><strong>Python · PyPI / uv</strong></td>
+              <td><code>pyproject.toml</code> / <code>requirements.txt</code> + <code>uv.lock</code> / <code>poetry.lock</code> / <code>pylock.toml</code></td>
+              <td>PubGrub/回溯求解器；通用锁文件附带 <strong>PEP 508 Environment Markers</strong> 条件分支。</td>
+              <td>单版本（同一 Python 环境仅存 1 份）</td>
+              <td>不求值 Markers 会爆跨平台误报；<strong>严禁在工作节点裸跑 <code>setup.py</code></strong>（解析元数据即触发 RCE）。</td>
+            </tr>
+            <tr>
+              <td><strong>Go · Modules</strong></td>
+              <td><code>go.mod</code>（真源）+ <code>vendor/modules.txt</code>（注：<code>go.sum</code> 非锁）</td>
+              <td><strong>MVS（Minimal Version Selection）</strong>：取满足全部上游下界的最低版本，不自动升最新。</td>
+              <td>主版本独立（<code>/v2</code> 视为不同包名）</td>
+              <td><strong><code>go.sum</code> 是 append-only 校验日志！</strong>拿 <code>go.sum</code> 当锁文件必爆大规模 Ghost CVE 误报。</td>
+            </tr>
+            <tr>
+              <td><strong>Rust · Cargo</strong></td>
+              <td><code>Cargo.toml</code> + <code>Cargo.lock</code>（官方确定性锁文件）</td>
+              <td>SemVer 兼容范围内尽量共享新版，不兼容主/零号次版本（<code>0.x</code>）可并存；支持 Feature 条件剪枝。</td>
+              <td>不兼容版本可多版本并存</td>
+              <td>二进制优先用 <code>Cargo.lock</code>（应用）或 <code>cargo-auditable</code> 嵌入段；注意平台/Feature 开关引入的条件依赖。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 2: 4 OSS EXTRACTORS ARCHITECTURE MATRIX -->
+    <section class="full-width">
+      <h2><span class="sec-num">02</span>四大 Apache-2.0 提取引擎源码级接口与能力矩阵</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:15%" />
+            <col style="width:12%" />
+            <col style="width:24%" />
+            <col style="width:19%" />
+            <col style="width:15%" />
+            <col style="width:15%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>引擎名称与链接</th>
+              <th>协议与语言</th>
+              <th>核心源码接口 / 输出模型</th>
+              <th>集成形态与泳道</th>
+              <th>安全 RCE 风险面</th>
+              <th>断网私有化表现</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener"><strong>OSV-SCALIBR</strong></a></td>
+              <td><code>Apache-2.0</code><br/>Go 库</td>
+              <td><code>FilesystemExtractor</code> (<code>FileRequired</code>/<code>Extract</code>)、<code>StandaloneExtractor</code>、<code>Enricher</code> (<code>transitivedependency/*</code>)、<code>plugin.Capabilities</code></td>
+              <td><strong>泳道 A</strong>：Go 进程内库级嵌入（零子进程）</td>
+              <td><strong>极低</strong>（纯数据读取 + 可选只读 HTTP API）</td>
+              <td><strong>极佳</strong>（<code>FilterByCapabilities</code> 一键摘除在线插件）</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/anchore/syft" target="_blank" rel="noopener"><strong>Anchore Syft</strong></a></td>
+              <td><code>Apache-2.0</code><br/>Go 库 / CLI</td>
+              <td><code>syft.GetSource</code> → <code>syft.CreateSBOM</code> → <code>*sbom.SBOM</code> (<code>pkg.Cataloger</code> / <code>artifact.Relationship</code> / <code>SquashedScope</code> vs <code>AllLayersScope</code>)</td>
+              <td><strong>泳道 A</strong>：Go 进程内库级嵌入</td>
+              <td><strong>极低</strong>（默认静态纯数据提取）</td>
+              <td><strong>极佳</strong>（全本地文件与镜像层解析）</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener"><strong>OWASP cdxgen</strong></a></td>
+              <td><code>Apache-2.0</code><br/>Node.js CLI/Server</td>
+              <td><code>createBom(path, opts)</code>、<code>--lifecycle pre-build|build</code>、<code>--deep</code> / <code>evinse</code>、<code>internal:workspaceRef</code>、CycloneDX 1.7 (<code>evidence</code>/<code>citations</code>/ML-BOM)</td>
+              <td><strong>泳道 B</strong>：沙箱外挂适配 / 长尾与 AI-BOM 专职</td>
+              <td><strong>高危</strong>（默认 <code>build</code> 触发构建执行 CVE-2024-50611，旧版 Maven 路径有 GHSA-5vwr-qchf-q4pf；静态扫加 <code>--lifecycle pre-build</code> 或 <code>CDXGEN_SECURE_MODE=true</code>）</td>
+              <td><strong>良</strong>（<code>pre-build</code> 全离线；<code>build</code> 需内网私服）</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener"><strong>ORT Analyzer</strong></a></td>
+              <td><code>Apache-2.0</code><br/>Kotlin JVM</td>
+              <td><code>Analyzer</code> → <code>PackageManager</code> (<code>GradleInspector</code>/Maven) → 全局去重 <code>DependencyGraph</code> (精准 <code>Scope</code>) → <code>OrtResult</code>（默认 <code>allowDynamicVersions=false</code>）</td>
+              <td><strong>泳道 B</strong>：客户 CI Hook 或异步隔离深度通道</td>
+              <td><strong>高</strong>（调用原生包管理器构建/解析，须沙箱或客户 CI 运行）</td>
+              <td><strong>良</strong>（随客户内网 CI 私服无外网依赖）</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 3: ROUTING DECISION TABLE -->
+    <section class="full-width">
+      <h2><span class="sec-num">03</span>按资产形态与交付场景的 Layer 1 引擎路由决策表</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:21%" />
+            <col style="width:20%" />
+            <col style="width:22%" />
+            <col style="width:20%" />
+            <col style="width:17%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>目标资产与扫描场景</th>
+              <th>首选主力引擎</th>
+              <th>补强 / 兜底方案</th>
+              <th>强制安全与性能约束</th>
+              <th>预期 Tier &amp; 置信度</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>带锁文件常规源码仓</strong><br/>(<code>package-lock</code>/<code>uv.lock</code>/<code>Cargo.lock</code>/<code>go.mod</code>)</td>
+              <td><strong>OSV-SCALIBR</strong>（Go 进程内）</td>
+              <td>JS Monorepo 可用 <code>cdxgen --lifecycle pre-build --no-install-deps</code> 补 <code>workspaceRef</code></td>
+              <td>零外部构建；Python 必须执行 PEP 508 Markers 剪枝</td>
+              <td><strong>Tier 1</strong><br/><code>0.90 – 0.93</code></td>
+            </tr>
+            <tr>
+              <td><strong>无锁 Java/Maven 多模块</strong><br/>(含父 POM / Spring BOM)</td>
+              <td><strong>OSV-SCALIBR</strong> (<code>pomxmlnet</code> 虚拟求解)</td>
+              <td>断网或自定义插件复杂仓 → 客户 CI Hook 跑 <strong>ORT / Maven</strong></td>
+              <td>SaaS/私有私服仅授 <strong>只读权限</strong>；平台构建须进 gVisor/Firecracker+Proxy</td>
+              <td><strong>Tier 2 / Tier 3</strong><br/><code>0.82 – 0.96</code></td>
+            </tr>
+            <tr>
+              <td><strong>复杂 Gradle 动态版本 &amp; 企业级合规审计</strong></td>
+              <td><strong>ORT Analyzer</strong>（CI Hook 触发）</td>
+              <td>如有 <code>gradle.lockfile</code> 可先走泳道 A 快速提取</td>
+              <td>严禁放入 IDE 同步热路径；平台侧运行必须进强隔离沙箱</td>
+              <td><strong>Tier 3</strong><br/><code>0.95 – 0.96</code></td>
+            </tr>
+            <tr>
+              <td><strong>OCI 容器镜像 &amp; 构建产物</strong><br/>(Fat-JAR / 二进制 / OS)</td>
+              <td><strong>Anchore Syft</strong> (<code>SquashedScope</code>) + <strong>OSV-SCALIBR</strong></td>
+              <td>如需审计删除层历史残留，单独留存 <code>AllLayersScope</code> 审计标签</td>
+              <td><code>deb/rpm</code> 绝不可剥离 <code>distro</code>；默认告警仅基于最终运行层</td>
+              <td><strong>Tier 4</strong><br/><code>0.96 – 0.98</code></td>
+            </tr>
+            <tr>
+              <td><strong>政企完全断网私有化部署</strong></td>
+              <td><strong>OSV-SCALIBR</strong> (<code>NetworkOffline</code>) + <strong>Syft</strong></td>
+              <td>无锁构建全靠客户内网 CI Hook 回传 <code>cdxgen</code> / <code>ORT</code> 产物</td>
+              <td><code>FilterByCapabilities</code> 强制剔除公网 Enricher，确保零外联超时</td>
+              <td><strong>Tier 1 / 3 / 4</strong><br/><code>0.90 – 0.98</code></td>
+            </tr>
+            <tr>
+              <td><strong>AI-BOM（大模型权重 / 数据集 / 推理框架）</strong></td>
+              <td><strong>OWASP cdxgen</strong> (<code>pre-build</code> ML-BOM 模式)</td>
+              <td>自研 HuggingFace / Safetensors / Pickle 扫描插件（Phase 2 Ch 05）</td>
+              <td>反序列化严禁直接 <code>pickle.load</code>，仅做静态操作码检查</td>
+              <td><strong>Tier 1 / 扩展</strong><br/><code>0.90+</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 4: FUSION RULES -->
+    <section class="full-width">
+      <h2><span class="sec-num">04</span>ACL 反腐败契约与多提取器置信度融合 4 条铁律</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>1. ACL 翻译边界：绝不泄漏第三方私有结构</h4>
+          <p>Syft <code>*sbom.SBOM</code>、OSV-SCALIBR <code>Inventory</code>、cdxgen JSON 与 ORT <code>OrtResult</code> 必须在 Layer 1 出口经无状态适配器统一转化为内部 <code>RawExtractionEnvelope</code>，并穿越 <code>Canonicalizer</code> 后再进入融合引擎。</p>
+        </div>
+        <div class="card">
+          <h4>2. 单版本生态：高阶覆写低阶（Supersede）</h4>
+          <p>Java / Python / Go 等单版本作用域内，同一 <code>(project_root, base_purl)</code> 按 <code>Tier 4 (0.98) ≈ Tier 3 (0.95) &gt; Tier 1 (0.92) &gt; Tier 2 (0.82) &gt; Tier 0 (0.45)</code> 裁决；低阶猜测标记 <code>superseded</code> 记入 CycloneDX 1.7 <code>citations[]</code>，绝不并存。</p>
+        </div>
+        <div class="card">
+          <h4>3. 多版本生态：按 <code>(purl, install_subpath)</code> 分治</h4>
+          <p>npm / pnpm 允许嵌套多版本合法共存。只有完整 PURL 与安装子路径均一致时才合并证据；不同路径实例在 Layer 2 IR 保持独立 <code>snapshot_nodes (bom-ref)</code>，防止漏洞版本被根路径版本吞掉。</p>
+        </div>
+        <div class="card">
+          <h4>4. 异构资产域：互补并集 + 最细边富化</h4>
+          <p>OS 包（<code>deb/rpm</code>）、语言应用包（<code>pypi/maven/npm</code>）与 AI 模型属互补域，执行并集；同一节点被多高阶引擎同时命中时，保留最精细的带 <code>Scope</code> 有向边（如 ORT <code>runtime</code>/<code>test</code>）并合并 <code>occurrences[]</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 5: OCI LAYERS, OS PACKAGES & BINARY ARTIFACTS -->
+    <section class="full-width">
+      <h2><span class="sec-num">05</span>容器镜像分层、OS 包数据库与编译制品提取速查表（Lesson 0005）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:17%" />
+            <col style="width:27%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>目标对象 / 生态</th>
+              <th>核心存储路径 / 专用链接器段</th>
+              <th>用户态提取底座与关键字段映射</th>
+              <th>头号盲区与防 DoS 红线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>OCI 容器分层树</strong></td>
+              <td><code>manifest.json</code> → <code>diff_ids</code> → <code>layer.tar.gz</code>；<code>.wh.&lt;file&gt;</code> 与 <code>.wh..wh..opq</code></td>
+              <td><a href="https://github.com/anchore/stereoscope" target="_blank" rel="noopener"><code>stereoscope</code></a> (Apache-2.0) 用户态内存 VFS 合成 <code>SquashedScope</code>；历史删除层仅归档审计。</td>
+              <td>严禁 <code>docker exec</code> 与宿主机内核 <code>mount -t overlay</code>；默认告警严禁扫无隔离的 <code>AllLayers</code>。</td>
+            </tr>
+            <tr>
+              <td><strong>Debian / Distroless / Alpine</strong></td>
+              <td><code>/var/lib/dpkg/status</code>、<code>status.d/*</code>、<code>/lib/apk/db/installed</code>、<code>os-release</code></td>
+              <td>过滤 <code>installed</code> 状态；必抓 <code>Source</code>（deb）与 <code>o:</code> origin（apk）写入 PURL <code>upstream</code>，<code>os-release</code> 写入 <code>distro</code>。</td>
+              <td>Distroless 无 <code>/var/lib/dpkg/status</code> 总表且无 shell；丢弃 <code>upstream</code> 或 <code>distro</code> 将直接击穿 L3 Backport 匹配。</td>
+            </tr>
+            <tr>
+              <td><strong>RHEL / Fedora / SUSE RPM</strong></td>
+              <td><code>/var/lib/rpm</code>、<code>/usr/lib/sysimage/rpm</code>（<code>Packages</code> / <code>Packages.db</code> / <code>rpmdb.sqlite</code>）</td>
+              <td><a href="https://github.com/knqyf263/go-rpmdb" target="_blank" rel="noopener"><code>go-rpmdb</code></a>（MIT，纯 Go 零 CGO）自动识别 BDB/NDB/SQLite 三代 DB 并提取 <code>SourceRPM</code>。</td>
+              <td>RHEL 9+ 弃用 BDB 改用 <code>rpmdb.sqlite</code>；禁止 Worker 通过 CGO 硬绑宿主机 <code>librpm.so</code>。</td>
+            </tr>
+            <tr>
+              <td><strong>Java JAR / Fat-JAR / Shade</strong></td>
+              <td><code>BOOT-INF/lib/*.jar</code>、<code>META-INF/maven/**/pom.properties</code></td>
+              <td>受限内存流式递归提取 nested JAR；Shade Uber-JAR 结合字节码指纹提示与 CI 前置 Tier 3 BOM 按 SHA-256 融合。</td>
+              <td>防 Zip Bomb 必须强制设最大递归深度 + <code>io.LimitReader</code> + ZipSlip <code>../</code> 过滤；Shade 会重定位类路径并剥离元数据。</td>
+            </tr>
+            <tr>
+              <td><strong>Go &amp; Rust 编译二进制</strong></td>
+              <td>Go <code>.go.buildinfo</code>（<code>debug/buildinfo</code>）<br/>Rust <code>.dep-v0</code>（zlib JSON）</td>
+              <td>Go 必须由 <code>GoVersion</code> 生成 <code>pkg:golang/stdlib</code> 且优先采纳 <code>replace</code>；Rust 推广 <code>cargo-auditable</code> 嵌入 <code>.dep-v0</code>。</td>
+              <td><code>go build -ldflags="-s -w"</code> 剥不掉 <code>.go.buildinfo</code>，但默认 <code>cargo build --release</code> 会丢失全部依赖树。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav no-print">
+      <a href="../lessons/0004-oss-extractors-architecture-and-orchestration.html">← 返回 Lesson 0004</a>
+      <a href="../lessons/0005-container-image-os-and-artifact-extraction.html">返回 Lesson 0005 · 镜像与制品采集</a>
+      <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
+    </footer>
+  </main>
+</body>
+</html>

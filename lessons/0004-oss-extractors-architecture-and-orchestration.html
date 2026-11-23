@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0004：开源提取底座源码级拆解：OSV-SCALIBR、Syft、cdxgen 与 ORT 组合编排</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003 · 源码解析真相</a>
+        <a href="./0004-oss-extractors-architecture-and-orchestration.html" class="active">Lesson 0004 · 开源提取底座拆解</a>
+        <a href="../reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0004</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 02 多语言与全形态采集提取引擎</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>开源提取底座源码级拆解：OSV-SCALIBR、Syft、cdxgen 与 ORT 组合编排</h1>
+      <p class="subtitle">搞懂了「四层解耦」和「源码解析陷阱」，真正落到工程代码里只剩三个硬核问题：四大 Apache-2.0 顶级提取底座内部插件接口怎么设计？哪些该进程内库级嵌入、哪些必须丢进沙箱外挂？多工具产出冲突结果时，如何用置信度模型和 CycloneDX 1.7 <code>citations</code> 融合成唯一真值？</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握四大引擎源码级接口差异、双泳道反腐败编排路由及四条多源置信度融合铁律</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001</a> 我们划清了“不重复造商品化解析器轮子”的商用合规红线；在 <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a> 我们看到了 5 大生态冲突裁决与 RCE 隔离边界。今天把这 4 个 <code>Apache-2.0</code> 顶级引擎拆到插件接口级，彻底解决绿地项目“用谁、怎么嵌、冲突了听谁的”工程决策题。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>四大 Apache-2.0 提取底座：源码级架构与核心接口</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>商业闭源 SCA 最忌讳把开源工具当黑盒命令行去包一层壳——一旦遇到断网私有化、多模块并发、或单生态解析翻车，黑盒会让你无从插桩也无从替换。下面直接看四大引擎的<strong>源码级接口与管道抽象</strong>：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">商用协议核验结果</span>
+        本课拆解的 4 大底座——<a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener">OSV-SCALIBR</a>、<a href="https://github.com/anchore/syft" target="_blank" rel="noopener">Anchore Syft</a>、<a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener">OWASP cdxgen</a> 与 <a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener">ORT</a>——主仓库均为 <strong>Apache-2.0</strong>，满足商业闭源嵌入或适配封装前提（仍需常规保留版权声明与 <code>NOTICE</code>）。
+      </aside>
+    </div>
+
+    <div class="engine-grid full-width">
+      <!-- Engine 1: OSV-SCALIBR -->
+      <article class="engine-card eng-go">
+        <div class="engine-head">
+          <div>
+            <h3 class="engine-title">1. Google OSV-SCALIBR</h3>
+            <div class="engine-sub">Go 库优先 · 驱动 OSV-Scanner v2</div>
+          </div>
+          <span class="badge badge-ok">Apache-2.0</span>
+        </div>
+        <pre class="engine-code">// FilesystemExtractor (extractor/filesystem): 零打开预过滤 + 提取
+FileRequired(api filesystem.FileAPI) bool
+Extract(ctx context.Context, input *filesystem.ScanInput) (inventory.Inventory, error)
+
+// Enricher (enricher): 联网/图谱补全 (如 transitivedependency/pomxml)
+Enrich(ctx context.Context, input *enricher.ScanInput, inv *inventory.Inventory) error
+
+// Capabilities (plugin): 按离线/OS/权限动态裁剪插件
+plugin.FilterByCapabilities(plugins, &amp;plugin.Capabilities{
+  OS: plugin.OSLinux, Network: plugin.NetworkOffline,
+})</pre>
+        <ul class="engine-kv">
+          <li><strong>核心管道：</strong><code>FilesystemExtractor</code> + <code>StandaloneExtractor</code> 产出统一 <code>Inventory</code>，再由 <code>Enricher</code>（如结合 <code>deps.dev</code> 算无锁 <code>pom.xml</code>）与 <code>Detector</code> 接力增强（见 <a href="https://github.com/google/osv-scalibr/blob/main/docs/supported_inventory_types.md" target="_blank" rel="noopener">插件矩阵</a> 与 <a href="https://github.com/google/osv-scalibr/blob/main/docs/new_enricher.md" target="_blank" rel="noopener">Enricher 文档</a>）。</li>
+          <li><strong>杀手锏：</strong>天生为<strong>进程内 Go 库嵌入</strong>设计；<code>FileRequired</code> 避免无谓文件读取，<code>FilterByCapabilities</code> 让政企断网私有化一键摘除在线 Enricher 而不超时。</li>
+          <li><strong>硬伤与边界：</strong>对复杂 DSL 构建（Gradle Groovy/Kotlin、<code>setup.py</code>）及企业级许可证深度合规管线非其强项。</li>
+        </ul>
+      </article>
+
+      <!-- Engine 2: Anchore Syft -->
+      <article class="engine-card eng-go">
+        <div class="engine-head">
+          <div>
+            <h3 class="engine-title">2. Anchore Syft</h3>
+            <div class="engine-sub">Go 库 &amp; CLI · 容器/制品提取标杆</div>
+          </div>
+          <span class="badge badge-ok">Apache-2.0</span>
+        </div>
+        <pre class="engine-code">// 核心 Go 管道 (github.com/anchore/syft/syft)
+src, _ := syft.GetSource(ctx, "registry:app:1.0", syft.DefaultGetSourceConfig())
+// DefaultCreateSBOMConfig() 可配 source.SquashedScope(终态) vs AllLayersScope(全层)
+bom, _ := syft.CreateSBOM(ctx, src, syft.DefaultCreateSBOMConfig())
+
+// *sbom.SBOM 核心图对象
+bom.Artifacts.Packages   // *pkg.Collection (pkg.Cataloger 产出)
+bom.Relationships        // []artifact.Relationship (DependencyOf/Contains)</pre>
+        <ul class="engine-kv">
+          <li><strong>核心管道：</strong>把任意镜像/Tar/目录抽象为 <code>source.Source</code>，并行调度按生态分组的 <code>pkg.Cataloger</code>，输出强类型的 <code>*sbom.SBOM</code>（见 <a href="https://pkg.go.dev/github.com/anchore/syft/syft" target="_blank" rel="noopener">Go Pkg Docs</a>）。</li>
+          <li><strong>杀手锏：</strong>OCI 镜像分层（<code>SquashedScope</code> vs <code>AllLayersScope</code>）、OS 包库（<code>dpkg</code>/<code>rpm</code>/<code>apk</code>）与二进制制品（Fat-JAR / Go <code>BuildInfo</code>）提取业界顶级；且与 Grype 天然验证了「提取与匹配解耦」。</li>
+          <li><strong>硬伤与边界：</strong>默认走<strong>静态纯数据路径</strong>；扫未带锁源码或需要执行包管理器的深度传递图时（例如无锁 Java/Go 传递边），覆盖深度有明显天花板。</li>
+        </ul>
+      </article>
+
+      <!-- Engine 3: OWASP cdxgen -->
+      <article class="engine-card eng-node">
+        <div class="engine-head">
+          <div>
+            <h3 class="engine-title">3. OWASP cdxgen</h3>
+            <div class="engine-sub">Node.js CLI / Server · 全能 CycloneDX 1.7 引擎</div>
+          </div>
+          <span class="badge badge-ok">Apache-2.0</span>
+        </div>
+        <pre class="engine-code">// 安全模式 vs 构建感知模式 (lib/cli/index.js → createBom)
+// 注：pre-build 默认隐含 --no-install-deps，可再配 CDXGEN_SECURE_MODE=true
+cdxgen --lifecycle pre-build --no-install-deps -o bom.json
+cdxgen --lifecycle build --deep --spec-version 1.7
+
+// 输出原生 CycloneDX 1.7 高阶结构
+// - properties: internal:workspaceRef (Monorepo 子包关联)
+// - evidence.identity[].methods[{technique, confidence}]
+// - 顶层 citations[] (pointers/expressions) / modelCard / cryptoProperties</pre>
+        <ul class="engine-kv">
+          <li><strong>杀手锏：</strong>生态覆盖极广，原生围绕 <a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener">CycloneDX 1.7</a> 设计，对 JS/Python Monorepo（<code>internal:workspaceRef</code>）、CBOM、ML-BOM 及 <code>evinse</code>（AST 证据流）支持最领先。</li>
+          <li><strong>高危安全红线：</strong><code>cdxgen</code> 默认走 <code>build</code> 生命周期并调用 <code>mvn</code> / <code>gradle</code> / <code>npm</code> 等原生构建工具，扫不可信仓库存在两类典型风险：构建文件任意代码执行（<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-50611" target="_blank" rel="noopener">CVE-2024-50611</a>）与旧版 Maven 模块路径命令注入（<a href="https://github.com/CycloneDX/cdxgen/security/advisories/GHSA-5vwr-qchf-q4pf" target="_blank" rel="noopener">GHSA-5vwr-qchf-q4pf</a>，需升级 <code>12.3.3+</code>）。静态快速扫必须强加 <code>--lifecycle pre-build --no-install-deps</code>（或开启 <code>CDXGEN_SECURE_MODE=true</code>），跑 <code>build</code> 模式必须丢进 <strong>Lesson 0003 隔离沙箱</strong>！</li>
+        </ul>
+      </article>
+
+      <!-- Engine 4: OSS Review Toolkit (ORT) -->
+      <article class="engine-card eng-jvm">
+        <div class="engine-head">
+          <div>
+            <h3 class="engine-title">4. OSS Review Toolkit (ORT)</h3>
+            <div class="engine-sub">Kotlin JVM · 高保真有效图与合规管线</div>
+          </div>
+          <span class="badge badge-ok">Apache-2.0</span>
+        </div>
+        <pre class="engine-code">// Analyzer 核心模型 (oss-review-toolkit.org)
+PackageManager (Maven / GradleInspector / Pip / Npm)
+  → 精准归类 Scope (compile / runtimeClasspath / testCompileClasspath)
+  → 全局去重有向图 DependencyGraph (避免子项目重复树爆炸)
+  → OrtResult (analyzer-result.yml → Downloader/Advisor/Evaluator)
+
+// 工程哲学：默认 allowDynamicVersions = false 拒猜动态范围！</pre>
+        <ul class="engine-kv">
+          <li><strong>杀手锏：</strong>不偷懒、不瞎猜，面向企业法务与高保真审计（见 <a href="https://oss-review-toolkit.org/ort/docs/tools/analyzer" target="_blank" rel="noopener">Analyzer 文档</a>）。<code>DependencyGraph</code> 跨多模块去重极省内存，按 <code>Scope</code> 彻底切分生产运行态与测试构建态，为许可证合规与无误报有效图提供黄金标准。</li>
+          <li><strong>硬伤与边界：</strong>JVM 启动与内存较重，依赖原生包管理器工具链（JDK/Gradle/Python 等）协同；<strong>绝对不适合同步高频快速扫</strong>，最佳落位是「客户 CI Hook 或异步隔离深度通道」。</li>
+        </ul>
+      </article>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:14%" />
+            <col style="width:15%" />
+            <col style="width:20%" />
+            <col style="width:21%" />
+            <col style="width:14%" />
+            <col style="width:16%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>底座引擎</th>
+              <th>形态与嵌入方式</th>
+              <th>最擅长的战场</th>
+              <th>工程盲区与安全雷区</th>
+              <th>断网私有化表现</th>
+              <th>商业平台推荐定位</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>OSV-SCALIBR</strong></td>
+              <td>Go 库级直接嵌入（零子进程开销）</td>
+              <td>多语言锁文件、<code>deps.dev</code> 无执行 Maven 求解、插件精细裁剪</td>
+              <td>复杂 DSL 构建（Gradle/<code>setup.py</code>）；缺少许可证合规管线</td>
+              <td><strong>极佳</strong>：<code>Capabilities</code> 离线一键裁剪不超时</td>
+              <td><strong>高速泳道主力</strong>（源码静态/Lockfile/Tier 2）</td>
+            </tr>
+            <tr>
+              <td><strong>Anchore Syft</strong></td>
+              <td>Go 库级直接嵌入（也可 CLI）</td>
+              <td>OCI 镜像分层、OS 包库（<code>deb/rpm/apk</code>）、Fat-JAR/二进制制品</td>
+              <td>无锁源码传递图浅；<code>AllLayersScope</code> 易引入已删除层幽灵告警</td>
+              <td><strong>极佳</strong>：全本地静态数据库/元文件解析</td>
+              <td><strong>高速泳道主力</strong>（容器镜像 + 交付产物 Tier 4）</td>
+            </tr>
+            <tr>
+              <td><strong>OWASP cdxgen</strong></td>
+              <td>Node.js 独立进程 / 沙箱适配器</td>
+              <td>冷门语言长尾覆盖、Monorepo 工作区、ML-BOM / CBOM、CycloneDX 1.7</td>
+              <td><strong>高危：</strong>默认 <code>build</code> 模式触发构建期 RCE（<code>CVE-2024-50611</code>），旧版 Maven 路径存在命令注入（<code>GHSA-5vwr-qchf-q4pf</code>）</td>
+              <td><strong>良</strong>（<code>pre-build</code> 全离线；<code>build</code> 需内网私服）</td>
+              <td><strong>沙箱/长尾补充</strong>（AI-BOM、Monorepo 与动态构建）</td>
+            </tr>
+            <tr>
+              <td><strong>ORT Analyzer</strong></td>
+              <td>JVM CLI / CI Hook 异步调用</td>
+              <td>企业级多模块 Gradle/Maven 有效图、精准 <code>Scope</code> 隔离、许可证合规链路</td>
+              <td>JVM 体积大冷启动慢；需完整构建环境与原生包管理器支持</td>
+              <td><strong>良</strong>（配合客户 CI 内网私服无需外网）</td>
+              <td><strong>深度合规通道</strong>（CI Hook / 政企高保真审计）</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>双泳道编排路由与反腐败适配层（Orchestrator + ACL）</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>既然 4 个引擎各有神通也各有暗伤，总架构师的正确姿势绝不是“全仓全量把 4 个 CLI 串行跑一遍”，而是设计一个<strong>能力感知路由器（Capability-Aware Router）</strong>分流到两条执行泳道，并在出口处架设一道铜墙铁壁般的<strong>反腐败适配层（Anti-Corruption Layer, ACL）</strong>。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">架构主权红线</span>
+        如果让 <code>*sbom.SBOM</code>（Syft）或 <code>OrtResult</code>（ORT）直接穿透到平台数据库和漏洞匹配层，只需半年你的代码库就会彻底“长死”在第三方工具的结构上。<strong>ACL 必须把一切外部格式无状态地翻译成自研结构体。</strong>
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 1 双泳道编排路由器与反腐败适配层（ACL）架构</strong>
+        <span>80%+ 场景在泳道 A 进程内毫秒级解决；复杂构建与 AI/长尾按需进入泳道 B，出口统一收口进 Layer 2 IR</span>
+      </figcaption>
+      <div class="orch-flow">
+        <!-- Stage 1: Router -->
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">① 能力感知路由器（Capability-Aware Router）</span>
+            <span class="orch-stage-kicker">INPUT: 资产类型 · 联网策略 · 仓库信任度 · SLA 时延要求</span>
+          </div>
+          <p class="orch-stage-desc">探测输入特征：是否含 Lockfile？是否为 OCI 镜像/JAR？当前是否处于政企断网模式（<code>NetworkOffline</code>）？是否允许沙箱执行不可信构建？据此下发精确的引擎组合与超时预算，绝不做无脑全量跑。</p>
+        </div>
+
+        <div class="orch-connector">▼ 分流调度（并行 / 按优先级降级） ▼</div>
+
+        <!-- Stage 2: Dual Lanes -->
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">泳道 A · Go 进程内高速引擎</span>
+              <span class="badge badge-ok">零进程开销 · 毫秒–秒级</span>
+            </div>
+            <ul>
+              <li><strong>嵌入组合：</strong><code>OSV-SCALIBR</code> + <code>Anchore Syft</code>（同编译在一个 Go Worker 二进制内，共享内存文件系统抽象）。</li>
+              <li><strong>负责目标：</strong>全部确定性 Lockfile（Tier 1）、<code>deps.dev</code>/私服只读 Maven 虚拟求解（Tier 2）、OCI 容器分层与 Fat-JAR/OS 数据库（Tier 4）。</li>
+              <li><strong>离线保障：</strong>断网部署下 <code>FilterByCapabilities</code> 自动剔除在线插件，100% 稳定零挂起。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">泳道 B · 隔离沙箱 / CI Hook 深度引擎</span>
+              <span class="badge badge-warn">强隔离边界 · 秒–分钟级</span>
+            </div>
+            <ul>
+              <li><strong>适配器组合：</strong><code>cdxgen</code> + <code>ORT Analyzer</code>（独立容器或客户 CI 流水线末尾触发）。</li>
+              <li><strong>安全门控：</strong>扫未授权 PR 时强制 <code>cdxgen --lifecycle pre-build --no-install-deps</code>；必须跑 <code>build</code> 模式或 ORT <code>GradleInspector</code> 时，<strong>强制进 Lesson 0003 的 gVisor/Firecracker + Credential-Injecting Proxy 沙箱</strong>。</li>
+              <li><strong>负责目标：</strong>无锁动态构建（Tier 3）、JS Monorepo 工作区边、ML-BOM/CBOM 与高精度许可证合规图谱。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">▼ 异构格式收口 ▼</div>
+
+        <!-- Stage 3: ACL -->
+        <div class="orch-stage stage-acl">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">② 反腐败适配层（Anti-Corruption Adapter） + PURL Canonicalizer</span>
+            <span class="orch-stage-kicker">翻译：Inventory / sbom.SBOM / CycloneDX / OrtResult → 统一 RawExtractionEnvelope</span>
+          </div>
+          <p class="orch-stage-desc">逐引擎剥离私有字段，将“工具名 + 提取技术 + 原始层级 + 安装子路径 + Scope + 约束表达式 + 原始 PURL”封装为标准化 <code>RawExtractionEnvelope</code>，随后统一穿过 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> 的 <code>Canonicalizer</code>（补齐 PyPI PEP 503 折叠、保留 Debian <code>distro</code>、保护 Go 大写原名）。</p>
+        </div>
+
+        <div class="orch-connector">▼ 消歧仲裁 ▼</div>
+
+        <!-- Stage 4: Fusion -->
+        <div class="orch-stage stage-fusion">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">③ 分级置信度融合与消歧引擎（Tiered Confidence Fusion）</span>
+            <span class="orch-stage-kicker">规则裁决 · 冲突覆写 · 互补并集 · 图边合并</span>
+          </div>
+          <p class="orch-stage-desc">依据生态单/多版本语义与采集阶梯置信度（Tier 0–4），对单版本冲突执行高阶覆写、对多版本共存按路径分治、对异构域执行互补并集，并将所有被采纳与被覆写的溯源记录写入 CycloneDX 1.7 <code>citations[]</code>。</p>
+        </div>
+
+        <div class="orch-connector">▼ 唯一真值落库 ▼</div>
+
+        <!-- Stage 5: Layer 2 IR -->
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">④ Layer 2 统一中间表示（Canonical Graph DB）</span>
+            <span class="badge badge-ok">唯一真相源 · 可审计</span>
+          </div>
+          <p class="orch-stage-desc">干净写入 <code>canonical_components</code>、<code>snapshot_nodes (bom-ref)</code> 与 <code>snapshot_edges</code>——下游 Layer 3 漏洞匹配与 Layer 4 可达性引擎<strong>完全感知不到上游到底用了几款开源引擎</strong>。</p>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>多提取器置信度融合与消歧算法</h2>
+
+    <div class="prose-col">
+      <p>当两个提取器对同一个项目给出不一致的结果时，绿地团队最容易踩进两个相反的极端：要么取<strong>简单并集（Naive Union）</strong>——把静态猜测的错误版本和真实构建版本全塞进库里，瞬间引爆 Ghost CVE 误报；要么取<strong>简单交集（Naive Intersection）</strong>——因为 OS 包工具不认识 Python 锁文件、或版本号不一致，交集直接变空集，制造大规模漏报灾难。</p>
+      <p>工业级架构必须基于<strong>「解析阶梯置信度模型」</strong>与<strong>「四条融合铁律」</strong>做确定性裁决（并对齐 CycloneDX 1.7 的 <code>evidence.identity</code> 与顶层 <code>citations</code> 规范）：</p>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:17%" />
+            <col style="width:13%" />
+            <col style="width:32%" />
+            <col style="width:38%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>证据阶梯（Tier）</th>
+              <th>默认置信度</th>
+              <th>典型产出提取器与方法</th>
+              <th>CycloneDX <code>evidence.identity</code> 技术映射与裁决权</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Tier 4 · 交付产物</strong></td>
+              <td><code>0.96 – 0.98</code></td>
+              <td>Syft (<code>SquashedScope</code> OS DB / Fat-JAR <code>pom.properties</code> / Go <code>BuildInfo</code>)</td>
+              <td><code>technique: binary-analysis</code> / <code>manifest-analysis</code>；代表最终交付态绝对真值，可覆写源码静态猜测。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 3 · 构建有效图</strong></td>
+              <td><code>0.95 – 0.96</code></td>
+              <td>ORT (CI Hook / <code>GradleInspector</code>) / 隔离沙箱 <code>cdxgen --lifecycle build</code></td>
+              <td><code>technique: manifest-analysis</code> (build-time)；含完整 <code>Scope</code> 边与调解结果，接管无锁动态项目。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 1 · 确定性锁文件</strong></td>
+              <td><code>0.90 – 0.93</code></td>
+              <td>OSV-SCALIBR (<code>uv.lock</code>/<code>pnpm-lock.yaml</code>/<code>Cargo.lock</code>) / <code>cdxgen pre-build</code></td>
+              <td><code>technique: manifest-analysis</code>；在执行 PEP 508 Markers 求值后具有极高确定性，与同阶梯引擎可证据叠加。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 2 · 虚拟求解</strong></td>
+              <td><code>0.80 – 0.85</code></td>
+              <td>OSV-SCALIBR (<code>transitivedependency/pomxml</code> via <code>deps.dev</code> / 私服只读 API)</td>
+              <td><code>technique: manifest-analysis</code> (registry-resolved)；在无源码构建前提下推演 Effective POM，劣于 Tier 3/4，优于 Tier 0。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 0 · 启发/静态清单</strong></td>
+              <td><code>0.35 – 0.55</code></td>
+              <td>纯离线单文件 <code>pom.xml</code> 正则/XML 提取、JAR 文件名猜测、已删除层 <code>AllLayersScope</code></td>
+              <td><code>technique: filename</code>；<strong>禁止在有高阶证据时并存入库</strong>，仅作降级兜底且须在 UI 标灰提示“低置信推断”。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid-2 full-width">
+      <div class="card">
+        <h4>铁律 1 · 单版本生态：冲突必覆写（Supersede）</h4>
+        <p>Java (Maven/Gradle)、Python (同一环境)、Go (同一主版本) 在同一构建单元内只能生效<strong>唯一版本</strong>。按 <code>(project_root, base_purl)</code> 分组后，高置信度 Tier 直接<strong>覆写</strong>低阶版本；被淘汰的版本记入 <code>citations[]</code> 标注 <code>superseded_lower_tier</code>，绝不写为有效节点。</p>
+      </div>
+      <div class="card">
+        <h4>铁律 2 · 多版本生态：按路径分治（Path-Scoped）</h4>
+        <p>npm / pnpm / yarn 允许同一包多版本合法嵌套共存。融合分组键必须扩展为 <code>(canonical_purl, install_subpath)</code>：不同路径的 <code>lodash@4.17.21</code> 与 <code>@4.17.15</code> 各自保留独立 <code>bom-ref</code>；只有路径也一致时才做证据合并。</p>
+      </div>
+      <div class="card">
+        <h4>铁律 3 · 异构资产域：互补并集（Disjoint Union）</h4>
+        <p>Syft 提取的 OS <code>deb/rpm</code> 包、OSV-SCALIBR 提取的应用 <code>pypi/cargo</code> 包、cdxgen 提取的 <code>huggingface</code> 模型属于<strong>互不重叠的资产域</strong>，必须执行并集以补全盲区；同时对容器历史删除层（Whiteout）做隔离，不污染运行态清单。</p>
+      </div>
+      <div class="card">
+        <h4>铁律 4 · 图边与证据：最细粒度富化叠加</h4>
+        <p>当两个高阶引擎在同一个组件节点上达成一致时（例如 OSV-SCALIBR 提取节点，ORT 或 cdxgen 补充了 <code>runtime</code>/<code>test</code> 边或 <code>internal:workspaceRef</code>），保留最精细的 <code>Scope</code> 与有向边，合并去重 <code>occurrences[]</code>，并在顶层 <code>citations[]</code> 并列署名。</p>
+      </div>
+    </div>
+
+    <!-- INTERACTIVE FUSION LAB -->
+    <section class="widget-panel full-width" data-widget="fusion-lab">
+      <script type="application/json" class="fusion-lab-data">
+        {
+          "title": "交互实验台：多提取器融合消歧模拟器（4 个实战场景 × 3 种融合策略）",
+          "intro": "先尝试切换为「简单并集」或「简单交集」，亲眼观察它们如何在真实企业项目中引爆 Ghost CVE 误报或 100% 漏报，再切回「分级置信度融合 + ACL」查看正确落库结构。"
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 4: INTERACTIVE SANDBOX -->
+    <h2><span class="sec-num">04</span>架构师实战沙盘：拍板 Layer 1 多引擎编排与隔离方案</h2>
+
+    <div class="prose-col">
+      <p>现在由你主持 Layer 1 架构定型评审会。请针对下面 5 个直接影响性能、安全与长期演进的工程决策选出方案，点击「运行架构评审」查看推演报告。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 1 开源提取底座组合编排沙盘（5 项关键决策）",
+          "intro": "平台目标：支持 SaaS 公有云扫描不可信 Git PR、政企断网私有化交付、容器镜像与复杂 Monorepo，核心扫描 Worker 采用 Go 编写。",
+          "summary": {
+            "optimal": "全部 {optimal} 项编排与适配决策均精准落地！你的架构兼具 Go 进程内高性能、不可信代码的零 RCE 安全边界、断网自适应与严格的 Layer 2 主权隔离。",
+            "warning": "没有触碰致命安全或架构红线，但有 {warning} 项处于覆盖盲区或资源浪费边缘（标黄项），建议在工程落地前补齐补偿方案。",
+            "critical": "当前设计存在 {critical} 处高危 RCE 漏洞、大规模误报/漏报灾难或架构锁死债（标红项）！请优先修正标红选项再签字立项。"
+          },
+          "modules": [
+            {
+              "name": "Go 核心扫描 Worker 集成 OSV-SCALIBR 与 Syft 的方式",
+              "layer": "泳道 A · 进程内集成",
+              "context": "团队主体后端为 Go，需高频并发扫数千个代码仓与容器镜像，同时支持客户断网机房部署。",
+              "options": [
+                {
+                  "label": "以 Go 库级方式直接嵌入 OSV-SCALIBR（配合 FilterByCapabilities 离线裁剪）与 Syft 核心 Cataloger，仅用 ACL 转译输出",
+                  "status": "optimal",
+                  "verdictTitle": "性能、可控性与离线适应性三赢",
+                  "feedback": "顶级 Go 底座打法！库级嵌入省去频繁 fork 子进程与 JSON 反复序列化损耗，Capabilities 让离线机房自动跳过联网插件，且 ACL 保证日后替换任意单生态解析器零痛感。"
+                },
+                {
+                  "label": "在 Worker 里用 exec.Command 轮流拉起 scalibr、syft、cdxgen、ort 四个 CLI 进程再拼文本",
+                  "status": "warning",
+                  "verdictTitle": "高并发下进程与 I/O 开销剧增且难控细粒度能力",
+                  "feedback": "虽然协议上 Apache-2.0 可行，但每次扫描都要反复解压镜像/遍历磁盘四遍并起停 JVM/Node 进程，高并发下内存和延迟直接失控。"
+                },
+                {
+                  "label": "为了彻底掌控全部源码，拒绝引入任何开源底座，安排 5 名研发半年内从零手写所有解析器",
+                  "status": "critical",
+                  "verdictTitle": "典型的“重复造轮子”战略资源错配",
+                  "feedback": "手工重写数十种 lockfile、dpkg/rpm 数据库与容器分层解析将耗光首年全部研发预算，直接拖垮 Phase 2 可达性、投毒检测与 AI-BOM 护城河建设。"
+                }
+              ]
+            },
+            {
+              "name": "SaaS 多租户中启用 OWASP cdxgen 扫描不可信外部 PR 的安全模式",
+              "layer": "泳道 B · cdxgen 安全边界",
+              "context": "平台希望借力 cdxgen 覆盖长尾生态、Monorepo 边与 ML-BOM，但代码来自互不信任的外部 PR。",
+              "options": [
+                {
+                  "label": "默认直接执行 cdxgen --lifecycle build -o bom.json，追求最高构建还原度",
+                  "status": "critical",
+                  "verdictTitle": "高危 RCE 安全事故（对应 CVE-2024-50611 风险面）",
+                  "feedback": "cdxgen 在 build 模式下会直接调用 mvn/gradle/npm 原生构建命令！在多租户宿主机或普通容器内裸跑等于对恶意 PR 敞开代码执行与窃密大门。"
+                },
+                {
+                  "label": "PR 快速门禁强制加 --lifecycle pre-build --no-install-deps；仅必要深度构建放入 gVisor/Firecracker+Proxy 隔离沙箱",
+                  "status": "optimal",
+                  "verdictTitle": "精准卡死执行红线并兼顾深度场景",
+                  "feedback": "完美践行防御纵深！静态快速检查零执行、零逃逸面；真正需要 build-time 的仓库才受控送入无凭据强隔离沙箱。"
+                },
+                {
+                  "label": "因为听说 cdxgen 有过 RCE 漏洞通告，直接一刀切禁用并完全禁止其产出 ML-BOM",
+                  "status": "warning",
+                  "verdictTitle": "因噎废食，平白放弃成熟的长尾与 AI-BOM 参考能力",
+                  "feedback": "关键在于管控执行边界（pre-build 标志 + 沙箱隔离），而不是连纯静态/数据驱动的解析能力一并丢弃。"
+                }
+              ]
+            },
+            {
+              "name": "企业级复杂 Gradle / 多模块项目引入 ORT Analyzer 的落位策略",
+              "layer": "泳道 B · ORT 落位",
+              "context": "大型政企客户拥有 50+ 子模块的 Gradle 仓库，需精准剥离 testCompileClasspath 并做严格许可证审计。",
+              "options": [
+                {
+                  "label": "把 ORT JVM 嵌入开发者 IDE 插件，每次 Ctrl+S 保存文件都在本地跑一次完整 ORT",
+                  "status": "critical",
+                  "verdictTitle": "极度灾难的开发者体验（分钟级卡顿直接逼卸载）",
+                  "feedback": "ORT 是为高保真合规分析设计的重型 JVM 管线，触发原生构建级依赖解析动辄数十秒到数分钟，放在 IDE 实时保存热路径是自杀式设计。"
+                },
+                {
+                  "label": "部署于客户自有 CI Hook 末尾（或平台异步深度通道），利用其 DependencyGraph 与 Scope 精准分离生产与测试依赖",
+                  "status": "optimal",
+                  "verdictTitle": "发挥 ORT 真正长板，零环境复现债",
+                  "feedback": "非常老练的架构师判断！客户 CI 本身具备精确 JDK 与私有仓库认证，由 CI Hook 异步触发 ORT 回传高保真边和 Scope，完美避开平台 JVM 冷启动与环境地狱。"
+                },
+                {
+                  "label": "改用正则扫描所有 build.gradle 文件里出现的版本号字符串替代 ORT",
+                  "status": "warning",
+                  "verdictTitle": "面对动态 DSL、变量插值与 Scope 边界几乎不可用",
+                  "feedback": "遇到 Gradle Kotlin DSL 逻辑和动态范围，正则扫描会丢失大量传递依赖且完全分不清 test 与 runtime 边界，最终在企业合规审计时翻车。"
+                }
+              ]
+            },
+            {
+              "name": "容器镜像（OS + 语言包）结合源码扫描的多源融合裁决策略",
+              "layer": "融合消歧层 · Fusion",
+              "context": "同一应用同时跑了 Syft 镜像扫描（含 Squashed 与 AllLayers 数据）和 OSV-SCALIBR 源码扫描。",
+              "options": [
+                {
+                  "label": "实行异构互补并集（OS 归 Syft，语言包跨阶梯融合），默认只取 SquashedScope 运行态，单版本冲突以 Tier 4 覆写 Tier 0",
+                  "status": "optimal",
+                  "verdictTitle": "消除 Ghost 误报且零漏报的黄金融合规则",
+                  "feedback": "4 条融合铁律一步到位！既打通了 OS + 语言双视野，又用 Whiteout 终态隔离了历史删除层噪音，并用实锤产物纠正了源码静态猜测误差。"
+                },
+                {
+                  "label": "把 Syft AllLayersScope 和 OSV-SCALIBR 的所有结果直接取全量并集入库",
+                  "status": "critical",
+                  "verdictTitle": "必现大量已卸载历史层包与版本冲突 Ghost 误报",
+                  "feedback": "构建镜像中途装完又删掉的临时工具（AllLayers）和静态误算的旧版依赖全会混进告警单，开发者信任度会在第一周跌穿。"
+                },
+                {
+                  "label": "只保留 Syft 和 OSV-SCALIBR 同时报出的完全一致交集组件，确保零误报",
+                  "status": "critical",
+                  "verdictTitle": "异构提取器交集接近为空，制造灾难性全盘漏报",
+                  "feedback": "OSV-SCALIBR 扫不出镜像里的 dpkg 系统包，Syft 对某些新格式锁文件也可能缺失；强行取交集等同于把一半以上真实组件直接删库。"
+                }
+              ]
+            },
+            {
+              "name": "多引擎采集结果进入 Layer 2 数据库前的反腐败隔离（ACL）方案",
+              "layer": "Layer 1 → Layer 2 契约",
+              "context": "未来半年团队计划逐步用自研高精度 Rust/Python 解析器替换掉部分开源提取器。",
+              "options": [
+                {
+                  "label": "图省事直接把 Syft *sbom.SBOM 和 ORT analyzer-result 原始结构作为主业务表 Schema 存储",
+                  "status": "critical",
+                  "verdictTitle": "平台被开源结构彻底锁死，替换成本等于重写",
+                  "feedback": "一旦下游漏洞匹配、前端台账和策略引擎直接查询第三方私有结构，未来换任何自研解析器或升级主版本都会引发跨系统雪崩重构。"
+                },
+                {
+                  "label": "强制经过无状态 ACL 适配器转译为 RawExtractionEnvelope，经 PURL Canonicalizer 规范化后统一落库自研 L2 IR",
+                  "status": "optimal",
+                  "verdictTitle": "兑现“外挂可插拔、内核零耦合”的演进自由",
+                  "feedback": "正统架构主权设计！下游 Layer 3/4 只认自研 IR 与 CycloneDX 1.7 citations 留痕，Layer 1 任何组件随时可局部灰度替换。"
+                },
+                {
+                  "label": "先按各开源工具原格式分别落 4 张原始表，每周跑一次批处理 SQL 试图对齐拼出全局视图",
+                  "status": "warning",
+                  "verdictTitle": "数据延迟、一致性和双写维护地狱",
+                  "feedback": "虽然留了一层缓冲，但跨 4 套异构表做实时查询和 PR 门禁几乎不可行，维护 4 套历史 schema 还会拖垮数据库迁移效率。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道高频架构排查与交叉决策题，重点检验你对 <strong>OSV-SCALIBR 离线能力机制、cdxgen 安全执行边界、跨生态/多工具融合消歧、以及 ORT 与 ACL 定位</strong> 的真实掌握度。<strong>先凭记忆独立作答，再看反馈解析。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0004 · 开源提取底座拆解与多源融合回忆测验",
+          "intro": "涵盖跨课交织（L0002 + L0003 + L0004）真实场景决策。",
+          "questions": [
+            {
+              "prompt": "客户把商业 SCA 平台部署在完全断网（Air-gapped）的政企专网机房，若直接运行默认全量启用的 OSV-SCALIBR 扫描包含 pom.xml 的仓库，最可能发生阻塞的是哪类插件，架构上应利用哪个原生机制在扫描启动前安全摘除？",
+              "options": [
+                "阻塞在纯数据解析锁文件插件，应通过强制关闭所有目录遍历彻底绕开。",
+                "阻塞在读取本地文件头预筛接口，应通过重写底层文件系统驱动来提速。",
+                "阻塞在访问外部的联网增强插件，应通过配置离线能力过滤机制来裁剪。",
+                "阻塞在本地构建环境容器运行时，应通过关闭进程内沙箱隔离机制放行。"
+              ],
+              "answerIndex": 2,
+              "explanation": "OSV-SCALIBR 中的 FilesystemExtractor（如锁文件与本地 DB 解析）均为纯本地文件操作；真正需要外网（例如查询 deps.dev / osv.dev 的 transitivedependency/pomxml 等）的是 Enricher 插件。架构上应在构造 ScanConfig 时传入 NetworkOffline 的 plugin.Capabilities，调用 plugin.FilterByCapabilities 自动摘除在线插件，避免断网环境反复超时阻塞（C 正确）。"
+            },
+            {
+              "prompt": "某团队想利用 OWASP cdxgen 覆盖长尾语言与工作区拓扑，直接在多租户 SaaS 的宿主机 Worker 上对用户上传的不可信 Git 仓库执行默认命令「cdxgen -o bom.json」（未加额外标志）。该方案最严重的安全后果与标准缓解组合是？",
+              "options": [
+                "默认构建阶段会触发原生工具执行任意代码，静态扫描应加前构建禁装标志或进沙箱。",
+                "默认构建阶段会强制上传私服密钥至公网库，静态扫描应先删除本地配置文件再运行。",
+                "默认执行流程采用强传染开源组件动态链接，闭源商业分发应改为独立进程外挂调用。",
+                "默认运行方式会清空宿主机的容器镜像分层，静态扫描应强行挂载只读根目录来保护。"
+              ],
+              "answerIndex": 0,
+              "explanation": "cdxgen 默认走 build 生命周期（会调 mvn/gradle/npm 等原生构建工具），在不可信仓库上运行存在严重构建期 RCE 风险（CVE-2024-50611，旧版 Maven 路径还曾曝出 GHSA-5vwr-qchf-q4pf 命令注入）。商业 SaaS 必须升级新版并对常规静态扫强制指定 --lifecycle pre-build --no-install-deps（或 CDXGEN_SECURE_MODE=true），仅将确实需要构建期解析的任务送入 gVisor/Firecracker + Credential-Injecting Proxy 隔离沙箱（A 正确）。"
+            },
+            {
+              "prompt": "【跨课交织】在一次发布扫描中同时运行了多个 Tier 引擎：① OSV-SCALIBR 静态读子模块 pom.xml 报出 log4j-core@2.14.1；② Syft 扫描打包后的 app.jar 实锤内嵌 log4j-core@2.17.1；③ Syft 同包容器镜像还识别出 pkg:deb/debian/openssl@3.0.11-1~deb12u2?arch=amd64&distro=debian-12。依据融合铁律，写入 Layer 2 IR 时应如何裁决？",
+              "options": [
+                "对所有引擎产出版本均取完整并集留存，确保全部潜在的脆弱版本都得到安全告警。",
+                "在所有跨生态组件之间均取严格交集，避免多款提取器对同一个应用出现识别偏差。",
+                "强制把全部组件统一剥离发行版限定符，仅保留核心语义版本号方便漏洞快速匹配。",
+                "单版本高阶制品覆写静态旧版猜测，异构系统包与语言包做互补并集并留存限定符。"
+              ],
+              "answerIndex": 3,
+              "explanation": "融合时必须区分「同生态单版本冲突」与「异构资产域」：Java Classpath 为单版本生态，Tier 4 产物实锤（2.17.1）必须覆写 Tier 0 静态误猜（2.14.1）并写入融合溯源记录，否则取并集（A）会引发 Ghost CVE；OS 包与 Java 包属互补资产域必须并集，取交集（B）会导致漏报；而 Debian deb 包绝不可剥离 distro 限定符（C），否则 Backport 补丁将大面积误报（D 正确）。"
+            },
+            {
+              "prompt": "为什么企业级商业 SCA 平台通常把 OSS Review Toolkit (ORT) 定位在“CI Hook 或异步深度合规通道”，而不放在低延迟同步网关，同时还要求所有引擎输出必须先过一层无状态反腐败适配器（ACL）？",
+              "options": [
+                "因为该工具采用强传染协议发布且缺乏图结构能力，适配器主要用来擦除传染许可证标记。",
+                "因为该工具依赖重型环境还原有效图与作用域，适配器旨在隔离外部结构以保底座演进权。",
+                "因为该工具只能识别容器底层操作系统的包数据库，适配器主要用来强行拼接源码树文件。",
+                "因为该工具在解析阶段会自动替换目标仓库代码，适配器旨在拦截源码改写防止构建损坏。"
+              ],
+              "answerIndex": 1,
+              "explanation": "ORT 同样是商业友好的 Apache-2.0 协议，且原生自带高效的全局去重 DependencyGraph（排除 A）；它核心擅长源码构建级多语言有效图与 Scope 分离而非容器 OS 层（排除 C），也不会在解析时改写目标源码（排除 D）。将其放在 CI Hook / 异步通道是因为 JVM 与原生包管理器还原需要重环境与较高耗时；而前置 ACL 则是为了防止 OrtResult / Syft SBOM 结构渗入 Layer 2，保障未来局部替换为自研解析器时零重构（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>编写反腐败适配器（ACL）与编排引擎设计文档前，推荐精读这几份一手代码文档与安全通告：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener"><strong>Google OSV-SCALIBR</strong></a>（<a href="https://github.com/google/osv-scalibr/blob/main/docs/supported_inventory_types.md" target="_blank" rel="noopener">Supported Inventory</a> &amp; <a href="https://github.com/google/osv-scalibr/blob/main/docs/new_enricher.md" target="_blank" rel="noopener">New Enricher Guide</a>）：Go 模块化 SCA 库接口样板。</li>
+          <li><a href="https://pkg.go.dev/github.com/anchore/syft/syft" target="_blank" rel="noopener"><strong>Anchore Syft Go Docs</strong></a>：<code>GetSource</code> / <code>CreateSBOM</code> 与 <code>pkg.Cataloger</code> / <code>artifact.Relationship</code> 官方 API 参考。</li>
+          <li><a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener"><strong>OWASP cdxgen</strong></a>、<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-50611" target="_blank" rel="noopener"><strong>CVE-2024-50611</strong></a> 与 <a href="https://github.com/CycloneDX/cdxgen/security/advisories/GHSA-5vwr-qchf-q4pf" target="_blank" rel="noopener"><strong>GHSA-5vwr-qchf-q4pf</strong></a>：分别对应构建文件 RCE 风险面与 Maven 路径命令注入，配合 <code>pre-build</code> / <code>CDXGEN_SECURE_MODE</code> 隔离。</li>
+          <li><a href="https://oss-review-toolkit.org/ort/docs/tools/analyzer" target="_blank" rel="noopener"><strong>ORT Analyzer Docs</strong></a> &amp; <a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener"><strong>CycloneDX 1.7 Schema</strong></a>：<code>DependencyGraph</code> / <code>Scope</code> 与 <code>citations[]</code> 标准依据。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>完成融合实验台、沙盘演练与 4 道主动回忆测验后，<strong>欢迎带着你的结果与决策思考回到对话中</strong>：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“我们产品的核心开发语言栈和交付形态（SaaS vs 政企离线私有化）分别是怎样的？我们来敲定你的第一版泳道 A/B 权重表。”</li>
+          <li>“我在实验台或第 X 道测验里卡住了，帮我深挖那个场景的源码级数据结构细节。”</li>
+          <li>“我已吃透四大提取底座的组合编排，准备进入 <strong>Lesson 0005（容器镜像、OS 发行版与制品分层采集原理）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0003-source-dependency-resolution-traps.html">← 上一课：Lesson 0003 · 源码解析真相</a>
+      <a href="../reference/layer1-resolution-and-extractor-matrix.html">配套速查卡：Ref 03 · 提取器与解析矩阵</a>
+      <a href="./0005-container-image-os-and-artifact-extraction.html">下一课：Lesson 0005 · 容器镜像、OS 发行版与制品分层采集原理 →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/extractor-fusion-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

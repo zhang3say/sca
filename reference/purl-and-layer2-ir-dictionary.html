@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查参考 02：ECMA-427 PURL 规范与 Layer 2 统一 IR 数据字典</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="../lessons/0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002 · Layer 2 统一 IR</a>
+        <a href="./sca-oss-landscape-and-4layer-map.html">Ref 01 · 四层与协议矩阵</a>
+        <a href="./purl-and-layer2-ir-dictionary.html" class="active">Ref 02 · PURL 与 IR 数据字典</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>REFERENCE CARD 02</span>
+        <span class="sep">/</span>
+        <span>PRINT-READY DATA DICTIONARY</span>
+      </div>
+      <h1>ECMA-427 PURL 编码规范与 Layer 2 统一 IR 数据字典</h1>
+      <p class="subtitle">供数据库 Schema 评审、反腐败适配器开发与双标准（CycloneDX 1.7 / SPDX 3.0.1）导出校验时随时翻阅。</p>
+      <div class="meta-strip">
+        <span><strong>依据标准：</strong>ECMA-427 (PURL) · ECMA-424 2nd Ed. (CycloneDX 1.7) · SPDX 3.0.1</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a></span>
+      </div>
+    </header>
+
+    <!-- SECTION 1: PURL ECOSYSTEM MATRIX -->
+    <section class="full-width">
+      <h2 style="margin-top:0;"><span class="sec-num">01</span>ECMA-427 PURL 8 大核心生态规范化速查表</h2>
+      <p style="font-size:0.88rem;color:var(--ink-muted);max-width:var(--content-width);">通用规则：<code>pkg:&lt;type&gt;/[namespace/]&lt;name&gt;[@version][?qualifiers][#subpath]</code>；<code>scheme</code> 与 <code>type</code> 恒小写；<code>qualifiers</code> 键小写、剔除空值并按<strong>字典序排序</strong>；解析顺序<strong>从右向左</strong>。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>生态 <code>type</code></th>
+              <th><code>namespace</code> 规则</th>
+              <th><code>name</code> 与大小写归一化</th>
+              <th>匹配关键 Qualifiers</th>
+              <th>规范示例与工程踩坑备忘</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>maven</code></td>
+              <td><strong>必填</strong>（<code>groupId</code>，保留点号与大小写）</td>
+              <td><code>artifactId</code>，大小写敏感，原样保留</td>
+              <td><code>classifier</code>、<code>type</code> / <code>packaging</code></td>
+              <td><code>pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1</code><br/>区分 <code>sources</code> / <code>tests</code> / <code>shaded</code> 构件须保留限定符。</td>
+            </tr>
+            <tr>
+              <td><code>npm</code></td>
+              <td>可选（Scoped 包 <code>@org</code>，小写）</td>
+              <td>小写；遵循 npm 命名规范</td>
+              <td>通常无需（剥离 <code>repository_url</code>）</td>
+              <td><code>pkg:npm/%40angular/core@17.3.0</code><br/><strong>必坑：</strong>scope 中的 <code>@</code> 必须百分比编码为 <code>%40</code>。</td>
+            </tr>
+            <tr>
+              <td><code>pypi</code></td>
+              <td><strong>不使用</strong>（留空）</td>
+              <td>小写；按 <strong>PEP 503</strong> 将 <code>_</code>、<code>.</code> 及连续 <code>-</code> 折叠为单个 <code>-</code></td>
+              <td>通常无需</td>
+              <td><code>pkg:pypi/django-rest-framework@3.14.0</code><br/><strong>必坑：</strong>不做 PEP 503 折叠会导致跨工具去重分裂。</td>
+            </tr>
+            <tr>
+              <td><code>golang</code></td>
+              <td><strong>必填</strong>（模块路径前缀，规范强制小写）</td>
+              <td>模块主名，规范强制小写；<strong><code>#subpath</code> 保留大小写</strong></td>
+              <td>通常无需</td>
+              <td><code>pkg:golang/google.golang.org/genproto#googleapis/api</code><br/><strong>必坑（#308）：</strong>IR 证据层须保留原始 <code>raw_name</code> 兼容大写 Go 仓库。</td>
+            </tr>
+            <tr>
+              <td><code>cargo</code></td>
+              <td>不使用（留空）</td>
+              <td>Rust crate 名，大小写敏感（常规小写）</td>
+              <td>通常无需</td>
+              <td><code>pkg:cargo/serde@1.0.210</code><br/>Cargo 中 <code>-</code> 与 <code>_</code> 在代码引用期可映射，但 crates.io 索引以原名为准。</td>
+            </tr>
+            <tr>
+              <td><code>deb</code></td>
+              <td>发行商（小写：<code>debian</code> / <code>ubuntu</code>）</td>
+              <td>源码或二进制包名（小写）</td>
+              <td><strong><code>distro</code></strong>、<code>arch</code>、<code>epoch</code>、<code>upstream</code></td>
+              <td><code>pkg:deb/debian/curl@7.88.1-10%2Bdeb12u5?arch=amd64&amp;distro=debian-12</code><br/><strong>红线：</strong>版本中的 <code>+</code> 按 ECMA-427 规范编码为 <code>%2B</code>；L3 匹配键绝不可剥离 <code>distro</code>，否则 Backport 补丁全误报。</td>
+            </tr>
+            <tr>
+              <td><code>rpm</code></td>
+              <td>发行商（小写：<code>redhat</code> / <code>fedora</code> / <code>rocky</code>）</td>
+              <td>RPM 包名（区分大小写，主流小写）</td>
+              <td><strong><code>distro</code></strong>、<code>arch</code>、<code>epoch</code>、<code>upstream</code></td>
+              <td><code>pkg:rpm/redhat/openssl@3.0.7-24.el9?arch=x86_64&amp;distro=rhel-9.3</code><br/>留意 <code>epoch</code> 与模块流（modularitylabel）上下文。</td>
+            </tr>
+            <tr>
+              <td><code>huggingface</code></td>
+              <td>模型组织或作者（如 <code>distilbert</code>）</td>
+              <td>模型仓库名</td>
+              <td>私有仓时附 <code>repository_url</code></td>
+              <td><code>pkg:huggingface/distilbert/distilbert-base-uncased@043235d6...</code><br/><strong>AI-BOM 要点：</strong><code>@version</code> 锚定小写 Git Commit SHA。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 2: LAYER 2 IR DATA DICTIONARY -->
+    <section class="full-width">
+      <h2><span class="sec-num">02</span>Layer 2 统一 IR 核心数据字典（PostgreSQL 双层身份架构）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>表名与层级</th>
+              <th>核心主键与索引</th>
+              <th>核心字段与枚举约定</th>
+              <th>架构职责与演进定位</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong><code>canonical_components</code></strong><br/><span class="badge badge-ok">Tier 1 · 全局规范层</span></td>
+              <td>PK: <code>id (UUID)</code><br/>UK: <code>match_key</code><br/>IDX: <code>(base_purl, ecosystem)</code></td>
+              <td><code>match_key</code>（含匹配限定符的规范 PURL）、<code>base_purl</code>（无版本前缀）、<code>ecosystem</code>、<code>version</code>、<code>component_type</code>（<code>library | application | operating-system | ml-model | data | service</code>）、<code>cpe_aliases TEXT[]</code></td>
+              <td>全平台唯一组件注册表。与 Layer 3 漏洞/许可/恶意包库直接挂接；0-day 爆发时通过 <code>base_purl</code> 实现跨万仓毫秒级反查。</td>
+            </tr>
+            <tr>
+              <td><strong><code>snapshot_nodes</code></strong><br/><span class="badge badge-build">Tier 2 · 快照节点层</span></td>
+              <td>PK: <code>(snapshot_id, node_ref)</code><br/>IDX: <code>(canonical_id, snapshot_id)</code></td>
+              <td><code>node_ref</code>（对齐 CycloneDX <code>bom-ref</code>）、<code>canonical_id</code>、<code>scope</code>（<code>required | optional | excluded</code>）、<code>is_direct</code>、<code>min_depth</code>、<code>occurrences JSONB</code>（<code>[{location, line, oci_layer, raw_purl, extractor}]</code>）、<code>ext_metadata JSONB</code></td>
+              <td>承接同一组件在多路径/多 Scope/多容器层中的独立实例；<code>ext_metadata</code> 预留 <code>callstacks</code>（L4 可达性）、<code>ai_card</code>（ML-BOM）与 <code>citations</code> 槽位。</td>
+            </tr>
+            <tr>
+              <td><strong><code>snapshot_edges</code></strong><br/><span class="badge badge-blue">Tier 3 · 有向关系层</span></td>
+              <td>PK: <code>(snapshot_id, src_node_ref, dst_node_ref, relation_type)</code><br/>IDX: <code>(snapshot_id, dst_node_ref)</code></td>
+              <td><code>src_node_ref</code>、<code>dst_node_ref</code>、<code>relation_type</code>（<code>depends_on | provides | contains | trained_on | fine_tuned_from</code>）、<code>edge_scope</code>、<code>constraint_expr</code>（原始声明版本范围）</td>
+              <td>完整还原直接/传递依赖树、容器/Fat-JAR 包含关系、CycloneDX <code>provides</code> 及 AI 训练血缘；<code>constraint_expr</code> 为 Phase 2 无破坏性升级求解器供数。</td>
+            </tr>
+            <tr>
+              <td><strong><code>vex_statements</code></strong><br/><span class="badge badge-warn">L4 降噪挂接表</span></td>
+              <td>PK: <code>id (UUID)</code><br/>IDX: <code>(asset_id, canonical_id, vuln_id)</code></td>
+              <td><code>vuln_id</code>（CVE/OSV/GHSA）、<code>canonical_id</code>、<code>node_ref</code>（可选精准位点）、<code>state</code>（<code>not_affected | affected | fixed | under_investigation</code>）、<code>justification</code>（如 <code>vulnerable_code_not_in_execute_path</code>）、<code>author / source</code></td>
+              <td>将静态可达性、运行时裁剪与安全人工审计结论沉淀为可审计的 VEX 声明，跨快照持续继承，导出时无缝嵌入 CycloneDX VEX / OpenVEX。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 3: DUAL STANDARD MAPPING -->
+    <section class="full-width">
+      <h2><span class="sec-num">03</span>CycloneDX 1.7 ↔ Layer 2 IR ↔ SPDX 3.0.1 双向投影矩阵</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>语义概念</th>
+              <th>Layer 2 IR 字段</th>
+              <th>CycloneDX 1.7 (ECMA-424 2nd Ed.)</th>
+              <th>SPDX 3.0.1 (JSON-LD Profiles)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>局部节点引用</strong></td>
+              <td><code>snapshot_nodes.node_ref</code></td>
+              <td><code>components[].bom-ref</code></td>
+              <td><code>Element.spdxId</code> (IRI)</td>
+            </tr>
+            <tr>
+              <td><strong>跨生态组件主键</strong></td>
+              <td><code>canonical_components.match_key</code></td>
+              <td><code>components[].purl</code></td>
+              <td><code>software_Package.packageUrl</code> / <code>externalIdentifier</code></td>
+            </tr>
+            <tr>
+              <td><strong>商业/固件双标识</strong></td>
+              <td><code>canonical_components.cpe_aliases</code></td>
+              <td><code>components[].cpe</code></td>
+              <td><code>externalIdentifier (identifierType: "cpe23")</code></td>
+            </tr>
+            <tr>
+              <td><strong>运行时作用域</strong></td>
+              <td><code>snapshot_nodes.scope</code></td>
+              <td><code>components[].scope</code> (<code>required|optional|excluded</code>)</td>
+              <td><code>LifecycleScopedRelationship</code>（<code>relationshipType: dependsOn</code> + <code>scope: runtime | development | build | test</code>）</td>
+            </tr>
+            <tr>
+              <td><strong>依赖与供给边</strong></td>
+              <td><code>snapshot_edges (depends_on / provides)</code></td>
+              <td><code>dependencies[].dependsOn</code> / <code>provides</code></td>
+              <td><code>Relationship (dependsOn / contains)</code></td>
+            </tr>
+            <tr>
+              <td><strong>位置与调用栈证据</strong></td>
+              <td><code>occurrences</code> / <code>ext_metadata.callstacks</code></td>
+              <td><code>evidence.occurrences</code> / <code>evidence.callstack.frames</code></td>
+              <td>扩展属性或关联 File Element</td>
+            </tr>
+            <tr>
+              <td><strong>多工具富化溯源</strong></td>
+              <td><code>ext_metadata.citations</code></td>
+              <td>顶层 <code>citations[]</code>（<strong>v1.7 新增</strong>）</td>
+              <td><code>CreationInfo</code>（按元素级关联）</td>
+            </tr>
+            <tr>
+              <td><strong>AI 模型与数据集</strong></td>
+              <td><code>component_type='ml-model'|'data'</code> + <code>trained_on</code> + <code>ai_card</code></td>
+              <td><code>type: "machine-learning-model"</code> + <code>modelCard</code></td>
+              <td><code>ai_AIPackage</code> --<code>trainedOn</code>--&gt; <code>dataset_DatasetPackage</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 4: COMMERCIAL-SAFE SDKs -->
+    <section class="full-width">
+      <h2><span class="sec-num">04</span>商用闭源合规的 PURL / SBOM 基础 SDK 选型（严禁手写解析器）</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>PURL 官方解析库（MIT · 零传染风险）</h4>
+          <p><span class="badge badge-ok">MIT License</span></p>
+          <p>直接引入官方生态实现，再在其外层包一层自研的 <code>Canonicalizer</code> 补齐 PEP 503 与 <code>match_key</code> 规则：</p>
+          <p>Go: <a href="https://github.com/package-url/packageurl-go" target="_blank" rel="noopener"><code>package-url/packageurl-go</code></a> · Java: <a href="https://github.com/package-url/packageurl-java" target="_blank" rel="noopener"><code>package-url/packageurl-java</code></a> · Python: <a href="https://github.com/package-url/packageurl-python" target="_blank" rel="noopener"><code>package-url/packageurl-python</code></a></p>
+        </div>
+        <div class="card">
+          <h4>SBOM 双向序列化与转换底座（Apache-2.0）</h4>
+          <p><span class="badge badge-ok">Apache-2.0 License</span></p>
+          <p>CycloneDX 官方库：<a href="https://github.com/CycloneDX/cyclonedx-go" target="_blank" rel="noopener"><code>CycloneDX/cyclonedx-go</code></a> / <a href="https://github.com/CycloneDX/cyclonedx-core-java" target="_blank" rel="noopener"><code>cyclonedx-core-java</code></a>；跨标准互转参考 OpenSSF <a href="https://github.com/protobom/protobom" target="_blank" rel="noopener"><code>protobom/protobom</code></a>（格式中立 Protobuf IR + CycloneDX/SPDX 读写器）。</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav no-print">
+      <a href="../lessons/0002-unified-ir-purl-and-cyclonedx-graph.html">← 返回 Lesson 0002</a>
+      <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 数据字典速查卡</span>
+    </footer>
+  </main>
+</body>
+</html>

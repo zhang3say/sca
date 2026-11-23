@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0003：源码依赖解析的底层真相：Manifest、Lockfile 与构建期解析陷阱</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002 · Layer 2 统一 IR</a>
+        <a href="./0003-source-dependency-resolution-traps.html" class="active">Lesson 0003 · 源码解析真相</a>
+        <a href="../reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 数据字典</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0003</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 02 多语言与全形态采集提取引擎</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>源码依赖解析的底层真相：Manifest、Lockfile 与构建期解析陷阱</h1>
+      <p class="subtitle">从今天起进入 Layer 1 采集提取引擎深水区。源码静态解析看似只是“读几个 XML/JSON/TOML”，真实世界却处处是版本裁决反差、幽灵依赖、环境剪枝与构建脚本 RCE。本课帮你把「四级渐进解析路由」与「防 RCE 沙箱隔离边界」一次拍板到位。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 5 大生态冲突裁决真相，拍板 Layer 1 渐进解析阶梯与构建期安全沙箱架构</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002 · Layer 2 双层身份 IR</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> 中，我们为 Layer 2 IR 建好了 <code>snapshot_nodes (bom-ref)</code>、<code>scope</code> 以及记录原始版本范围的 <code>constraint_expr</code>。然而“垃圾进、垃圾出”：如果 Layer 1 源码提取器算错了传递依赖版本、漏掉了 Monorepo 嵌套实例、误把 <code>go.sum</code> 当成锁文件，或者在平台宿主机上直接跑 <code>mvn</code> / <code>npm install</code> 遭到 RCE 反杀，再精巧的底座也会沦为误报制造机或高危肉鸡。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>精度鸿沟：Manifest、Lockfile 与有效图谱的「四级渐进阶梯」</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>许多绿地 SCA 团队的第一个天真假设是：“不就是用正则或 XML/JSON 解析器扫一遍源码里的 <code>pom.xml</code>、<code>package.json</code>、<code>requirements.txt</code> 吗？”——<strong>实证研究早已击碎了这个幻觉。</strong></p>
+      <aside class="sidenote">
+        <span class="sidenote-title">实证基准 · IEEE S&amp;P 2023</span>
+        KTH 皇家理工学院团队（<a href="https://arxiv.org/abs/2303.11102" target="_blank" rel="noopener">Balliu et al., <em>Challenges of Producing Software Bill of Materials for Java</em>, arXiv:2303.11102 / IEEE S&amp;P 2023</a>）以 Apache Flink、Jenkins 等 26 个真实 Java/Maven 工程构建 Ground Truth，横评 6 款主流 SBOM 工具后证实：<strong>不感知构建期有效图谱的纯静态扫描面临严重的传递依赖漏报与版本漂移</strong>，不同工具产出差异极大。
+      </aside>
+      <p>源码仓库中关于依赖的事实存在三种完全不同保真度的形态，你的 Layer 1 引擎必须按<strong>确定性从高到低</strong>分级路由，而绝不能混为一谈：</p>
+    </div>
+
+    <div class="grid-3 full-width">
+      <div class="card">
+        <h4>1. Manifest（清单文件）</h4>
+        <p><span class="badge badge-warn">声明态 · 约束范围</span></p>
+        <p>如 <code>package.json</code>、<code>pom.xml</code>、<code>build.gradle</code>、<code>pyproject.toml</code>、<code>requirements.txt</code>。它只表达开发者的“宽松意图”（如 <code>^4.17.0</code> 或 <code>${spring.version}</code>），既不含大多数传递依赖，也无法确定今天和明天拉取到的具体版本。</p>
+      </div>
+      <div class="card">
+        <h4>2. Lockfile（锁文件）</h4>
+        <p><span class="badge badge-ok">确定性快照 · 高性价比真值</span></p>
+        <p>如 <code>package-lock.json</code>、<code>pnpm-lock.yaml</code>、<code>yarn.lock</code>、<code>uv.lock</code>、<code>poetry.lock</code>、<code>pylock.toml</code> (PEP 751)、<code>gradle.lockfile</code>、<code>Cargo.lock</code>、<code>go.mod</code>。记录了精确版本与加密哈希，<strong>无需执行不可信代码即可接近 100% 还原真实树</strong>（<em>警示：<code>go.sum</code> 不是锁文件！</em>）。</p>
+      </div>
+      <div class="card">
+        <h4>3. Build-Time Graph（构建有效图）</h4>
+        <p><span class="badge badge-build">最高保真 · 高安全/运维成本</span></p>
+        <p>当项目无锁文件（如大量传统 Maven / Gradle 企业老仓），或依赖变量插值、Profile 条件开关、动态插件生成时，只有请求仓库元数据或运行原生构建插件（<code>mvn dependency:tree</code> / Gradle Resolution API）才能拿到 Effective Graph，但同时伴随 <strong>RCE 与环境复现成本</strong>。</p>
+      </div>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 1 源码采集「四级渐进解析阶梯（Progressive Resolution Ladder）」</strong>
+        <span>黄金原则：能纯静态零执行解决的绝不触发构建；必须构建的优先走 CI Hook 或强隔离沙箱</span>
+      </figcaption>
+      <div class="ladder-grid">
+        <div class="ladder-step tier-1">
+          <div class="ladder-step-head">
+            <span>TIER 1 · 零执行首选</span>
+            <span class="badge badge-ok">毫秒级</span>
+          </div>
+          <div class="ladder-step-title">锁文件确定性解析</div>
+          <p class="ladder-step-desc">直接解析 <code>package-lock.json</code> v2/v3、<code>pnpm-lock.yaml</code>、<code>uv.lock</code>、<code>pylock.toml</code>、<code>gradle.lockfile</code>、<code>Cargo.lock</code> 与 <code>go.mod</code>。</p>
+          <div class="ladder-step-meta">安全风险：极低（纯数据解析）<br/>精度：95%–99%+（依赖 Marker 求值）</div>
+        </div>
+
+        <div class="ladder-step tier-2">
+          <div class="ladder-step-head">
+            <span>TIER 2 · 无执行求解</span>
+            <span class="badge badge-blue">秒级</span>
+          </div>
+          <div class="ladder-step-title">注册表元数据虚拟求解</div>
+          <p class="ladder-step-desc">针对无锁 <code>pom.xml</code> 或未锁定范围，借鉴 OSV-SCALIBR / <code>deps.dev</code> 或连私有 Nexus 拉取父 POM 与 BOM 元数据，在内存中复刻调解算法而不执行构建脚本。</p>
+          <div class="ladder-step-meta">安全风险：低（仅只读 HTTP 拉取）<br/>盲区：Gradle Groovy/Kotlin 动态逻辑</div>
+        </div>
+
+        <div class="ladder-step tier-3">
+          <div class="ladder-step-head">
+            <span>TIER 3 · 构建感知</span>
+            <span class="badge badge-warn">十秒–分钟级</span>
+          </div>
+          <div class="ladder-step-title">CI Hook 优先 + 沙箱兜底</div>
+          <p class="ladder-step-desc">复杂多模块 Maven/Gradle 或无锁 <code>setup.py</code>：首选在<strong>客户自有 CI 构建末尾</strong>嵌入轻探针采集有效图；若需平台侧主动扫，必须进 gVisor/Firecracker 沙箱。</p>
+          <div class="ladder-step-meta">安全风险：高（RCE/窃密面）<br/>精度：接近 100% 构建真值</div>
+        </div>
+
+        <div class="ladder-step tier-4">
+          <div class="ladder-step-head">
+            <span>TIER 4 · 产物闭环</span>
+            <span class="badge badge-build">制品态真值</span>
+          </div>
+          <div class="ladder-step-title">制品与运行环境反扫补盲</div>
+          <p class="ladder-step-desc">对已产出的 OCI 镜像、Fat-JAR（<code>META-INF/maven</code>）、<code>site-packages</code>、<code>node_modules</code> 与 Go 二进制内嵌 <code>debug.BuildInfo</code> 提取“实际交付物”（见 Lesson 0005）。</p>
+          <div class="ladder-step-meta">价值：验证源码扫描 vs 实际交付偏差<br/>规避一切构建脚本不确定性</div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>五大主流生态版本裁决真相与核心工程暗坑</h2>
+
+    <div class="prose-col">
+      <p>不同包管理器的底层数学哲学南辕北辙。如果用同一套“挑最新版”或“按包名合并”的直觉去写解析器，你在不同语言上就会交替产出截然相反的漏报与误报。下表浓缩了架构评审时必须逐生态核验的底层规则：</p>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:13%" />
+            <col style="width:18%" />
+            <col style="width:25%" />
+            <col style="width:15%" />
+            <col style="width:29%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>语言生态</th>
+              <th>典型清单 vs 锁/有效图文件</th>
+              <th>核心冲突裁决算法</th>
+              <th>版本共存语义</th>
+              <th>头号工程暗坑与 Layer 1 规则</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Java · Maven</strong><br/><a href="https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html" target="_blank" rel="noopener">官方文档</a></td>
+              <td><code>pom.xml</code>（天然无锁文件；需靠 Effective POM 或 <code>dependency:tree</code>）</td>
+              <td><strong>Nearest Definition（最短路径优先）</strong>；同深度时 <strong>First Declaration Wins</strong>；<code>dependencyManagement</code> 与 BOM (<code>&lt;scope&gt;import&lt;/scope&gt;</code>) <strong>优先级高于调解</strong>。</td>
+              <td>单版本（同一 GA 在同一 Classpath 仅存 1 份）</td>
+              <td>1) <strong>绝对不能用语义版本号大小猜结果</strong>（深度 2 的 1.0 漏洞版会打败深度 3 的 2.1 修复版）；<br/>2) 不解析父 POM <code>${var}</code> 插值、Profiles 与 BOM Import 会大面积算错版本。</td>
+            </tr>
+            <tr>
+              <td><strong>Java/Kotlin · Gradle</strong><br/><a href="https://docs.gradle.org/current/userguide/dependency_locking.html" target="_blank" rel="noopener">官方文档</a></td>
+              <td><code>build.gradle(.kts)</code> / <code>libs.versions.toml</code> + 可选 <code>gradle.lockfile</code></td>
+              <td>默认 <strong>Highest Version Wins（全局最高版本胜出）</strong>；<code>strictly</code> / <code>constraints</code> / <code>resolutionStrategy</code> 可强干预；有 <code>gradle.lockfile</code> 则强制锁定。</td>
+              <td>单版本（按 Configuration 独立求解，如 <code>runtimeClasspath</code> vs <code>test*</code>）</td>
+              <td>1) <strong>与 Maven 完全相反的拓扑裁决</strong>，切忌混用规则；<br/>2) 动态范围（<code>31.+</code>、<code>[1.0,2.0)</code>）无锁时导致“今日绿灯、明日构建拉入投毒包”；<br/>3) DSL 图灵完备，重度插件改写只能靠 Tier 3/4 还原。</td>
+            </tr>
+            <tr>
+              <td><strong>JS/TS · npm &amp; pnpm</strong><br/><a href="https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json" target="_blank" rel="noopener">npm v3</a> / <a href="https://pnpm.io/workspaces" target="_blank" rel="noopener">pnpm</a></td>
+              <td><code>package.json</code> + <code>package-lock.json</code> (v3) / <code>pnpm-lock.yaml</code> / <code>yarn.lock</code></td>
+              <td>允许同一包多版本按子树嵌套共存；npm 通过 <strong>Hoisting 扁平提升</strong>至根 <code>node_modules</code>；pnpm 用 <code>importers</code> + <code>snapshots</code> 严格软链隔离。</td>
+              <td><strong>多版本合法共存</strong>（同一项目磁盘上可同时运行 4.17.15 与 4.17.21）</td>
+              <td>1) 必须按 Lesson 0002 在 L2 IR 为不同路径实例生成<strong>独立 <code>bom-ref</code></strong>，不可按 PURL 强合并；<br/>2) npm 扁平化会诱发<strong>幽灵依赖</strong>（未声明却能 require）；<br/>3) Monorepo 需正确连接 <code>workspace:*</code> 内部边与 <code>dev:true</code>。</td>
+            </tr>
+            <tr>
+              <td><strong>Python · PyPI / uv / Poetry</strong><br/><a href="https://peps.python.org/pep-0508/" target="_blank" rel="noopener">PEP 508</a> / <a href="https://peps.python.org/pep-0751/" target="_blank" rel="noopener">PEP 751</a></td>
+              <td><code>pyproject.toml</code> / <code>requirements.txt</code> + <code>uv.lock</code> / <code>poetry.lock</code> / <code>pylock.toml</code></td>
+              <td>回溯/PubGrub SAT 求解器；现代通用锁文件携带 <strong>Environment Markers</strong>（<code>sys_platform</code>、<code>python_version</code>），按安装目标环境线性求值。</td>
+              <td>单版本（同一 Python <code>site-packages</code> 环境仅存 1 份）</td>
+              <td>1) <strong>不求值 Environment Markers 会把跨平台/旧 Py 分支全部报成误报</strong>；<br/>2) <code>requirements.txt</code> 常缺传递锁、含 VCS URL 或 <code>-e .</code>；<br/>3) 遗留 <code>setup.py</code> 在提取元数据时即触发任意代码执行！</td>
+            </tr>
+            <tr>
+              <td><strong>Go · Modules</strong><br/><a href="https://go.dev/ref/mod" target="_blank" rel="noopener">go.dev/ref/mod</a> / <a href="https://research.swtch.com/vgo-mvs" target="_blank" rel="noopener">MVS</a></td>
+              <td><code>go.mod</code>（真源）+ <code>go.sum</code>（<strong>非锁文件</strong>）+ <code>vendor/modules.txt</code></td>
+              <td><strong>MVS（Minimal Version Selection）</strong>：取满足全部上游 <code>require</code> 最低下界的<strong>最小版本</strong>，绝不自动升到代理仓最新版；受 <code>replace</code> / <code>exclude</code> 修正。</td>
+              <td>主版本独立（<code>/v2</code> 视为不同导入路径，同一主版本内单版本）</td>
+              <td><strong>头号红线误区：<code>go.sum</code> 是 append-only 加密校验和日志，不是 Lockfile！</strong>未执行 <code>go mod tidy</code> 或 MVS 探查留下的旧哈希会引发大面积 <strong>Ghost CVE 误报</strong>；必须扫 <code>go.mod</code>（Go 1.17+ 含完整构建及测试间接依赖），若需剔除测试依赖则由 Tier 4 结合二进制 <code>BuildInfo</code>。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- INTERACTIVE DEPENDENCY RESOLUTION LAB -->
+    <section class="widget-panel full-width" data-widget="dep-lab">
+      <script type="application/json" class="dep-lab-data">
+        {
+          "title": "交互实验室：5 大生态依赖裁决真相与 Layer 1 误判复现",
+          "intro": "点击下方 5 个生态场景并切换开关，亲眼验证：同一份源码或菱形拓扑，为何在不同生态和解析策略下会产出截然相反的漏洞扫描结论。"
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>静态解析天花板与构建期沙箱防 RCE 纵深架构</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>当项目既没有提交锁文件（例如大量企业级老旧 Maven/Gradle 仓库、无锁 <code>requirements.txt</code> + <code>setup.py</code>），又使用动态构建逻辑时，Tier 1 与 Tier 2 就触及了<strong>静态解析的天花板</strong>。此时若决定在平台上运行原生包管理器做构建感知解析（Tier 3），你面临的不再只是精度问题，而是<strong>平台基础设施被接管的高危 RCE 威胁</strong>。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">两条交付路径优先级</span>
+        商业实战中应把 <strong>CI/CD Native Hook（在客户自有构建流水线末尾采集）</strong> 放在第一优先级：客户 CI 天然装好了特定 JDK/Gradle/私有仓库凭据，不产生平台侧环境复现债；平台侧沙箱仅作为“零接入 Git 仓库扫描”的兜底能力。
+      </aside>
+      <p>以下四类动作在包管理器仅“解析元数据”阶段就会执行不可信代码：</p>
+      <ul>
+        <li><strong>Python <code>setup.py</code> / 动态 <code>build-backend</code></strong>：执行 <code>pip download</code> 或读取未提供 wheel 的源码包时直接运行任意 Python 代码。</li>
+        <li><strong>Node.js 生命周期钩子</strong>：若触发了安装流程却未禁用脚本（<code>--ignore-scripts</code>），<code>preinstall</code> / <code>postinstall</code> 立刻拿到 Shell 权限（这也是大量 npm 投毒包的首选触发点）。</li>
+        <li><strong>Gradle Groovy/Kotlin DSL</strong>：<code>build.gradle</code> 本质是可执行 JVM 程序，即使只跑 <code>./gradlew dependencies</code>（Configuration Phase），脚本顶层的 <code>exec { ... }</code> 照样会执行。</li>
+        <li><strong>Maven 扩展机制</strong>：恶意仓库里的 <code>.mvn/extensions.xml</code> 或自定义构建插件可在解析阶段即注入执行逻辑。</li>
+      </ul>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 2 · Tier 3 平台侧构建期防 RCE 纵深隔离与凭据代理架构（对标 Dependabot Proxy 模式）</strong>
+        <span>核心铁律：构建沙箱绝不允许触碰宿主机内核，也绝不允许持有明文仓库凭据</span>
+      </figcaption>
+      <div class="sandbox-arch-box">
+        <div class="sandbox-zone zone-untrusted">
+          <div class="sandbox-zone-kicker">UNTRUSTED EXECUTION ZONE</div>
+          <div class="sandbox-zone-title">一次性隔离沙箱（无凭据 / 禁直连内网）</div>
+          <ul>
+            <li>运行 <code>mvn</code> / <code>gradlew</code> / <code>pip</code> / <code>npm --ignore-scripts</code></li>
+            <li><strong>零持久盘 / 零环境变量密钥</strong>（无 Token、无 SSH Key）</li>
+            <li>强隔离内核边界：<strong>gVisor (<code>runsc</code>)</strong> 或 <strong>Firecracker MicroVM</strong></li>
+            <li>强制屏蔽默认出网，仅允许流量发往外部 Proxy；仅回传经 Schema 与体积校验的依赖树 JSON 至 Layer 2 Adapter</li>
+            <li>严格 CPU / 内存 / 超时熔断，扫完即刻销毁实例</li>
+          </ul>
+        </div>
+
+        <div class="sandbox-arrow-col">
+          <span>HTTP(S)</span>
+          <span class="sandbox-arrow-glyph">──▶</span>
+          <span style="font-size:0.68rem;">仅允许走受控代理<br/>无凭据明文</span>
+        </div>
+
+        <div class="sandbox-zone zone-proxy">
+          <div class="sandbox-zone-kicker">TRUSTED CONTROL BOUNDARY · DEPENDABOT PROXY PATTERN</div>
+          <div class="sandbox-zone-title">沙箱外独立鉴权与白名单代理（Credential-Injecting Proxy）</div>
+          <ul>
+            <li><strong>凭据托管与动态注入</strong>：仅当目标域名匹配客户配置白名单（如 <code>nexus.corp.internal</code>）时，由代理在请求离开边界前代注入 Auth Header</li>
+            <li><strong>SSRF / 元数据封堵</strong>：硬拦截云厂商元数据地址（<code>169.254.169.254</code>）与控制面内网网段</li>
+            <li><strong>路径与方法收口</strong>：私有制品仓只放行元数据与构件 <code>GET</code>（如 <code>.pom</code>/<code>maven-metadata.xml</code>），禁 <code>POST/PUT</code> 写入，阻断外带信道</li>
+          </ul>
+        </div>
+
+        <div class="sandbox-arrow-col">
+          <span>带鉴权</span>
+          <span class="sandbox-arrow-glyph">──▶</span>
+          <span style="font-size:0.68rem;">白名单放行</span>
+        </div>
+
+        <div class="sandbox-zone zone-upstream">
+          <div class="sandbox-zone-kicker">ALLOWED REGISTRIES</div>
+          <div class="sandbox-zone-title">合法上游仓库与私有 Nexus</div>
+          <ul>
+            <li>Maven Central / PyPI / npmjs / Go Proxy</li>
+            <li>客户授权接入的私有 Nexus / JFrog Artifactory</li>
+            <li><strong>最小只读授权（Read-Only Token）</strong>：仅返回 POM、元数据与构件，严防投毒脚本借凭据反向污染私有仓</li>
+          </ul>
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col">
+      <h3>核心选型对比：普通 Docker (<code>runc</code>) vs Google gVisor vs Kata Containers vs AWS Firecracker</h3>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:16%" />
+            <col style="width:14%" />
+            <col style="width:24%" />
+            <col style="width:22%" />
+            <col style="width:24%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>隔离技术方案</th>
+              <th>开源协议（商用合规核验）</th>
+              <th>内核隔离原理</th>
+              <th>性能与部署门槛</th>
+              <th>在商业 SCA 平台中的推荐定位</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>普通容器 <code>runc</code></strong></td>
+              <td><span class="badge badge-ok">Apache-2.0</span></td>
+              <td>Linux Namespaces + Cgroups + Seccomp，<strong>与宿主机共享同一 Linux 内核</strong>。</td>
+              <td>零虚拟化损耗；任何 K8s/Docker 环境开箱即用。</td>
+              <td><span class="badge badge-danger">不推荐跑 Tier 3</span> 共享内核面对针对性容器逃逸（如针对恶意 <code>setup.py</code>/<code>build.gradle</code>）防御纵深不足。</td>
+            </tr>
+            <tr>
+              <td><strong>Google gVisor (<code>runsc</code>)</strong></td>
+              <td><span class="badge badge-ok">Apache-2.0</span></td>
+              <td>Go 编写的用户态内核（<code>Sentry</code> 拦截绝大多数 Syscall，<code>Gofer</code> 代理文件 I/O），隔离宿主机内核。</td>
+              <td>冷启动快（约数十毫秒）；<strong>无需硬件 KVM 嵌套虚拟化</strong>，可无缝运行在客户常规 K8s / 云主机或私有化虚机中。</td>
+              <td><span class="badge badge-ok">私有化 &amp; 多租户均衡首选</span> 兼顾内核隔离强度与企业内网无 KVM 环境的可交付性（需留意密集小文件 I/O 场景如 <code>node_modules</code> 有性能折损，可优先用 Tier 1 绕开）。</td>
+            </tr>
+            <tr>
+              <td><strong>Kata Containers (<code>kata-runtime</code>)</strong></td>
+              <td><span class="badge badge-ok">Apache-2.0</span></td>
+              <td>OCI/CRI 兼容的 MicroVM 容器运行时，每个 Pod 独占轻量虚拟机与 <strong>Guest Linux 内核</strong>（可选 QEMU / Cloud Hypervisor / Firecracker 等 VMM）。</td>
+              <td><strong>强依赖宿主机 <code>/dev/kvm</code></strong>；优势在于直接通过 K8s <code>RuntimeClass</code>（如 <code>kata-fc</code> / <code>kata-clh</code>）无缝切换，无需改业务镜像。</td>
+              <td><span class="badge badge-blue">K8s 原生高安全首选</span> 若平台架构本身跑在支持 KVM 的 Kubernetes 集群上，用 Kata 替代裸调 Firecracker 可直接复用 K8s 调度与生命周期管理。</td>
+            </tr>
+            <tr>
+              <td><strong>AWS Firecracker</strong></td>
+              <td><span class="badge badge-ok">Apache-2.0</span></td>
+              <td>Rust 编写的超轻量 KVM MicroVM VMM，每个任务拥有<strong>完全独立的 Guest Linux 内核</strong>与极小 TCB（亦常作 Kata 底层 VMM）。</td>
+              <td>隔离强度与冷启动极优；但<strong>强依赖宿主机 <code>/dev/kvm</code></strong>，且裸用需自建 VMM 池化与网络编排，在受限私有化机房部署复杂度高。</td>
+              <td><span class="badge badge-blue">自建 Serverless SaaS 天花板</span> 适合拥有专职底座团队的公有云托管 SaaS，或作为 Kata Containers 的底层 <code>kata-fc</code> 引擎运行。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE SANDBOX -->
+    <h2><span class="sec-num">04</span>架构师实战沙盘：评审 Layer 1 源码解析与构建隔离方案</h2>
+
+    <div class="prose-col">
+      <p>下面模拟你在审阅 Layer 1 源码采集模块 RFC 文档时的 5 项核心决策。请逐一选出你的拍板方案，点击「运行架构评审」查看每个选择背后的漏报/误报或安全灾难推演。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 1 源码依赖解析架构评审沙盘（5 个核心决策）",
+          "intro": "背景：商业 SCA 平台需覆盖 Java (Maven/Gradle)、Node.js (npm/pnpm)、Python 与 Go 客户仓库，同时支持云端 SaaS 与政企私有化部署。",
+          "summary": {
+            "optimal": "全部 {optimal} 项 Layer 1 源码解析与安全边界决策均精准过关！你的采集层兼顾了高准确率（Tier 1/2 优先、生态原生裁决）、Monorepo 多版本保真度以及防 RCE 纵深安全。",
+            "warning": "没有触发高危红线，但有 {warning} 项处于成本、精度或运维复杂度的权衡边缘（标黄项），建议在 RFC 评审会上明确补偿措施。",
+            "critical": "当前设计存在 {critical} 处致命精度灾难或高危 RCE/窃密漏洞（标红项）！如果按此上线，将迅速在真实客户项目中遭遇大规模 Ghost 误报或基础设施失陷。"
+          },
+          "modules": [
+            {
+              "name": "企业级多模块 Java/Maven 仓库（无锁文件）解析路由",
+              "layer": "Layer 1 · Maven 路由",
+              "context": "客户仓库含父子 pom.xml、${version} 属性插值与 Spring Boot BOM Import，暂未接 CI Hook。",
+              "options": [
+                {
+                  "label": "优先走 Tier 2 注册表元数据虚拟求解（拉取父 POM/BOM 复刻 Nearest+BOM 裁决），复杂动态构建再走 CI Hook/隔离沙箱",
+                  "status": "optimal",
+                  "verdictTitle": "兼具安全性、速度与高精度的渐进架构",
+                  "feedback": "工业界最优实践（对标 OSV-SCALIBR + deps.dev 模式）！无需启动重量级且含 RCE 风险的 JVM 构建，即可精确展开属性插值、BOM 覆写与 Nearest Definition 调解；仅对极少数自定义插件场景降级到 Tier 3。"
+                },
+                {
+                  "label": "用正则静态解析单个 pom.xml，遇到同 artifactId 冲突就取语义版本号最大的那个",
+                  "status": "critical",
+                  "verdictTitle": "彻底违背 Maven 规则且丢光传递依赖",
+                  "feedback": "Maven 从不按版本号大小调解冲突（那是 Gradle 的规则），且单文件正则解不开父 POM 变量与 BOM Import，导致严重的版本错算与传递依赖大面积漏报。"
+                },
+                {
+                  "label": "所有 Maven 仓库不管简单复杂，一律在平台启动完整 mvn clean package 构建后再提取",
+                  "status": "warning",
+                  "verdictTitle": "算力成本、环境复现债与失败率极高",
+                  "feedback": "跑完整构建既慢（分钟级），又常因客户特定 JDK 小版本、私有测试插件或代码编译错误导致扫描全盘失败；对仅缺有效依赖图的场景属于严重过度执行。"
+                }
+              ]
+            },
+            {
+              "name": "Go 模块源码扫描数据源选择",
+              "layer": "Layer 1 · Go 解析器",
+              "context": "研发反馈某客户项目 go.sum 里有 200 多条记录而 go.mod 只有 40 多条，问应该解析哪一个。",
+              "options": [
+                {
+                  "label": "以 go.mod（结合 replace/exclude 与 MVS）为主真源，严禁将 go.sum 当作依赖清单写入 IR",
+                  "status": "optimal",
+                  "verdictTitle": "精准消灭 Go 生态头号 Ghost CVE 误报源",
+                  "feedback": "完全正确！Go 1.17+ 后主 go.mod 已包含全部编译所需直接与间接依赖（// indirect），配合 MVS 即可得出真实编译版本；go.sum 仅用于密码学哈希校验，把其当作锁文件会报出大量未编译幽灵漏洞。"
+                },
+                {
+                  "label": "只解析 go.sum（因为它列出所有历史精确哈希，看起来最像 Lockfile）",
+                  "status": "critical",
+                  "verdictTitle": "必定爆发大规模 Ghost CVE 误报事故",
+                  "feedback": "go.sum 是 append-only 的校验和缓存，包含历史未清理版本和 MVS 探查过的过渡版本。拿 go.sum 当锁文件扫描是商业 SCA 被研发投诉误报率最高的原因之一。"
+                },
+                {
+                  "label": "同时解析 go.mod 和 go.sum 并取并集，宁可多报不可漏报",
+                  "status": "critical",
+                  "verdictTitle": "“宁可多报”摧毁开发者信任与降噪指标",
+                  "feedback": "在现代 SCA 中，把永远不会被 Go 编译器编进二进制的历史校验记录并入资产表，只会制造大量无法修复的噪音告警，迫使客户关掉门禁。"
+                }
+              ]
+            },
+            {
+              "name": "Python 跨平台通用锁文件（uv.lock / pylock.toml）与遗留 setup.py 处理",
+              "layer": "Layer 1 · Python 策略",
+              "context": "仓库存在跨 Linux/Windows 的 uv.lock，另有老项目只有无版本号的 requirements.txt + setup.py。",
+              "options": [
+                {
+                  "label": "Tier 1 解析通用锁文件并按目标环境求值 PEP 508 Markers（区分 dev 组）；无锁 setup.py 仅在隔离沙箱或 AST 静态近似提取",
+                  "status": "optimal",
+                  "verdictTitle": "精准剪枝且严守安全边界",
+                  "feedback": "完美对齐 PEP 751 与安全底线！按目标 OS/Python 版本求值 Markers 可大幅降低跨平台误报；对于高危的 setup.py，绝不直接 pip install 裸跑，而是优先安全静态分析或送入无凭据隔离沙箱。"
+                },
+                {
+                  "label": "解析 uv.lock 时直接忽略所有 environment markers，把文件里每个包全量入库告警",
+                  "status": "warning",
+                  "verdictTitle": "引入跨平台与历史 Python 版本的冗余误报",
+                  "feedback": "虽然不会像执行 setup.py 那样触发 RCE，但忽略 Markers 会把 Windows 专属库或仅用于 Python 3.8 的旧包全部挂到 Linux Python 3.12 生产环境名下，降低告警精准度。"
+                },
+                {
+                  "label": "在扫描工作节点直接执行 python setup.py egg_info 获取精确依赖元数据",
+                  "status": "critical",
+                  "verdictTitle": "经典严重 RCE 安全事故入口",
+                  "feedback": "setup.py 是任意 Python 脚本！直接执行 egg_info 等同于把平台工作节点的 Shell 权限双手奉送给恶意 PR 提交者或供应链投毒作者。"
+                }
+              ]
+            },
+            {
+              "name": "平台侧执行 Tier 3 动态构建解析时的安全沙箱与仓库凭据设计",
+              "layer": "Layer 1 · 安全隔离架构",
+              "context": "需要连接客户私有 Nexus / npm 仓拉取 POM 或依赖树，同时防止恶意构建脚本逃逸与窃密。",
+              "options": [
+                {
+                  "label": "gVisor/Firecracker 强隔离沙箱（无明文凭据、禁连内网元数据），通过外部鉴权白名单代理（Dependabot Proxy 模式）代注入 Token",
+                  "status": "optimal",
+                  "verdictTitle": "对齐世界顶级供应链安全平台的纵深防御",
+                  "feedback": "无懈可击！即使构建脚本在沙箱内遭遇 RCE，由于沙箱内既无明文 Token 也接触不到宿主机内核和 169.254.169.254 元数据，且受限于外部代理白名单，攻击者既逃不出去也偷不到客户私有仓库密钥。"
+                },
+                {
+                  "label": "使用普通 Docker 容器跑构建，并将私有仓库账号密码以环境变量注入容器方便 mvn 读取",
+                  "status": "critical",
+                  "verdictTitle": "一键窃取全部私有仓库凭据的经典漏洞",
+                  "feedback": "恶意 build.gradle 或 postinstall 只需一行 printenv 并发起外联（或 DNS 外带），就能把客户私有制品仓高权限凭据直接偷走，且普通共享内核容器防不住针对性内核逃逸。"
+                },
+                {
+                  "label": "使用 Firecracker 隔离，但直接放通沙箱任意公网与内网路由以防拉包失败",
+                  "status": "warning",
+                  "verdictTitle": "内核隔离到位但网络边界与 SSRF 失守",
+                  "feedback": "Firecracker 保护了宿主机内核，但未收敛出网和屏蔽云元数据/内网网段会让沙箱沦为客户内网扫描跳板，也无法阻断将源码或敏感环境变量外带至攻击者服务器。"
+                }
+              ]
+            },
+            {
+              "name": "Monorepo 中 npm v3 / pnpm 多版本共存向 Layer 2 IR 写入策略",
+              "layer": "Layer 1 → Layer 2 对接",
+              "context": "package-lock.json 显示 root 有 lodash@4.17.21，同时 packages/legacy 嵌套依赖了 lodash@4.17.15。",
+              "options": [
+                {
+                  "label": "解析全量 packages/snapshots 路径树，为两个版本分别生成独立 snapshot_nodes (bom-ref) 并留存位置与 dev scope",
+                  "status": "optimal",
+                  "verdictTitle": "无缝兑现 Layer 2 双层身份的设计价值",
+                  "feedback": "漂亮！L1 与 L2 契合如齿轮咬合：两个版本共存的事实得以完整保真，后续既能精准告警 legacy 子模块的高危风险，又不会把 api 服务误判为受影响，且能指导研发改对锁路径。"
+                },
+                {
+                  "label": "为了结果简洁，仅扫描根目录 package.json 和顶层提升后的 node_modules/lodash",
+                  "status": "critical",
+                  "verdictTitle": "直接漏报深层嵌套的真实高危漏洞",
+                  "feedback": "只看提升到根目录的版本会导致 packages/legacy 实际运行时的 4.17.15 高危漏洞彻底从扫描报告中消失，产生不可接受的漏报。"
+                },
+                {
+                  "label": "把整个 node_modules 全量扫描结果拍平成无边列表，丢失属于哪个子包与 dev 标记",
+                  "status": "warning",
+                  "verdictTitle": "虽无漏报，但丢失定位修复与 Scope 降噪能力",
+                  "feedback": "如果丢掉 workspace 子包归属和 dev:true 标记，面对大型 Monorepo 研发团队，安全平台将说不清到底是前端构建工具还是核心后端网关引入了风险。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道场景题重点检验你对 <strong>Go MVS / <code>go.sum</code>、Maven vs Gradle 裁决反转、Python Markers / Node 多版本共存、以及构建期凭据代理架构</strong> 的即时决策力。<strong>请勿回翻正文，先凭记忆作答。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0003 · 源码依赖解析陷阱与安全沙箱回忆测验",
+          "intro": "结合真实一线踩坑场景做回忆检索，巩固长期记忆。",
+          "questions": [
+            {
+              "prompt": "某 Go 服务仓库的 go.mod 通过两个上游间接要求 golang.org/x/net v0.17.0（含 CVE）与 v0.23.0（已修复），Go Proxy 最新版本为 v0.30.0，而未运行 go mod tidy 的 go.sum 仍残留 v0.15.0、v0.17.0 和 v0.23.0 的哈希。关于 Go 实际编译版本与 SCA 扫描数据源，哪项判断正确？",
+              "options": [
+                "编译期会按最新原则拉取代理新版，直接全量扫描校验文件最准确。",
+                "编译期按最小选择锁定已修复版本，应扫模块声明并避开校验文件。",
+                "编译期会并行打包新旧两个小版本，必须把校验文件视为标准锁表。",
+                "编译期按声明先后回退至漏洞旧版，只需正则提取校验文件首条项。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Go 采用最小版本选择（MVS），永远选择满足所有 require 约束的最低版本（max(v0.17.0, v0.23.0) = v0.23.0），绝不自动拉取代理新版 v0.30.0（排除 A），也不支持同主版本并行打包（排除 C）或按声明顺序选旧版（排除 D）。go.sum 只是加密校验和日志而非锁文件，扫描 go.sum 会制造大量 Ghost CVE 误报，必须扫 go.mod（B 正确）。"
+            },
+            {
+              "prompt": "同一菱形拓扑下：App 经由 mod-a 引入 lib-x:1.0.0（路径深度 2），同时经由 mod-b → mod-d 引入 lib-x:2.1.0（路径深度 3）。如果该工程分别使用 Apache Maven 与 Gradle 构建，默认裁决以及在 Maven 中启用 <dependencyManagement> BOM Import 强制指定 2.1.0 后的结果分别是？",
+              "options": [
+                "两者均默认挑选语义最高版本生效，只需读取根清单即可精确还原。",
+                "两者均默认采取最近定义原则生效，仅在启用锁文件时才升至新版。",
+                "前者选最高版而后者选最近定义，若引入依赖管理则直接失效报错。",
+                "前者按最近选旧版而后者选新版，若配置依赖管理则优先覆写调解。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Maven 默认遵循 Nearest Definition（最短路径优先），因此选 Depth 2 的 1.0.0；而 Gradle 默认遵循 Highest Version Wins（全局最高版本优先），因此选 2.1.0（排除 A、B、C）。同时在 Maven 规范中，dependencyManagement（含 BOM import）优先级高于依赖调解，配置后会将版本覆写为 2.1.0（D 正确）。"
+            },
+            {
+              "prompt": "分析同时包含多平台 Python 通用锁文件（uv.lock / pylock.toml）与 Node.js Monorepo（package-lock.json v3）的企业代码库时，若 Layer 1 解析器①完全忽略 PEP 508 Environment Markers，且②按 (snapshot_id, package_name) 强行合并 Node 组件，会同步产生哪组恶果？",
+              "options": [
+                "把非目标平台组件报成跨端误报，并漏检子包嵌套的旧版脆弱依赖。",
+                "把目标平台核心组件漏报出清单，并重复统计相同根目录旧版依赖。",
+                "阻断全部传递依赖版本区间计算，并导致锁文件哈希校验全不通过。",
+                "触发动态脚本远程代码执行漏洞，并使工作区内部引用全链路崩溃。"
+              ],
+              "answerIndex": 0,
+              "explanation": "忽略 PEP 508 Environment Markers 会把仅在 Windows 或旧 Python 版本才会安装的分支全部写入 Linux 生产清单，制造跨平台误报；而 Node.js 允许不同工作区子包合法嵌套不同版本的同一个包，按包名强合并会覆盖/吞掉嵌套的脆弱版本或丢失定位上下文，导致漏报或无法修复（A 正确）。"
+            },
+            {
+              "prompt": "为了对复杂无锁的 Gradle / setup.py 仓库执行 Tier 3 构建感知解析，团队把构建脚本放进了 AWS Firecracker MicroVM 运行，但直接通过环境变量把客户私有 Nexus 的读写 Token 传进了沙箱内。该设计仍存在什么致命安全隐患？",
+              "options": [
+                "该运行时协议具强传染属性，商业闭源平台集成将触发合规阻断。",
+                "该运行时不支持网络通信，构建进程根本无法下载任何外部构件。",
+                "恶意脚本仍可在沙箱内窃取凭据，须改由外部鉴权代理注入令牌。",
+                "该运行时无法拦截系统调用，等价于在宿主机直接裸跑构建脚本。"
+              ],
+              "answerIndex": 2,
+              "explanation": "Firecracker 为 Apache-2.0 协议（排除 A），拥有独立 Guest Linux 内核可强隔离宿主机（排除 D），也支持正常受控联网（排除 B）。但哪怕内核再安全，一旦把明文凭据塞进沙箱环境变量，恶意 build.gradle 或 setup.py 脚本就能直接读取环境变量并通过构建网络外带窃密！必须参考 Dependabot Proxy 模式，将密钥留在沙箱外，由白名单代理动态注入鉴权头（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>做 Layer 1 解析策略与沙箱安全 RFC 评审时，推荐随时查验这些一手规范与论文：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://arxiv.org/abs/2303.11102" target="_blank" rel="noopener"><strong>Balliu et al. (IEEE S&amp;P 2023)</strong></a>：<em>Challenges of Producing Software Bill of Materials for Java</em>——建立对静态 SBOM 精度边界的清醒量化认知。</li>
+          <li><a href="https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html" target="_blank" rel="noopener"><strong>Apache Maven Dependency Mechanism</strong></a>、<a href="https://docs.gradle.org/current/userguide/dependency_locking.html" target="_blank" rel="noopener"><strong>Gradle Locking</strong></a>、<a href="https://peps.python.org/pep-0751/" target="_blank" rel="noopener"><strong>PEP 751 (<code>pylock.toml</code>)</strong></a> 与 <a href="https://go.dev/ref/mod" target="_blank" rel="noopener"><strong>Go Modules Reference (MVS)</strong></a>：五大生态行为的唯一权威法典。</li>
+          <li><a href="https://gvisor.dev/" target="_blank" rel="noopener"><strong>gVisor</strong></a> / <a href="https://github.com/kata-containers/kata-containers" target="_blank" rel="noopener"><strong>Kata Containers</strong></a> / <a href="https://firecracker-microvm.github.io/" target="_blank" rel="noopener"><strong>Firecracker</strong></a>（均 Apache-2.0）与 <a href="https://github.com/dependabot/dependabot-core" target="_blank" rel="noopener"><strong>Dependabot Proxy 架构</strong></a>：构建期沙箱凭据隔离的工业参考样板。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>完成第 2 节交互实验室、沙盘和 4 道测验后，<strong>欢迎带着你的结果回到对话中追问或同步进度</strong>：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“把我们目标客户最重的 2 个语言生态（比如内网无锁 Maven + 私有 Nexus，或 Python AI 工程仓）告诉我，我们一起定 Tier 1/2/3 的精确路由权重。”</li>
+          <li>“我在实验台/测验里选错了第 X 题，帮我复盘背后的真实场景细节。”</li>
+          <li>“我掌握了源码解析的边界与陷阱，准备进入 <strong>Lesson 0004（开源提取底座源码级拆解：OSV-SCALIBR、Syft、cdxgen 与 ORT 组合编排 + 解锁 Ref 03 速查卡）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">← 上一课：Lesson 0002 · Layer 2 统一 IR 与 PURL/CycloneDX</a>
+      <a href="./0004-oss-extractors-architecture-and-orchestration.html">下一课：Lesson 0004 · 开源提取底座拆解与编排（含 Ref 03） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/dep-resolution-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

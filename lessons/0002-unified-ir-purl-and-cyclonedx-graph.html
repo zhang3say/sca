@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0002：统一中间表示（Layer 2 IR）设计：PURL 为何淘汰 CPE 与 CycloneDX 1.7 图模型</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001 · 四层解耦</a>
+        <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html" class="active">Lesson 0002 · Layer 2 统一 IR</a>
+        <a href="../reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 数据字典</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0002</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 01 总体架构与开源边界</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>统一中间表示（Layer 2 IR）设计：PURL 为何淘汰 CPE 与 CycloneDX 1.7 图模型</h1>
+      <p class="subtitle">上一课我们确立了「Layer 2 统一 IR 是平台不可外包的脊椎」。今天直接落地这根脊椎的物理蓝图：吃透 ECMA-427 PURL 规范化暗坑、用「双层身份模型」破解依赖图建模最大误区，并让 PostgreSQL 底座同时无损兼容 CycloneDX 1.7、SPDX 3.0 以及未来的可达性与 AI-BOM。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>独立拍板 Layer 2 IR 数据库表模型、PURL 归一化策略与双国际标准投影契约</span>
+        <span><strong>速查卡片：</strong><a href="../reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 Layer 2 IR 数据字典</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001</a> 中我们划定了四层解耦红线：<strong>绝不能直接用 Trivy / Syft 的输出 JSON 当核心内表</strong>。接下来 1–3 个月内，你的团队写下第一行建表 SQL 之前，必须把三件事钉死：① 组件怎么命名才不会在多工具融合时反复撞车？② 同一个组件出现在同一项目的不同路径/Scope 怎么存才不丢证据？③ 如何今天不写一行可达性或 AI-BOM 代码，却能保证半年后平滑挂接不改底表？</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>CPE 2.3 为何在现代 SCA 必然失效，以及「双标识」真相</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>第一代 SCA 围绕 NIST NVD 的 <a href="https://nvd.nist.gov/products/cpe" target="_blank" rel="noopener">CPE 2.3（Common Platform Enumeration）</a> 构建组件标识，格式为 13 段冒号串：<code>cpe:2.3:a:vendor:product:version:update:edition:language:sw_edition:target_sw:target_hw:other</code>。它诞生于商业盒装软件与 IT 硬件资产时代，搬到开源包管理器生态后暴露出四个结构性死穴：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">架构师防矫枉过正</span>
+        淘汰 CPE 做<strong>开源主键</strong>，不等于把 CPE 字段从 IR 里彻底删除！对于商业闭源软件（如 Oracle WebLogic）、硬件固件、OS 内核以及政企传统合规审计，CPE 仍是不可替代的兼容标识。最佳实践对齐 <a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.5–1.7</a>：<strong>开源以 PURL 为第一主键，同时保留 <code>cpe</code> 作为可选兼容槽位（Dual-Identifier）</strong>。
+      </aside>
+      <ol>
+        <li><strong>Vendor 猜测地狱</strong>：开源项目没有统一的“厂商名”。同一个 <code>lodash</code> 在 NVD 历史记录里可能被人工标成 <code>lodash</code>、<code>lodash_project</code> 或 <code>lodash.js</code>；没有中心词典查表，扫描器根本无法确定性地从 <code>package.json</code> 推导出唯一 CPE。</li>
+        <li><strong>跨生态命名碰撞（Cross-Ecosystem Confusion）</strong>：CPE 缺少强制的“包管理器生态”维度（<code>target_sw</code> 经常填 <code>*</code>）。当 C++ 的 <code>requests</code> 或 PHP 的 <code>spring</code> 出现 CVE，使用模糊 CPE 匹配的扫描器会把它错挂到 Python 或 Java 组件上，制造海量误报。</li>
+        <li><strong>通配符超集爆炸与 PURL→CPE 翻译失真</strong>：由于 NVD 仍以 CPE 发布数据，许多旧工具被迫把扫描到的 PURL “翻译”成 CPE 去查 NVD，一旦碰上通配符 <code>*</code> 逻辑交叉或模糊匹配，就会误吞整个产品家族。</li>
+        <li><strong>人工编目严重滞后</strong>：新包发布到 PyPI/npm 只需几秒，但进入 NVD CPE 词典往往需要数周甚至永远不会录入，且完全覆盖不了现代供应链恶意投毒包（Malicious Packages）。</li>
+      </ol>
+      <p>国际标准 <a href="https://github.com/Ecma-TC54/ECMA-427" target="_blank" rel="noopener">Package-URL（PURL，Ecma TC54 正式采纳为 ECMA-427）</a> 彻底翻转了范式：<strong>不再依赖中心化人工词典，而是直接由包管理器坐标确定性地算出全局唯一标识</strong>，天然驱动 <a href="https://github.com/ossf/osv-schema" target="_blank" rel="noopener">OSV</a>、GHSA、CycloneDX 与 SPDX 3.0。</p>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>ECMA-427 PURL 语法解剖与四个隐蔽的工程暗坑</h2>
+
+    <div class="prose-col">
+      <p>依据 <a href="https://github.com/package-url/purl-spec" target="_blank" rel="noopener">ECMA-427 / purl-spec 规范</a>，任意软件或模型组件都由 7 个有序片段构成，其中仅 <code>scheme</code>、<code>type</code>、<code>name</code> 为必填项，解析时遵循<strong>从右向左剥离</strong>（先拆 <code>#subpath</code> → 再拆 <code>?qualifiers</code> → 再拆 <code>@version</code> → 最后按 <code>/</code> 拆分 <code>type/namespace/name</code>）：</p>
+    </div>
+
+    <figure class="purl-anatomy full-width">
+      <div class="purl-string-display">
+        <span class="pseg pseg-scheme">pkg</span><span class="pseg-sep">:</span><span class="pseg pseg-type">maven</span><span class="pseg-sep">/</span><span class="pseg pseg-namespace">org.apache.logging.log4j</span><span class="pseg-sep">/</span><span class="pseg pseg-name">log4j-core</span><span class="pseg-sep">@</span><span class="pseg pseg-version">2.14.1</span><span class="pseg-sep">?</span><span class="pseg pseg-qual">classifier=sources&amp;type=jar</span><span class="pseg-sep">#</span><span class="pseg pseg-subpath">org/apache/logging</span>
+      </div>
+      <div class="purl-legend-grid">
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#3f3d38;">1. scheme (必填)</span>
+          恒为小写 <code>pkg</code>，表明这是一个包定位符。
+        </div>
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#8b2635;">2. type (必填)</span>
+          小写生态标识：<code>maven</code>、<code>npm</code>、<code>pypi</code>、<code>golang</code>、<code>deb</code>、<code>huggingface</code> 等。
+        </div>
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#1b4d6b;">3. namespace (可选)</span>
+          生态特定命名空间：Maven <code>groupId</code>、npm <code>%40scope</code>、Debian/RedHat 发行商。
+        </div>
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#1b6543;">4. name (必填)</span>
+          组件主名称，必须遵循各生态的规范化与大小写规则。
+        </div>
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#8c5100;">5. version (可选)</span>
+          精确版本或不可变 Git Commit SHA；剥离它即得倒排索引用的 <strong>Base PURL</strong>。
+        </div>
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#54337a;">6. qualifiers (可选)</span>
+          按 Key <strong>字典序排序</strong>的 <code>k=v</code>，区分 <code>distro</code>、<code>arch</code>、<code>classifier</code> 等关键上下文。
+        </div>
+        <div class="purl-legend-item">
+          <span class="lbl" style="color:#5b4d3c;">7. subpath (可选)</span>
+          包内相对子路径（如 Go 子包），保留大小写并清除 <code>.</code> / <code>..</code>。
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col has-sidenote">
+      <h3>核心研发最易踩的四个 PURL 规范化暗坑</h3>
+      <p>当你的 Layer 1 同时集成 OSV-SCALIBR、Syft、cdxgen 与自研解析器时，如果 Layer 2 入口没有一道铁腕的 <strong>PURL Canonicalizer（规范化器）</strong>，同一组件会产出互不相等的字符串，导致资产重复统计与漏洞漏报：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">一石二鸟：AI-BOM 主键</span>
+        ECMA-427 生态已涵盖 <a href="https://github.com/package-url/purl-spec" target="_blank" rel="noopener"><code>pkg:huggingface</code></a> 类型（格式 <code>pkg:huggingface/&lt;org&gt;/&lt;model&gt;@&lt;lowercase-git-sha&gt;</code>）。今天把 PURL 规范化器写扎实，Phase 2 引入大模型权重资产时，直接复用同一主键索引，零 Schema 破坏！
+      </aside>
+      <ul>
+        <li><strong>暗坑 1 · PyPI 命名折叠（<a href="https://peps.python.org/pep-0503/" target="_blank" rel="noopener">PEP 503</a>）</strong>：PyPI 包名不区分大小写，且 <code>_</code>、<code>.</code> 与连续 <code>-</code> 等价。上游工具可能分别输出 <code>pkg:pypi/Django_Rest.Framework@3.14.0</code> 与 <code>pkg:pypi/django-rest-framework@3.14.0</code>——必须全部折叠为小写短横线形式。</li>
+        <li><strong>暗坑 2 · npm Scoped 包的 <code>@</code> 编码陷阱</strong>：<code>@angular/core</code> 中的 <code>@</code> 在 PURL 中绝不能原样拼接（因为 <code>@</code> 是版本分隔符），规范要求必须百分比编码为 <code>pkg:npm/%40angular/core@17.3.0</code>。</li>
+        <li><strong>暗坑 3 · Golang 大小写历史分歧（<a href="https://github.com/package-url/purl-spec/issues/308" target="_blank" rel="noopener">purl-spec #308</a>）</strong>：规范明确要求 <code>golang</code> 的 <code>namespace/name</code> 强制小写，但 <code>#subpath</code> 保留大小写；而真实 Go 仓库路径（如 <code>github.com/Azure/azure-sdk-for-go</code>）是大小写敏感的。工程最佳实践：<strong>主键统一按 ECMA-427 小写归一化，同时在证据字段保留 <code>raw_name</code></strong> 供反查上游代理与 OSV。</li>
+        <li><strong>暗坑 4 · 误删 OS 包的 <code>distro</code> 限定符导致海量误报</strong>：为了“极致去重”而把问号后的所有 qualifiers 粗暴砍掉，在语言包上或许可行，但在 <code>pkg:deb/debian/curl@7.88.1-10?arch=amd64&amp;distro=debian-12</code> 上是灾难——<strong>丢了 <code>distro</code> 就无法区分 Debian/RHEL 发行版安全回溯补丁（Backport）</strong>，Layer 3 会把已修补的系统包误报成高危。因此我们必须把 <strong>Base PURL</strong>（索引前缀）与 <strong>L3 Match Key</strong>（保留匹配语义限定符，剔除 <code>download_url</code>/<code>repository_url</code> 等非身份限定符）明确拆开。</li>
+      </ul>
+    </div>
+
+    <!-- INTERACTIVE PURL LAB -->
+    <section class="widget-panel full-width" data-widget="purl-lab">
+      <script type="application/json" class="purl-lab-data">
+        {
+          "title": "交互实验台：ECMA-427 PURL 规范化与三键派生（Canonical / Base / Match Key）",
+          "intro": "点击下方 6 个真实生产脏数据案例（或直接修改输入框），观察 Layer 2 Anti-Corruption Adapter 应如何纠偏并派生出倒排索引键与漏洞匹配键：",
+          "presets": [
+            {
+              "label": "PyPI 大小写与下划线脏数据",
+              "purl": "PKG:PyPI/Django_Rest.Framework@3.14.0?repository_url=https://pypi.org/simple"
+            },
+            {
+              "label": "npm 未编码 @scope 陷阱",
+              "purl": "pkg:npm/@Angular/Core@17.3.0"
+            },
+            {
+              "label": "Debian 乱序限定符 + Backport",
+              "purl": "pkg:deb/Debian/curl@7.88.1-10+deb12u5?distro=debian-12&arch=amd64&download_url=https://mirror.example/curl.deb"
+            },
+            {
+              "label": "Debian 缺失 distro（误报高危）",
+              "purl": "pkg:deb/debian/openssl@3.0.11-1~deb12u2?arch=amd64"
+            },
+            {
+              "label": "Golang 大小写争议 + Subpath",
+              "purl": "pkg:golang/github.com/Azure/azure-sdk-for-go@v68.0.0#./services/compute/mgmt/2021-07-01"
+            },
+            {
+              "label": "AI-BOM · HuggingFace 模型权重",
+              "purl": "pkg:huggingface/distilbert/distilbert-base-uncased@043235D6088ECD3DD5FB5CA3592B6913FD516027"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>破解最大建表误区：双层身份模型与 PostgreSQL 图存储</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>理解了 PURL 规范化后，80% 的工程师在画 ER 图时会掉进第二个深坑：<strong>“既然 PURL 唯一标识了一个开源包，那我直接在扫描快照表里把 <code>(snapshot_id, canonical_purl)</code> 设成唯一主键不就完美去重了吗？”</strong></p>
+      <p>只要碰到下面两个最常见的企业级场景，这个“单层表”设计立刻崩盘：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">架构印证：Dependency-Track v5</span>
+        开源标杆 <a href="https://dependencytrack.org/" target="_blank" rel="noopener">OWASP Dependency-Track v5 (Project Hyades)</a> 在面向大规模企业负载重构时，明确区分全局身份 <code>purl</code> 与文档局部节点 <code>bom-ref</code>，并在数据库层彻底放弃 H2/MySQL/SQL Server，<strong>全面收敛至 PostgreSQL</strong> 承载关系型组件图谱与持久化任务状态。
+      </aside>
+      <ul>
+        <li><strong>场景 A（Monorepo 多 Scope 共存）</strong>：同一个仓库里，<code>pkg:npm/lodash@4.17.21</code> 同时出现在 <code>services/payment/package-lock.json</code>（生产运行时 <code>scope=required</code>）与 <code>tools/e2e/package-lock.json</code>（仅 CI 测试 <code>scope=excluded</code>）。按 PURL 强行合并会导致 Scope 坍塌——要么把测试依赖当生产高危告警，要么漏掉真正上线的高危路径。</li>
+        <li><strong>场景 B（多容器层 / Shaded Fat-JAR 多位点）</strong>：同一个 <code>pkg:pypi/requests@2.31.0</code> 既装在基础镜像 Layer 2 的系统 Python 里，又装在应用 Layer 6 的 <code>/opt/venv</code> 里；或者同一个 JAR 被两个子模块以不同依赖路径引入。合并节点后，你再也说不清“应该改哪份锁文件或哪一层 Dockerfile”来修复漏洞。</li>
+      </ul>
+      <blockquote>
+        <p>Layer 2 核心铁律（Two-Tier Identity）：<strong>全局资产索引归 <code>Canonical Component (PURL)</code>，扫描上下文与依赖图归 <code>Snapshot Node (bom-ref)</code>。二者彻底分离、多对一关联。</strong></p>
+      </blockquote>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 2 统一中间表示（Canonical IR）三表核心骨架</strong>
+        <span>一次采集、全局 O(1) 漏洞反查、原生无损承接 L4 可达性 / VEX / AI-BOM</span>
+      </figcaption>
+      <div class="ir-grid">
+        <div class="ir-table-card tier-global">
+          <div class="ir-table-title">1. canonical_components</div>
+          <div class="ir-table-sub">Tier 1 · 全局规范组件注册表（跨全公司资产去重，对接 Layer 3 漏洞/许可库）</div>
+          <ul class="ir-field-list">
+            <li><span class="ir-field-key">id (UUID PK)</span><span class="ir-field-note">内部紧凑外键</span></li>
+            <li><span class="ir-field-key">match_key (UNIQUE)</span><span class="ir-field-note">规范 PURL+匹配限定符</span></li>
+            <li><span class="ir-field-key">base_purl (INDEX)</span><span class="ir-field-note">无版本前缀（0-day秒查）</span></li>
+            <li><span class="ir-field-key">ecosystem / version</span><span class="ir-field-note">L3 版本引擎输入</span></li>
+            <li><span class="ir-field-key">cpe_aliases (TEXT[])</span><span class="ir-field-note">商业/固件双标识槽</span></li>
+            <li><span class="ir-field-key">component_type</span><span class="ir-field-note">library | os | ml-model | data</span></li>
+          </ul>
+        </div>
+
+        <div class="ir-table-card tier-node">
+          <div class="ir-table-title">2. snapshot_nodes</div>
+          <div class="ir-table-sub">Tier 2 · 快照图节点表（对齐 CycloneDX <code>bom-ref</code>，保留全部上下文与证据）</div>
+          <ul class="ir-field-list">
+            <li><span class="ir-field-key">(snapshot_id, node_ref) PK</span><span class="ir-field-note">快照内局部唯一标识</span></li>
+            <li><span class="ir-field-key">canonical_id (FK)</span><span class="ir-field-note">指向 Tier 1 全局组件</span></li>
+            <li><span class="ir-field-key">scope</span><span class="ir-field-note">required | optional | excluded</span></li>
+            <li><span class="ir-field-key">is_direct / min_depth</span><span class="ir-field-note">预计算加速常见过滤</span></li>
+            <li><span class="ir-field-key">occurrences (JSONB)</span><span class="ir-field-note">路径/行号/OCI Layer Digest</span></li>
+            <li><span class="ir-field-key">ext_metadata (JSONB)</span><span class="ir-field-note">提取器/调用栈/AI卡片/citations</span></li>
+          </ul>
+        </div>
+
+        <div class="ir-table-card tier-edge">
+          <div class="ir-table-title">3. snapshot_edges</div>
+          <div class="ir-table-sub">Tier 3 · 有向依赖与血缘边表（统一表达软件依赖、能力供给与 AI 训练血缘）</div>
+          <ul class="ir-field-list">
+            <li><span class="ir-field-key">snapshot_id</span><span class="ir-field-note">归属扫描快照</span></li>
+            <li><span class="ir-field-key">src_node_ref (FK)</span><span class="ir-field-note">父节点 / 消费方</span></li>
+            <li><span class="ir-field-key">dst_node_ref (FK)</span><span class="ir-field-note">子节点 / 被依赖方</span></li>
+            <li><span class="ir-field-key">relation_type</span><span class="ir-field-note">depends_on | provides | contains | trained_on</span></li>
+            <li><span class="ir-field-key">edge_scope</span><span class="ir-field-note">runtime | dev | build | test</span></li>
+            <li><span class="ir-field-key">constraint_expr</span><span class="ir-field-note">原始版本约束（供 L4 自动修复）</span></li>
+          </ul>
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col has-sidenote">
+      <h3>关键选型权衡：0→1 阶段该用 PostgreSQL 还是 Neo4j 图数据库？</h3>
+      <p>看到“依赖图”三个字，很多架构师会本能地想在 Phase 1 引入 Neo4j 或 NebulaGraph。<strong>强烈建议克制：0→1 阶段请坚定选择 PostgreSQL 作为统一 IR 的唯一真相源！</strong></p>
+      <aside class="sidenote">
+        <span class="sidenote-title">预留 Phase 2/3 演进槽</span>
+        在 <code>snapshot_nodes.ext_metadata</code> 中提前约定结构化命名空间：<code>reachability</code>（挂载 L4 调用栈与符号位点）、<code>ai_card</code>（挂载 ML-BOM 参数/数据集/安全评估）与 <code>citations</code>（记录由哪个 L1/L4 引擎富化）。MVP 期间可为 <code>NULL</code>，二期零 DDL 停机平滑激活。
+      </aside>
+      <div class="grid-2">
+        <div class="card">
+          <h4>为什么 PostgreSQL 完胜 0→1 阶段？</h4>
+          <p><span class="badge badge-ok">推荐 · 单引擎事务一致</span></p>
+          <p><strong>1. 查询模式决定选型：</strong>SCA 90% 的高频查询是“按 <code>base_purl</code> 查受影响快照”（B-Tree 倒排）和“查某快照的直接/传递路径”（单快照边数通常在数百到数万级，PostgreSQL <code>WITH RECURSIVE</code> + 预计算 <code>is_direct</code> 毫秒级完成）。</p>
+          <p><strong>2. 零双写与极低私有化运维成本：</strong>商业 SCA 大量客户需要离线私有化部署，多一套图库意味着客户侧运维、备份与数据一致性成本翻倍。</p>
+        </div>
+        <div class="card">
+          <h4>什么时候才考虑专用图索引？</h4>
+          <p><span class="badge badge-blue">Phase 3 按需衍生只读视图</span></p>
+          <p>当单租户跨仓库全局图谱突破<strong>千万级活跃边</strong>，且需要高频运行跨项目多跳影响面模拟（如企业级内部自研 SDK 级联传播图分析）时，再通过 CDC/事件流从 PostgreSQL 异步投影到只读图分析引擎，<strong>绝不把图数据库当作主写入库</strong>。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>PostgreSQL 核心建表参考骨架（Layer 2 IR MVP）</strong>
+        <span>含 0-day 倒排索引 · 多位置证据 · 可达性/AI-BOM 零破坏扩展槽</span>
+      </div>
+      <pre><code><span class="tok-cmt">-- Tier 1: 全局规范组件注册表（L2 ↔ L3 唯一桥接点）</span>
+<span class="tok-kw">CREATE TABLE</span> canonical_components (
+  id             <span class="tok-type">UUID</span> <span class="tok-kw">PRIMARY KEY</span>,
+  match_key      <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL UNIQUE</span>,    <span class="tok-cmt">-- 规范 PURL（含 distro/arch 等匹配语义限定符）</span>
+  base_purl      <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,           <span class="tok-cmt">-- 去版本/去限定符前缀：pkg:maven/org.apache.../log4j-core</span>
+  ecosystem      <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,           <span class="tok-cmt">-- maven | npm | pypi | golang | deb | huggingface ...</span>
+  version        <span class="tok-type">TEXT</span>,
+  component_type <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL DEFAULT</span> <span class="tok-str">'library'</span>, <span class="tok-cmt">-- library | application | os | ml-model | data</span>
+  cpe_aliases    <span class="tok-type">TEXT[]</span> <span class="tok-kw">DEFAULT</span> <span class="tok-str">'{}'</span>      <span class="tok-cmt">-- 商业软件/固件兼容双标识</span>
+);
+<span class="tok-kw">CREATE INDEX</span> idx_canonical_base_purl <span class="tok-kw">ON</span> canonical_components (base_purl, ecosystem);
+
+<span class="tok-cmt">-- Tier 2: 快照图节点（对应 CycloneDX bom-ref，保留位置、Scope 与未来 L4 证据槽）</span>
+<span class="tok-kw">CREATE TABLE</span> snapshot_nodes (
+  snapshot_id    <span class="tok-type">UUID</span> <span class="tok-kw">NOT NULL</span>,
+  node_ref       <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,           <span class="tok-cmt">-- 局部唯一 bom-ref（允许同一 PURL 多位点共存）</span>
+  canonical_id   <span class="tok-type">UUID</span> <span class="tok-kw">NOT NULL REFERENCES</span> canonical_components(id),
+  scope          <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL DEFAULT</span> <span class="tok-str">'required'</span>, <span class="tok-cmt">-- required | optional | excluded</span>
+  is_direct      <span class="tok-type">BOOLEAN</span> <span class="tok-kw">NOT NULL DEFAULT FALSE</span>,
+  min_depth      <span class="tok-type">INTEGER</span>,
+  occurrences    <span class="tok-type">JSONB</span> <span class="tok-kw">NOT NULL DEFAULT</span> <span class="tok-str">'[]'</span>,      <span class="tok-cmt">-- [{location, line, oci_layer, raw_purl}]</span>
+  ext_metadata   <span class="tok-type">JSONB</span> <span class="tok-kw">NOT NULL DEFAULT</span> <span class="tok-str">'{}'</span>,      <span class="tok-cmt">-- {callstacks:[], ai_card:{}, citations:[]}</span>
+  <span class="tok-kw">PRIMARY KEY</span> (snapshot_id, node_ref)
+);
+<span class="tok-kw">CREATE INDEX</span> idx_nodes_canonical_lookup <span class="tok-kw">ON</span> snapshot_nodes (canonical_id, snapshot_id);
+
+<span class="tok-cmt">-- Tier 3: 有向依赖与血缘边（支持软件依赖、能力供给与 AI 训练血缘）</span>
+<span class="tok-kw">CREATE TABLE</span> snapshot_edges (
+  snapshot_id     <span class="tok-type">UUID</span> <span class="tok-kw">NOT NULL</span>,
+  src_node_ref    <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+  dst_node_ref    <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+  relation_type   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL DEFAULT</span> <span class="tok-str">'depends_on'</span>, <span class="tok-cmt">-- depends_on | provides | contains | trained_on</span>
+  edge_scope      <span class="tok-type">TEXT</span>,                   <span class="tok-cmt">-- runtime | dev | build | test</span>
+  constraint_expr <span class="tok-type">TEXT</span>,                   <span class="tok-cmt">-- 原始声明区间（如 "^4.17.0"），供 L4 升级求解器使用</span>
+  <span class="tok-kw">PRIMARY KEY</span> (snapshot_id, src_node_ref, dst_node_ref, relation_type)
+);
+<span class="tok-kw">CREATE INDEX</span> idx_edges_dst_lookup <span class="tok-kw">ON</span> snapshot_edges (snapshot_id, dst_node_ref);</code></pre>
+    </div>
+
+    <!-- SECTION 4 -->
+    <h2><span class="sec-num">04</span>对外契约投影：CycloneDX 1.7 (ECMA-424) vs SPDX 3.0.1</h2>
+
+    <div class="prose-col">
+      <p>拥有了自主可控的 Layer 2 IR 之后，你的平台如何与上下游工具链、客户合规审计无缝互通？答案是<strong>将外部国际标准视为“双向无损投影视图（Serializer / Deserializer）”</strong>，而不是直接照搬为内表。当前国际供应链安全已收敛为双雄格局：</p>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>设计维度</th>
+              <th><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7 (ECMA-424 2nd Ed.)</a></th>
+              <th><a href="https://spdx.github.io/spdx-spec/v3.0.1/" target="_blank" rel="noopener">SPDX 3.0.1 (Linux Foundation)</a></th>
+              <th>在你的 Layer 2 IR 中的映射定位</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>基因与主战场</strong></td>
+              <td>OWASP 出身，<strong>应用安全与全栈风险管理</strong>（SBOM / VEX / CBOM / ML-BOM / SaaSBOM）。</td>
+              <td>Linux 基金会主导（ISO/IEC 5962 演进），<strong>许可证合规、法律审计与政府采购</strong>，采用 JSON-LD 模块化 Profile。</td>
+              <td>对外推荐把 <strong>CycloneDX 1.7 作为首选高精度交换格式</strong>，把 <strong>SPDX 3.0 作为合规导出视图</strong>。</td>
+            </tr>
+            <tr>
+              <td><strong>节点与依赖边</strong></td>
+              <td><code>components[]</code>（带局部 <code>bom-ref</code>、<code>scope</code>）+ 顶层 <code>dependencies[]</code>（支持 <code>dependsOn</code> 与 <code>provides</code> 能力供给边）。</td>
+              <td>所有资产继承 <code>Core/Element</code>（如 <code>software_Package</code>），边为一等公民 <code>Relationship</code> 节点（<code>dependsOn</code> / <code>contains</code>）及 <code>LifecycleScopedRelationship</code>（标注 <code>runtime</code> / <code>development</code> 等阶段）。</td>
+              <td>直接映射 <code>snapshot_nodes</code> + <code>snapshot_edges.relation_type</code>，双向零信息损耗。</td>
+            </tr>
+            <tr>
+              <td><strong>可达性与证据链</strong></td>
+              <td>原生内置 <code>evidence.occurrences</code>（文件位置）与 <strong><code>evidence.callstack</code>（函数调用栈帧）</strong>；<strong>v1.7 新增顶层 <code>citations</code></strong> 追踪多工具富化来源。</td>
+              <td>通过 <code>CreationInfo</code> 与独立安全 Profile 表达；缺少原生细粒度函数调用栈结构。</td>
+              <td><code>occurrences</code> 与 <code>ext_metadata.callstacks</code> / <code>citations</code> 天然对齐 CycloneDX 1.7，无缝承接 L4 可达性！</td>
+            </tr>
+            <tr>
+              <td><strong>VEX 与知识产权</strong></td>
+              <td>内嵌 <code>vulnerabilities[]</code>（含 <code>analysis.state</code> / <code>justification</code>）直指 <code>bom-ref</code>；<strong>v1.7 新增专利断言 <code>patents</code>、强化 CBOM 与 TLP 分级</strong>。</td>
+              <td>Security Profile 独立 <code>VexAffectedVulnAssessmentRelationship</code> 等关系对象表达。</td>
+              <td>VEX 决策与 <code>canonical_id</code> + <code>node_ref</code> 关联（独立 <code>vex_statements</code> 表），导出时双向翻译。</td>
+            </tr>
+            <tr>
+              <td><strong>AI / ML-BOM 建模</strong></td>
+              <td>组件类型 <code>machine-learning-model</code> + 结构化 <code>modelCard</code>（架构、训练数据、量化评估）。</td>
+              <td>独立 Profile 子类 <code>ai_AIPackage</code> 与 <code>dataset_DatasetPackage</code>，经 <code>Relationship(trainedOn)</code> 连接。</td>
+              <td>IR 通过 <code>component_type='ml-model'|'data'</code> + <code>relation_type='trained_on'</code> + <code>ext_metadata.ai_card</code> <strong>一套图模型同时导出双标准 AI-BOM</strong>！</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SECTION 5: INTERACTIVE SANDBOX -->
+    <h2><span class="sec-num">05</span>架构师实战沙盘：评审 Layer 2 IR 数据库与标准映射方案</h2>
+
+    <div class="prose-col">
+      <p>下面模拟你主持 Layer 2 核心数据模型评审会。面对研发团队提出的 5 个具体方案分歧，请运用本课的<strong>双层身份、ECMA-427 规范化、存储权衡与双标准投影</strong>原则逐一拍板，点击「运行架构评审」即时验雷。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 2 统一 IR 架构评审沙盘（5 个核心数据决策）",
+          "intro": "背景：0→1 商业闭源 SCA 统一底座进入建表评审阶段，客户覆盖大型 Monorepo、容器镜像与内网私有化部署，Phase 2 计划接入函数级可达性与 AI-BOM。",
+          "summary": {
+            "optimal": "全部 {optimal} 项 Layer 2 IR 核心决策均精准落地！你的平台脊椎兼具 O(1) 全局 0-day 检索性能、完整上下文证据链与无痛兼容可达性/AI-BOM 的演进弹性。",
+            "warning": "没有触碰致命重构雷区，但存在 {warning} 处隐性成本或演进摩擦点（标黄项）。建议结合团队运维能力与客户私有化部署形态再次权衡。",
+            "critical": "当前 IR 设计存在 {critical} 处致命数据模型缺陷（标红项）。一旦按此建表并写入海量历史快照，后续做 Scope 降噪、多工具去重或接入可达性/AI-BOM 时将触发高成本数据迁移重构！"
+          },
+          "modules": [
+            {
+              "name": "扫描快照中组件节点表的主键设计",
+              "layer": "Layer 2 · 节点身份模型",
+              "context": "同一 Monorepo 中，同一个 npm 组件同时出现在生产服务（required）与 E2E 测试工具（excluded）两份锁文件中。",
+              "options": [
+                {
+                  "label": "双层身份：全局表按规范 PURL 去重，快照节点表以 (snapshot_id, node_ref) 为主键",
+                  "status": "optimal",
+                  "verdictTitle": "兼得全局检索效率与局部图保真",
+                  "feedback": "教科书级架构！全局 canonical_components 支撑 0-day 秒级倒排反查，snapshot_nodes 以局部 bom-ref 为主键保留独立 Scope、文件路径与依赖子树，完全对齐 CycloneDX 1.7 与 Dependency-Track v5 范式。"
+                },
+                {
+                  "label": "单层表：直接用 (snapshot_id, canonical_purl) 做唯一主键合并落库",
+                  "status": "critical",
+                  "verdictTitle": "破坏 Scope 与位置证据的高危设计",
+                  "feedback": "按 PURL 强行合并快照节点会吞掉不同路径的 Scope（dev vs prod）与容器分层归属，导致后续既无法过滤测试依赖误报，也无法准确告诉研发该改哪份锁文件。"
+                },
+                {
+                  "label": "不做全局组件去重表，每次扫描直接把组件全字段冗余写进快照节点表",
+                  "status": "warning",
+                  "verdictTitle": "0-day 全网反查与存储膨胀隐患",
+                  "feedback": "虽然保留了局部上下文，但全平台几万个快照里同一个 log4j-core 会冗余存储数万份元数据，0-day 爆发时全表扫描字符串效率骤降，且无法集中挂接 L3 情报元数据。"
+                }
+              ]
+            },
+            {
+              "name": "多提取器汇总后的 PURL 归一化策略",
+              "layer": "Layer 2 · Anti-Corruption Adapter",
+              "context": "Layer 1 同时产出 Syft、OSV-SCALIBR 与 cdxgen 结果，包含 PyPI 大小写差异、npm 未编码 @scope 及 Debian distro 限定符。",
+              "options": [
+                {
+                  "label": "全部原样存入数据库，查询漏洞时再现场做模糊字符串匹配",
+                  "status": "critical",
+                  "verdictTitle": "多源去重失效且拖垮查询性能",
+                  "feedback": "不经归一化的脏 PURL 会导致同一组件在系统里分裂出多个节点（如 Jinja_2 vs jinja-2），同时失去 B-Tree 精确索引能力，在线匹配与去重彻底失控。"
+                },
+                {
+                  "label": "统一执行 ECMA-427 规范化，派生 base_purl + 保留 distro 等匹配限定符的 match_key，并存 raw_purl",
+                  "status": "optimal",
+                  "verdictTitle": "严谨且可审计的归一化管线",
+                  "feedback": "完美解法！按各生态规则（PEP 503、npm %40、qualifier 字典序）统一规范化，分离索引前缀 base_purl 与含 distro 的 match_key（保住 Debian/RHEL Backport 精确度），同时在 occurrences 中留存 raw_purl 便于排障审计。"
+                },
+                {
+                  "label": "规范化时把问号 '?' 之后的所有 qualifiers 全部一刀切删除",
+                  "status": "critical",
+                  "verdictTitle": "触发 OS 发行版 Backport 大面积误报",
+                  "feedback": "粗暴砍掉 qualifiers 会丢失 deb/rpm 的 distro、arch 与 maven 的 classifier，导致 Layer 3 无法识别发行版回溯补丁（Backport），把已修复的 Debian/RHEL 系统包统统误报成高危漏洞。"
+                }
+              ]
+            },
+            {
+              "name": "Phase 1 依赖图谱与扩展属性存储引擎选型",
+              "layer": "Layer 2 · 存储架构",
+              "context": "团队需要支持商业私有化离线交付，并在 1–3 个月内上线稳定可靠的资产与依赖图查询能力。",
+              "options": [
+                {
+                  "label": "PostgreSQL（规范表 + 节点表 + 有向边表 + JSONB 扩展槽）",
+                  "status": "optimal",
+                  "verdictTitle": "0→1 工程性价比与运维可靠性最优解",
+                  "feedback": "完全对齐 OWASP Dependency-Track v5 (Hyades) 的大规模工程演进共识：单库 ACID 事务、极简私有化交付、B-Tree + JSONB + 递归 CTE 足以覆盖 95% 以上 SCA 查询场景，未来超大规模再异步投影只读图索引。"
+                },
+                {
+                  "label": "一期即引入 PostgreSQL + Neo4j 双写架构存储依赖图",
+                  "status": "warning",
+                  "verdictTitle": "过早优化引入双写与私有化运维重负",
+                  "feedback": "0→1 阶段单快照依赖图规模远未达到关系库瓶颈；引入 Neo4j 双写不仅带来跨库事务一致性复杂度，还会让客户内网私有化交付和资源占用成本飙升。"
+                },
+                {
+                  "label": "把完整 CycloneDX JSON 直接存进单列 TEXT/JSONB，不拆节点表和边表",
+                  "status": "critical",
+                  "verdictTitle": "丧失持续重算与跨项目 0-day 秒查能力",
+                  "feedback": "把整份 SBOM 当大文档黑盒存储后，新爆出 0-day 时你无法在毫秒内跨一万个项目反查谁依赖了该组件，也没法对单个节点挂载 VEX 豁免状态或增量 Diff。"
+                }
+              ]
+            },
+            {
+              "name": "对外 SBOM 国际标准兼容与导入导出策略",
+              "layer": "Layer 2 · 外部协议边界",
+              "context": "安全团队客户偏爱 CycloneDX（含 VEX/调用栈），部分政企与汽车合规客户强制要求导出 SPDX 3.0。",
+              "options": [
+                {
+                  "label": "以自研 IR 为内核，编写双向投影器支持 CycloneDX 1.7（主力）与 SPDX 3.0（合规视图）",
+                  "status": "optimal",
+                  "verdictTitle": "内部主权 + 外部双标全覆盖",
+                  "feedback": "高明！内核只维护一份高内聚 IR，外部标准仅作为序列化/反序列化视图：CycloneDX 1.7 完整释放 VEX、evidence.callstack、citations 与 ML-BOM 能力，SPDX 3.0 无缝满足合规与法律审计。"
+                },
+                {
+                  "label": "直接把 CycloneDX 1.7 JSON Schema 原封不动翻译成 60 张内部关系表",
+                  "status": "warning",
+                  "verdictTitle": "外部标准演进绑架内部研发速度",
+                  "feedback": "CycloneDX 是为文档交换设计的层级嵌套格式，直接照抄建表会导致查询过度 JOIN、难以表达跨快照规范组件去重，且每次标准小版本变更都会冲击核心库表。"
+                },
+                {
+                  "label": "只支持自研私有 JSON 格式导出，拒绝兼容 CycloneDX 与 SPDX",
+                  "status": "critical",
+                  "verdictTitle": "封闭孤岛阻断企业采购与生态集成",
+                  "feedback": "现代企业安全体系、监管合规（如欧盟 CRA、国内供应链合规要求）与上下游安全平台强依赖 CycloneDX / SPDX 标准交换。封闭格式会直接让你在政企 POC 中出局。"
+                }
+              ]
+            },
+            {
+              "name": "为 Phase 2 静态可达性、VEX 与 AI-BOM 预留架构弹性",
+              "layer": "Layer 2 → Layer 4 / AI 演进",
+              "context": "MVP 阶段暂不开发调用图与大模型扫描，但老板要求半年后接入时不推倒重建数据底座。",
+              "options": [
+                {
+                  "label": "在节点与边表原生支持 component_type / relation_type 枚举及 ext_metadata(JSONB) 槽位",
+                  "status": "optimal",
+                  "verdictTitle": "零当下负担、零未来重构的教科书预留",
+                  "feedback": "优雅且克制！通过开放的 component_type（含 ml-model / data）、relation_type（含 provides / trained_on）以及 ext_metadata 约定槽位（callstacks / ai_card / citations），今天零开发负担，二期直接插拔上线。"
+                },
+                {
+                  "label": "先把表结构写死为纯开源语言包（只允许 library 与 depends_on），二期再重构",
+                  "status": "critical",
+                  "verdictTitle": "主动埋下第 6 个月推倒重写的地雷",
+                  "feedback": "写死单一资产类型与单一依赖边后，接入模型权重/数据集血缘、容器分层包含关系或 CycloneDX provides 关系时，被迫拆改全部核心表与历史数据接口，违背统一底座初衷。"
+                },
+                {
+                  "label": "把模型权重路径和函数调用栈拼成逗号分隔的备注字符串塞进 description 字段",
+                  "status": "critical",
+                  "verdictTitle": "非结构化字符串反模式摧毁查询与投影",
+                  "feedback": "把核心安全证据塞进非结构化备注字段，会导致后续无法索引可达性状态、无法做策略门禁过滤，也无法无损导出为标准的 CycloneDX evidence.callstack 或 modelCard。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 6: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">06</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道场景题重点检验你对 <strong>PURL/CPE 边界、双层身份模型、ECMA-427 规范化暗坑以及 PostgreSQL/双标准投影</strong> 的真实掌握度。<strong>请勿回翻正文，先凭直觉作答。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0002 · Layer 2 统一 IR 与 PURL/CycloneDX 回忆测验",
+          "intro": "结合真实工程撞墙场景做即时反馈，夯实架构直觉。",
+          "questions": [
+            {
+              "prompt": "团队在设计 Layer 2 统一 IR 时，有成员提议：“既然 PURL 已成为国际标准 ECMA-427，我们在内部数据模型里干脆彻底删除 CPE 字段，所有组件只存 PURL。” 作为总架构师，对这一建议的正确架构裁决是？",
+              "options": [
+                "完全同意，现代所有商业闭源软件与硬件固件均已全面采用规范包坐标。",
+                "完全反对，仍应以传统平台枚举作唯一主键并将包坐标设为可选辅助项。",
+                "开源以规范包坐标作主键，同时保留平台枚举槽位以兼容商业软件固件。",
+                "开源与商业软件均改用自研哈希主键，避免同时维护两套外部命名规范。"
+              ],
+              "answerIndex": 2,
+              "explanation": "商业闭源软件（如商业中间件）、硬件固件与部分 OS/政企合规体系仍大量使用 CPE 2.3（排除 A）；开源包则必须以确定性的 PURL 替代模糊的 CPE（排除 B）；自研封闭哈希会割裂 OSV/GHSA 等外部生态情报（排除 D）。现代最佳实践是「开源以 PURL 为主键 + 保留 CPE 兼容槽位」的双标识架构（C）。"
+            },
+            {
+              "prompt": "在一个大型 Monorepo 扫描快照中，pkg:npm/lodash@4.17.21 同时出现在生产微服务（Scope=required）和端到端测试工具目录（Scope=excluded）。若后端表直接以 (snapshot_id, canonical_purl) 作为图节点唯一主键合并落库，会直接引发什么后果？",
+              "options": [
+                "丢失节点位置与作用域上下文，导致误报降噪与精确依赖溯源失效。",
+                "触发标准包坐标语法解析异常，导致系统无法导出合规的软件清单。",
+                "阻塞全局规范组件的倒排索引，导致漏洞爆发时无法快速检索项目。",
+                "破坏开源组件版本的语义排序，导致生态原生比较器误判修复区间。"
+              ],
+              "answerIndex": 0,
+              "explanation": "同一 PURL 在单次快照中完全可以以不同 Scope（生产 vs 测试）、不同文件路径或不同容器层出现多次。强制按 PURL 合并快照节点会吞掉位置与作用域上下文，导致误报降噪与修复定位失效（A 正确）。因此必须采用「全局 canonical_components (PURL) + 局部 snapshot_nodes (bom-ref)」双层身份模型。"
+            },
+            {
+              "prompt": "你在 Layer 1 同时集成了 Syft 与 cdxgen 扫描同一份 Python + Debian 混合镜像：前者产出 pkg:pypi/Jinja_2@3.1.2 与 pkg:deb/debian/curl@7.88.1-10?distro=debian-12&arch=amd64，后者产出 pkg:pypi/jinja-2@3.1.2 且遗漏了 distro 限定符。Layer 2 归一化与存储层该如何处理？",
+              "options": [
+                "原样落库并保留全部提取器原始文本，避免归一化过程改变上游输入。",
+                "统一剔除所有问号后限定符并小写化，借此实现跨工具间的极致去重。",
+                "优先丢弃带限定符的系统包提取记录，改用上游源码版本去匹配漏洞。",
+                "按规范折叠生态包名并重排限定符，同时保留发行版信息以防止误报。"
+              ],
+              "answerIndex": 3,
+              "explanation": "PyPI 必须按 PEP 503 将 Jinja_2 折叠为 jinja-2 才能跨工具去重（排除 A）；粗暴剔除 qualifiers 或丢弃发行版信息会导致 Layer 3 无法识别 Debian/RHEL 的安全回溯补丁（Backport），制造大量误报（排除 B、C）。正确做法是在 Adapter 层执行 ECMA-427 规范化（含 qualifier 字典序重排）并保留发行版匹配语义（D）。"
+            },
+            {
+              "prompt": "参考 OWASP Dependency-Track v5 (Hyades) 架构实践，并面向未来扩展静态函数可达性、VEX 与 AI-BOM。在 0→1 阶段落地 Layer 2 统一 IR 存储与对外 BOM 契约时，下列哪项方案最合理？",
+              "options": [
+                "直接用纯图库存放标准清单原文，放弃关系库以防二期遍历性能撞墙。",
+                "关系库双层表加扩展槽存自研模型，对外按需双向投影至双国际标准。",
+                "将整份标准清单原样塞入大字段，每次检索漏洞血缘时在内存中解析。",
+                "一期只建传统开源库表写死字段，待二期启动大模型项目时推倒重建。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Dependency-Track v5 (Hyades) 已验证 PostgreSQL 足以支撑企业级大规模依赖图与持久化摄入，0→1 引入纯图库属于过早优化（排除 A）；大字段黑盒存储无法支持 0-day 秒级倒排反查与增量重算（排除 C）；写死传统字段会引发重构债（排除 D）。用 PostgreSQL 双层身份表 + 有向边表 + JSONB 扩展槽维护自研 IR 主权，对外双向投影至 CycloneDX 1.7 与 SPDX 3.0 是最优解（B）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>做架构拍板前，强烈建议亲自翻阅这两份一手国际标准文档的关键章节（10 分钟即可抓到精髓）：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/Ecma-TC54/ECMA-427" target="_blank" rel="noopener"><strong>Ecma-TC54 / ECMA-427 (PURL Spec)</strong></a> 与 <a href="https://github.com/package-url/purl-spec" target="_blank" rel="noopener"><strong>purl-spec 类型定义</strong></a>：重点看从右向左的 Parsing 算法，以及 <code>pypi</code>、<code>npm</code>、<code>maven</code>、<code>golang</code>、<code>deb</code>、<code>huggingface</code> 的类型规范化细则。</li>
+          <li><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener"><strong>CycloneDX 1.7 JSON Reference (ECMA-424 2nd Ed.)</strong></a> 与 <a href="https://spdx.github.io/spdx-spec/v3.0.1/" target="_blank" rel="noopener"><strong>SPDX 3.0.1 Model</strong></a>：对照查看 CycloneDX 的 <code>evidence.callstack</code>、<code>dependencies[].provides</code>、<code>citations</code> 与 SPDX 3.0 的 <code>ai_AIPackage</code> / <code>Relationship</code>。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>看完本课并做完实验台与测验后，<strong>随时回到对话里把你的实战疑问抛给我</strong>，例如：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“把我们团队真实的目标语言和数据库选型告诉你，帮我把上面三张核心表扩写成可直接评审的完整 DDL 草案。”</li>
+          <li>“Go / Java 生态里有哪些 Apache-2.0/MIT 协议的成熟 PURL 解析库可以直接复用（避免自己手写解析器踩坑）？”</li>
+          <li>“我做完了 Lesson 0001 和 0002 的测验，帮我复盘疑问、把核心术语沉淀进 Glossary，然后进入 <strong>Lesson 0003（源码依赖解析真相：Manifest / Lockfile 与构建期解析陷阱）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">← 上一课：Lesson 0001 四层解耦与开源边界</a>
+      <a href="../reference/purl-and-layer2-ir-dictionary.html">速查卡：Ref 02 · PURL 与 IR 字典</a>
+      <a href="./0003-source-dependency-resolution-traps.html">下一课：Lesson 0003 · 源码依赖解析真相 →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/purl-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

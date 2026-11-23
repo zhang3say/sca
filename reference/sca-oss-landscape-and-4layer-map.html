@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查参考：第三代 SCA 四层解耦架构与开源底座协议矩阵</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="../lessons/0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001 · 四层解耦</a>
+        <a href="../lessons/0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002 · Layer 2 IR</a>
+        <a href="./sca-oss-landscape-and-4layer-map.html" class="active">Ref 01 · 架构与协议矩阵</a>
+        <a href="./purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 字典</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>REFERENCE CARD 01</span>
+        <span class="sep">/</span>
+        <span>PRINT-READY CHEAT SHEET</span>
+      </div>
+      <h1>第三代 SCA 四层解耦架构与开源底座协议矩阵</h1>
+      <p class="subtitle">供架构评审与技术选型时快速核查：四层职责与数据契约、商用闭源协议红线、以及全球标杆研发聚焦分布。</p>
+      <div class="meta-strip">
+        <span><strong>适用约束：</strong>商业闭源交付（Apache-2.0 / MIT 优先，规避 GPL / AGPL）</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001</a></span>
+      </div>
+    </header>
+
+    <section class="full-width">
+      <h2 style="margin-top:0;"><span class="sec-num">01</span>四层解耦架构契约（Layer Contract）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>架构层级</th>
+              <th>核心职责与输入输出契约</th>
+              <th>研发策略</th>
+              <th>典型失效模式（反模式）</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Layer 4<br/>决策与壁垒层</strong></td>
+              <td>静态/动态可达性、恶意包行为评分、EPSS/KEV/VEX 降噪、无破坏性升级路径、策略门禁与 AI 风险推理。<br/><code>Input: L2 IR + L3 Intel + CallGraph/Runtime</code> → <code>Output: Actionable Finding / PR / Gate</code></td>
+              <td><span class="badge badge-build">核心自研</span></td>
+              <td>把 CVSS 高危清单原样抛给研发，无可达性与修复路径，导致 90%+ 误报疲劳。</td>
+            </tr>
+            <tr>
+              <td><strong>Layer 3<br/>情报与知识底座</strong></td>
+              <td>多源漏洞聚合与去重（OSV/GHSA/NVD）、生态原生版本区间语义引擎、恶意包情报、许可证兼容性与包健康度。<br/><code>Input: Multi-Feed Advisories</code> → <code>Output: Normalized OSV/Graph Query API</code></td>
+              <td><span class="badge badge-warn">开源源 + 自研管线</span></td>
+              <td>仅依赖 NVD CPE 字符串模糊匹配，导致大量误报/漏报与跨生态版本比较失真。</td>
+            </tr>
+            <tr>
+              <td><strong>Layer 2<br/>统一中间表示 (IR)</strong></td>
+              <td>全平台唯一真相源：<code>PURL</code> 组件主键、有向依赖图（直接/传递/Scope/证据链）、CycloneDX 1.7 兼容导入导出、预留符号/模型/VEX 挂载点。<br/><code>Input: Normalized Events</code> → <code>Output: Canonical Component Graph</code></td>
+              <td><span class="badge badge-build">100% 自研主权</span></td>
+              <td>直接将 Trivy/Syft 输出 JSON 充当核心数据库 Schema，导致更换提取器或新增可达性时推倒重写。</td>
+            </tr>
+            <tr>
+              <td><strong>Layer 1<br/>采集与提取层</strong></td>
+              <td>跨形态资产扫描：源码 Manifest/Lockfile、构建期依赖树、容器镜像分层、OS 包库、制品/二进制、AI 模型清单。<br/><code>Input: Target Artifacts</code> → <code>Output: Raw Inventory + Evidence</code></td>
+              <td><span class="badge badge-ok">借力 OSS + 补齐短板</span></td>
+              <td>从零手写几十种语言/OS 包格式解析器消耗全部人力；或全盘透传单一 CLI 无适配器隔离。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="full-width">
+      <h2><span class="sec-num">02</span>主流开源 SCA 底座与商用合规排雷表</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>项目名称</th>
+              <th>主协议与配套条款</th>
+              <th>商用闭源评估</th>
+              <th>技术形态与最佳落位</th>
+              <th>架构集成要点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener">Google OSV-SCALIBR</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">直接嵌入安全</span></td>
+              <td>Go 模块化库 / Layer 1</td>
+              <td>插件化 Extractor/Enricher/Detector，驱动 OSV-Scanner v2；极适合作为 Go 底座直接嵌入并裁剪插件。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/anchore/syft" target="_blank" rel="noopener">Anchore Syft</a> / <a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Grype</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">直接嵌入安全</span></td>
+              <td>Go 库 &amp; CLI / Layer 1 &amp; 3</td>
+              <td>容器分层、OS 包数据库与二进制元数据提取标杆；天然示范「SBOM 提取与漏洞匹配解耦」。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener">OWASP cdxgen</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">适配器封装安全</span></td>
+              <td>Node.js CLI / Layer 1</td>
+              <td>语言与构建系统覆盖面极广，原生输出 CycloneDX 1.6/1.7（含 CBOM / ML-BOM），适合作为独立隔离沙箱采集器。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener">OSS Review Toolkit (ORT)</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">参考/封装安全</span></td>
+              <td>Kotlin JVM / Layer 1 &amp; 合规</td>
+              <td>调用原生包管理器还原高保真传递依赖树，深度覆盖许可证合规管线。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/aquasecurity/trivy" target="_blank" rel="noopener">Aqua Trivy</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">安全（防架构锁死）</span></td>
+              <td>Go CLI / 综合参考</td>
+              <td>适合参考其 OCI 离线漏洞库分发与容器扫描工程化；<strong>切忌</strong>将其一体化扫描结果直接当作平台内部数据模型。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/DependencyTrack/dependency-track" target="_blank" rel="noopener">OWASP Dependency-Track</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">架构蓝图参考</span></td>
+              <td>Java 平台 / Layer 2–4 参考</td>
+              <td>学习其「以 SBOM 为中心持续重算漏洞 + VEX 协同 + 策略引擎」的异步服务端范式。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/ossf/malicious-packages" target="_blank" rel="noopener">OpenSSF Malicious Packages</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">直接摄入安全</span></td>
+              <td>OSV JSON 数据源 / Layer 3</td>
+              <td>开源恶意包冷启动情报源，直接兼容 OSV Schema 入库。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/aboutcode-org/scancode-toolkit" target="_blank" rel="noopener">ScanCode-Toolkit</a></td>
+              <td>代码 <code>Apache-2.0</code><br/>LicenseDB <code>CC-BY-4.0</code></td>
+              <td><span class="badge badge-warn">可用·需履行署名</span></td>
+              <td>Python / 源码许可证扫描</td>
+              <td>代码本身宽松，但若分发或衍生使用其 LicenseDB，必须严格遵守 CC-BY-4.0 署名与变更说明义务。</td>
+            </tr>
+            <tr>
+              <td><a href="https://semgrep.dev/" target="_blank" rel="noopener">Semgrep CE</a></td>
+              <td>引擎 <code>LGPL-2.1</code><br/>官方规则 <code>Semgrep Rules License v1.0</code></td>
+              <td><span class="badge badge-warn">高敏边界·规则禁竞品</span></td>
+              <td>静态分析引擎 / 规则库</td>
+              <td>引擎需警惕静态链接传染边界；<strong>官方规则集明确限制用于竞品商业 SaaS</strong>，不可拿其规则打包售卖。</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.fossology.org/" target="_blank" rel="noopener">FOSSology</a></td>
+              <td>主体 <code>GPL-2.0</code>（少量库 LGPL-2.1）</td>
+              <td><span class="badge badge-danger">严禁闭源链接集成</span></td>
+              <td>许可证扫描系统</td>
+              <td>强传染协议，闭源商业产品禁止直接内嵌/修改分发；仅可作学术研究或严格进程级外部合规对照。</td>
+            </tr>
+            <tr>
+              <td><a href="https://codeql.github.com/" target="_blank" rel="noopener">GitHub CodeQL CLI</a></td>
+              <td><code>GitHub CodeQL Terms</code>（非 OSI 开源）</td>
+              <td><span class="badge badge-danger">严禁用于商业闭源产品</span></td>
+              <td>语义代码分析引擎</td>
+              <td>默认条款仅限分析开源代码或学术研究，用于私有/商业代码分析必须采购 GHAS 授权，绝不能嵌入商业产品底座。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="full-width">
+      <h2><span class="sec-num">03</span>全球商业标杆的核心壁垒分布</h2>
+      <div class="grid-3">
+        <div class="card">
+          <h4>Snyk · 情报深度 + 修复图谱</h4>
+          <p><span class="badge badge-warn">L3 强壁垒</span> <span class="badge badge-build">L4 强体验</span></p>
+          <p>以自建人工研判漏洞库（<code>SNYK-*</code>，早于 CVE 捕获 GitHub Commit）+ 严谨版本区间 + 自动 PR 修复图谱，抢占开发者工作流入口。</p>
+        </div>
+        <div class="card">
+          <h4>Endor Labs · 高保真依赖 + 函数可达性</h4>
+          <p><span class="badge badge-blue">L1 深度构建</span> <span class="badge badge-build">L4 核心壁垒</span></p>
+          <p>押注跨直接/传递依赖的静态函数级调用图（Call Graph），通过执行路径追踪将告警噪音压降 90%+，直击第三代 SCA 最大痛点。</p>
+        </div>
+        <div class="card">
+          <h4>Socket.dev · 行为分析 + 主动拦截</h4>
+          <p><span class="badge badge-warn">L3 实时监控</span> <span class="badge badge-build">L4 行为引擎</span></p>
+          <p>绕开「先有 CVE 再告警」的滞后范式，在包发布与安装边界对 AST、网络外联、环境变量读取与 <code>postinstall</code> 脚本做 70+ 行为红旗检测。</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav no-print">
+      <a href="../lessons/0001-decoupled-sca-architecture-and-oss-boundary.html">← 返回 Lesson 0001</a>
+      <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
+    </footer>
+  </main>
+</body>
+</html>

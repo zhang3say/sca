@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0001：第三代 SCA 四层解耦架构与「借力 vs 自研」边界划分</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0001-decoupled-sca-architecture-and-oss-boundary.html" class="active">Lesson 0001 · 四层解耦与开源边界</a>
+        <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002 · Layer 2 统一 IR</a>
+        <a href="../reference/sca-oss-landscape-and-4layer-map.html">Ref 01 · 架构与协议速查表</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0001</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · 统一底座架构</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>第三代 SCA 四层解耦架构与「借力 vs 自研」边界划分</h1>
+      <p class="subtitle">从 0 到 1 启动商业化 SCA 产品矩阵之前，总架构师必须先拍板的第一个决策：为什么不能让开源扫描器定义你的数据模型，以及如何在 Apache-2.0/MIT 合规红线下精准分配自研弹药。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>独立画出四层解耦蓝图并完成 MVP 模块的「借力/自研」边界评审</span>
+        <span><strong>速查卡片：</strong><a href="../reference/sca-oss-landscape-and-4layer-map.html">四层契约与开源协议速查表</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">为什么先学这一课（对齐你的 Mission）</div>
+      <p>你的目标是在 1–3 个月内拍板<strong>全场景统一底座</strong>，并且未来要在同一底座上平滑长出第三代壁垒（可达性、恶意包、AI-BOM）。几乎所有 0→1 的 SCA 团队栽的第一个大跟头，都不是算法不够难，而是<strong>第一天就把“扫描工具”当成了“平台架构”</strong>。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>0→1 的头号架构陷阱：为什么 80% 的团队会在第 6 个月推倒重写？</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>当你从零搭建 SCA，最诱人的捷径是：“先封装一个成熟的开源全能扫描器（比如直接调用 Trivy CLI），把输出的漏洞 JSON 落库、套一层前端管理台，两周就能出 Demo。”</p>
+      <p>这正是<strong>第一代 / 第二代 SCA 的「扫描器中心（Scanner-Centric）」心智</strong>：把 <em>资产提取 → 漏洞匹配 → 告警展示</em> 耦合成一条黑盒流水线。它在第 1 个月跑得飞快，但会在第 6 个月遭遇三次毁灭性撞墙：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">三代 SCA 的本质代差</span>
+        <strong>第一代</strong>：靠文件名/哈希/CPE 做扁平组件清单与 NVD 匹配；<br/>
+        <strong>第二代</strong>：解析包管理器依赖树 + 切入 CI/CD 与 IDE 自动化提 PR；<br/>
+        <strong>第三代 + AI 时代</strong>：以<strong>统一图模型</strong>为中心，叠加函数/运行时可达性降噪、恶意包行为分析与 AI-BOM（模型/数据集/MCP 依赖）治理。
+      </aside>
+      <ol>
+        <li><strong>数据模型被上游 CLI 绑架</strong>：当你想同时整合 <code>Syft</code>（容器镜像强）+ <code>cdxgen</code>（复杂源码构建强）+ 自研 Java/C++ 解析器时，不同工具输出的字段、依赖边语义与证据格式互不兼容，你的数据库表结构被迫打满补丁。</li>
+        <li><strong>无法“一次采集、持续重算”</strong>：明天突然爆出一个新的高危 0-day（类似 Log4Shell 或新的 npm 投毒链）。如果你的核心表存的是“上次扫描出的漏洞列表”，而不是<strong>“独立且完整的依赖图谱（SBOM IR）”</strong>，你就必须重新拉起全公司几千个仓库和镜像重扫一遍。</li>
+        <li><strong>第三代高价值能力无处挂载</strong>：静态可达性分析需要把<code>函数调用路径</code>挂接到图上的某个<code>(组件 PURL, 精确版本, 符号坐标)</code>节点；VEX 需要记录“为何此路径不可达”；AI-BOM 需要把模型权重文件与训练数据集作为一等公民接入同一依赖图。扁平的扫描结果表根本撑不住这些关系。</li>
+      </ol>
+      <blockquote>
+        <p>总架构师第一条铁律：<strong>开源扫描器是可插拔的“传感探头”，绝不能成为你平台的“脊椎”。平台的脊椎必须是你 100% 自主掌控的统一中间表示（Unified IR）。</strong></p>
+      </blockquote>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>第三代 SCA 的四层解耦架构</h2>
+
+    <div class="prose-col">
+      <p>要同时满足“全场景覆盖（源码/构建/镜像/制品/AI）”、“高效借力开源底座”与“聚焦高价值差异化壁垒”，现代 SCA 平台必须严格按<strong>数据流与变更频率</strong>切分为四层。每一层有清晰的输入输出契约，并对应截然不同的「借力 vs 自研」策略：</p>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 现代化全场景 SCA 四层解耦参考架构</strong>
+        <span>越往下越偏“多生态广度与商品化”，越往上越偏“语境精度与商业护城河”</span>
+      </figcaption>
+      <div class="arch-stack">
+        <div class="arch-layer layer-4">
+          <div>
+            <div class="arch-layer-id">Layer 4 · Action &amp; Moat</div>
+            <div class="arch-layer-name">决策、降噪与壁垒层</div>
+            <div class="arch-layer-sub">商业溢价与差异化核心</div>
+          </div>
+          <div class="arch-layer-body">
+            静态函数级可达性（Call Graph）与动态运行时裁剪、恶意包行为分析（AST/沙箱/红旗规则）、EPSS/KEV/VEX 智能优先级、无破坏性升级路径规划、策略门禁与 AI/Agent 供应链风险研判。
+            <div class="io-line">消费: L2 统一图谱 + L3 情报API + 代码/运行时上下文 → 产出: 可执行工单 / 自动 PR / 门禁决策</div>
+          </div>
+          <div class="arch-layer-strategy">
+            <span class="badge badge-build">核心自研壁垒</span>
+            <small>80% 长期核心研发精力应最终沉淀在此层</small>
+          </div>
+        </div>
+
+        <div class="arch-flow-arrow">▲ 实时查询 &amp; 持续重算（无需重扫源码） ▲</div>
+
+        <div class="arch-layer layer-3">
+          <div>
+            <div class="arch-layer-id">Layer 3 · Intelligence</div>
+            <div class="arch-layer-name">情报与知识底座层</div>
+            <div class="arch-layer-sub">准确度与时效性命脉</div>
+          </div>
+          <div class="arch-layer-body">
+            多源漏洞汇聚与去重归一化（<a href="https://github.com/ossf/osv-schema" target="_blank" rel="noopener">OSV Schema</a> / GHSA / NVD / 发行版公告）、<strong>生态原生版本区间语义引擎</strong>（SemVer / Maven / PEP 440 / Debian EVR）、<a href="https://github.com/ossf/malicious-packages" target="_blank" rel="noopener">恶意包情报流</a>、许可证兼容性知识库、漏洞函数级指纹（支撑 L4 可达性）。
+            <div class="io-line">消费: 多源上游 Feed + 自研安全研究 → 产出: 标准化版本匹配引擎 &amp; 离线/在线知识包</div>
+          </div>
+          <div class="arch-layer-strategy">
+            <span class="badge badge-warn">开源源 + 自研管线</span>
+            <small>借力 OSV 等开放源冷启动，自研归一化与版本引擎</small>
+          </div>
+        </div>
+
+        <div class="arch-flow-arrow">▲ 统一组件主键（PURL）与图谱索引关联 ▲</div>
+
+        <div class="arch-layer layer-2">
+          <div>
+            <div class="arch-layer-id">Layer 2 · Canonical Spine</div>
+            <div class="arch-layer-name">统一中间表示层 (IR)</div>
+            <div class="arch-layer-sub">全平台唯一真相源（不可外包）</div>
+          </div>
+          <div class="arch-layer-body">
+            以国际标准 <a href="https://github.com/Ecma-TC54/ECMA-427" target="_blank" rel="noopener">PURL (ECMA-427)</a> 为组件身份主键，存储完整有向依赖图（Direct / Transitive / Scope / 文件路径证据 / 镜像层来源），对外无损映射 <a href="https://github.com/CycloneDX/specification" target="_blank" rel="noopener">CycloneDX 1.7 (ECMA-424)</a> 与 <a href="https://github.com/spdx/spdx-3-model" target="_blank" rel="noopener">SPDX 3.0</a>，原生预留 VEX、函数符号索引及 AI/ML-BOM 节点扩展字段。
+            <div class="io-line">消费: L1 适配器标准事件 → 产出: 跨场景统一资产与依赖图谱（支持增量 Diff 与溯源）</div>
+          </div>
+          <div class="arch-layer-strategy">
+            <span class="badge badge-build">100% 自研主权</span>
+            <small>绝不直接使用任何开源 CLI 的输出结构做内表</small>
+          </div>
+        </div>
+
+        <div class="arch-flow-arrow">▲ Adapter 归一化转换（屏蔽上游工具差异） ▲</div>
+
+        <div class="arch-layer layer-1">
+          <div>
+            <div class="arch-layer-id">Layer 1 · Sensors</div>
+            <div class="arch-layer-name">采集与提取层</div>
+            <div class="arch-layer-sub">多语言与全形态广度覆盖</div>
+          </div>
+          <div class="arch-layer-body">
+            面向源码 Manifest/Lockfile、构建期包管理器、容器镜像分层、OS 包数据库、二进制制品与 AI 模型清单的插件化提取器阵列。遵循“通用生态借力开源、痛点生态自研补强”原则。
+            <div class="io-line">消费: Git 仓库 / CI 构建环境 / OCI 镜像 / 制品库 → 产出: 原始组件与依赖边证据</div>
+          </div>
+          <div class="arch-layer-strategy">
+            <span class="badge badge-ok">优先借力 Apache-2.0</span>
+            <small>嵌入 OSV-SCALIBR / Syft 等库，按需插拔自研解析器</small>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col has-sidenote">
+      <h3>印证视角：全球商业标杆是如何在这四层下注的？</h3>
+      <p>拆解全球最成功的三家新一代商业标杆，你会发现一个惊人的共识：<strong>没有一家把核心研发浪费在“从零重造所有 OS/锁文件提取器”上</strong>，它们全部在 Layer 2 标准契约稳固后，各自在 Layer 3 或 Layer 4 打穿一个极深护城河：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">架构参考原型</span>
+        开源平台 <a href="https://github.com/DependencyTrack/dependency-track" target="_blank" rel="noopener">OWASP Dependency-Track</a>（Apache-2.0）就是典型的「L1 与 L2–L4 解耦」参考架构：它自己根本不做源码扫描，而是专注于摄入标准 CycloneDX SBOM，并在服务端持续重算漏洞与 VEX 状态。
+      </aside>
+      <ul>
+        <li><strong><a href="https://snyk.io/" target="_blank" rel="noopener">Snyk</a>（重仓 Layer 3 情报研判 + Layer 4 开发者修复流）</strong>：不仅聚合 NVD/生态公告，还持续监控 GitHub 提交与 PR 并在 CVE 正式分配前由人工团队研判出 <code>SNYK-*</code> 条目，叠加严谨版本区间与自动修复 PR 图谱。</li>
+        <li><strong><a href="https://www.endorlabs.com/" target="_blank" rel="noopener">Endor Labs</a>（重仓 Layer 1 构建保真度 + Layer 4 函数级可达性）</strong>：直击传统 SCA 告警泛滥的死穴，通过静态分析跨直接与传递依赖构建深层函数调用图（Call Graph），验证应用入口是否真的会调用漏洞函数，将噪音压降 90% 以上。</li>
+        <li><strong><a href="https://socket.dev/" target="_blank" rel="noopener">Socket.dev</a>（重仓 Layer 3 实时注册表监控 + Layer 4 行为分析）</strong>：跳出“等 CVE 出来再告警”的滞后模式，在包发布和安装边界对代码做 AST 静态行为检测（70+ 红旗信号：网络外联、读取 <code>.env</code>/SSH 密钥、<code>postinstall</code> 脚本、代码混淆、维护者突变），主动拦截 0-day 投毒包与 AI Agent Skills 恶意投毒。</li>
+      </ul>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>站在巨人肩膀上：开源底座选型与商业协议排雷</h2>
+
+    <div class="prose-col">
+      <p>在你的商业闭源交付红线下，选型开源底座必须同时过两关：<strong>① 协议合规关</strong>（不仅是主代码许可证，还要查清配套规则库与数据集的衍生许可）；<strong>② 工程集成深度关</strong>（库级嵌入 vs CLI 进程封装）。</p>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>开源底座 / 工具</th>
+              <th>实测许可证</th>
+              <th>商业闭源判定</th>
+              <th>核心工程价值与架构定位</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener">Google OSV-SCALIBR</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">首选 · 库级嵌入</span></td>
+              <td>Google 内部大规模使用的 Go 模块化 SCA 引擎，驱动 <a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener">OSV-Scanner v2</a>。天然按 <code>Extractor / Enricher / Detector</code> 插件分层，可直接作为 Go 库引入并按需替换或追加自研插件。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/anchore/syft" target="_blank" rel="noopener">Anchore Syft</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">首选 · 库级嵌入</span></td>
+              <td>容器镜像分层、OS 包数据库（dpkg/rpm/apk）与制品元数据编目（Cataloging）的行业标杆；同样是 Go 库与 CLI 双形态，和 <a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Grype</a> 构成经典的提取/匹配解耦范式。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener">OWASP cdxgen</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">推荐 · 隔离封装</span></td>
+              <td>多语言构建感知（Build-aware）覆盖面极广，原生输出 CycloneDX 1.6/1.7（支持 CBOM 与 AI/ML-BOM）。因依赖 Node.js 与各语言构建环境，最适合封装为独立沙箱 Worker。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener">OSS Review Toolkit (ORT)</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-ok">推荐 · 参考/封装</span></td>
+              <td>调用原生包管理器精确还原复杂源码传递依赖树，是高保真依赖解析与企业级许可证合规的绝佳工程蓝本（Kotlin/JVM）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/aquasecurity/trivy" target="_blank" rel="noopener">Aqua Trivy</a></td>
+              <td><code>Apache-2.0</code></td>
+              <td><span class="badge badge-blue">合规 · 谨防锁死</span></td>
+              <td>极佳的全能扫描参考与离线数据库分发范例（BoltDB/OCI），但若把它直接当作核心数据底座，极易陷入第 01 节的“扫描器中心”重构债。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/aboutcode-org/scancode-toolkit" target="_blank" rel="noopener">ScanCode-Toolkit</a></td>
+              <td>代码 <code>Apache-2.0</code><br/>数据 <code>CC-BY-4.0</code></td>
+              <td><span class="badge badge-warn">可用 · 注意数据署名</span></td>
+              <td>源码许可证识别标杆。代码本身可商用，但配套的 <strong>ScanCode LicenseDB 采用 CC-BY-4.0</strong>，商业分发时必须履行清晰的署名与修改说明义务。</td>
+            </tr>
+            <tr>
+              <td><a href="https://semgrep.dev/" target="_blank" rel="noopener">Semgrep CE</a></td>
+              <td>引擎 <code>LGPL-2.1</code><br/>官规 <code>Semgrep Rules v1.0</code></td>
+              <td><span class="badge badge-warn">边界高敏 · 规避官规</span></td>
+              <td>核心引擎为弱传染 LGPL-2.1（需严格隔离链接边界）；更隐蔽的坑在于<strong>Semgrep 官方维护规则集明确限制用于竞品商业 SaaS</strong>，不可拿其规则打包售卖。</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.fossology.org/" target="_blank" rel="noopener">FOSSology</a> / <a href="https://codeql.github.com/" target="_blank" rel="noopener">CodeQL</a></td>
+              <td><code>GPL-2.0</code> / <code>GitHub 专有条款</code></td>
+              <td><span class="badge badge-danger">严禁闭源产品嵌入</span></td>
+              <td>FOSSology 主体为强传染 GPL-2.0；CodeQL 默认免费条款<strong>仅限开源代码或学术研究</strong>，商业私有代码扫描必须购买 GHAS，两者均不可作为商业 SCA 产品底座。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>关键工程权衡：库级嵌入 (Library) vs 进程封装 (CLI Adapter)</h3>
+      <p>同样是 Apache-2.0 底座，集成方式不同，工程掌控力天差地别：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">隐性成本提醒</span>
+        无论选择 Library 还是 CLI，在进入 Layer 2 前都必须强制经过一层<strong>反腐败适配器（Anti-Corruption Adapter）</strong>，把外部结构体翻译成你自己的内部 IR（含 PURL + 证据链 + 依赖边）。
+      </aside>
+      <div class="grid-2">
+        <div class="card">
+          <h4>库级嵌入（如 Go 引入 OSV-SCALIBR / Syft）</h4>
+          <p><span class="badge badge-ok">推荐用于核心扫描引擎</span></p>
+          <p><strong>优势：</strong>零子进程开销、内存内流式转换、可精细裁剪插件（关掉不准的 Extractor，注入自研 Extractor）、统一错误遥测与超时控制。</p>
+          <p><strong>代价：</strong>绑定宿主语言生态（Go），需建立上游版本升级的回归测试防线。</p>
+        </div>
+        <div class="card">
+          <h4>隔离进程封装（如沙箱运行 cdxgen / ORT）</h4>
+          <p><span class="badge badge-blue">推荐用于异构构建环境</span></p>
+          <p><strong>优势：</strong>天然跨语言隔离（Node.js / JVM / 原生包管理器）、防止构建期扫描污染宿主环境或触发恶意构建脚本安全风险。</p>
+          <p><strong>代价：</strong>序列化与容器启动开销较高，需做并发队列与只读挂载/断网沙箱控制。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE SANDBOX -->
+    <h2><span class="sec-num">04</span>架构师实战沙盘：拍板你的 0→1 MVP 模块边界</h2>
+
+    <div class="prose-col">
+      <p>下面模拟你作为总架构师主持第一次架构评审会。面对这 6 个真实模块，请严格对照<strong>四层解耦原则</strong>与<strong>商业闭源协议红线</strong>逐一拍板，点击「运行架构评审」即时检验你的方案是否存在隐性重构债或合规雷区。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "MVP 架构边界评审沙盘（6 个核心模块）",
+          "intro": "背景：商业闭源 SCA 产品，1–3 个月交付统一底座 MVP，团队核心栈偏 Go/云原生，后续计划扩展可达性与 AI-BOM。",
+          "modules": [
+            {
+              "name": "统一资产与依赖图数据模型（数据库核心表）",
+              "layer": "Layer 2 · Canonical IR",
+              "context": "研发提议直接照搬上游开源扫描器的 JSON 输出结构落库以缩短工期。",
+              "options": [
+                {
+                  "label": "100% 自研内部 IR（PURL 主键 + 图边 + 扩展槽）",
+                  "status": "optimal",
+                  "verdictTitle": "牢牢握住平台脊椎",
+                  "feedback": "完全正确。内部 IR 是全平台最不能外包的部分。采用 PURL 主键、显式依赖边、证据来源与扩展槽，并通过 Adapter 吸收上游提取器，未来接入多提取器、可达性与 AI-BOM 均无需推倒重构。"
+                },
+                {
+                  "label": "直接用 Trivy / Syft 原生 JSON Schema 建表",
+                  "status": "critical",
+                  "verdictTitle": "上游 Schema 绑架高危债",
+                  "feedback": "一旦外部工具字段变更、或者你要混用多个提取器（如镜像用 Syft + 源码用自研解析器）并挂载函数可达性路径时，核心库表将被迫大面积重构。外部格式只应作为导入导出视图，绝非内部存储模型。"
+                },
+                {
+                  "label": "先存扁平组件列表，不存依赖边，二期再补图谱",
+                  "status": "warning",
+                  "verdictTitle": "隐性返工风险较高",
+                  "feedback": "丢失直接/传递依赖边会导致二期无法判断“该升级哪个直接依赖来消除传递漏洞”，也难以做 Scope（dev vs prod）降噪。哪怕 MVP 查询简单，存储层也应在第一天保留 (parent -> child, scope) 依赖边表。"
+                }
+              ]
+            },
+            {
+              "name": "容器镜像分层与 OS 包数据库（dpkg/rpm/apk）提取",
+              "layer": "Layer 1 · Sensors",
+              "context": "需要覆盖主流 Linux 发行版与 OCI 镜像各层的文件归属及删除标记（whiteout）。",
+              "options": [
+                {
+                  "label": "全自研解析 OCI 层与各发行版包数据库",
+                  "status": "warning",
+                  "verdictTitle": "典型重复造轮子",
+                  "feedback": "解析 dpkg/rpm/apk/alpine/debian 细节和 OCI whiteout 规则属于高维护成本的商品化苦力活，很难形成商业差异化壁垒，反而会抽干核心研发在 Layer 2/3/4 的宝贵兵力。"
+                },
+                {
+                  "label": "库级嵌入 Apache-2.0 底座（OSV-SCALIBR 或 Syft）",
+                  "status": "optimal",
+                  "verdictTitle": "站在巨人肩膀上的最优解",
+                  "feedback": "精准借力！OSV-SCALIBR 与 Syft 均为 Apache-2.0 协议的 Go 库，经过 Google / 社区海量镜像验证；通过库级嵌入 + 自研 Adapter 转为内部 IR，既零合规风险又能数周内达到行业一线覆盖度。"
+                },
+                {
+                  "label": "直接透传调用 Trivy 输出 CVE 列表，不落地 SBOM",
+                  "status": "critical",
+                  "verdictTitle": "破坏解耦与持续重算能力",
+                  "feedback": "这退回到了第一代“扫描器中心”模式：既无法在爆出新 0-day 时基于已有资产图谱瞬间重算，也无法接入你自己的漏洞研判库和可达性降噪。"
+                }
+              ]
+            },
+            {
+              "name": "跨生态漏洞与恶意包情报底座",
+              "layer": "Layer 3 · Intelligence",
+              "context": "需要高质量匹配开源语言包与恶意投毒包，并逐步沉淀商业级误报修正能力。",
+              "options": [
+                {
+                  "label": "仅直连 NVD API 并按 CPE 字符串模糊匹配",
+                  "status": "critical",
+                  "verdictTitle": "第一代架构误报/漏报深坑",
+                  "feedback": "NVD CPE 命名极度不一致且覆盖语言生态严重滞后，也不含恶意投毒包。基于 CPE 的匹配会产生海量误报和漏报，完全无法支撑现代化 SCA 体验。"
+                },
+                {
+                  "label": "聚合 OSV + GHSA + OpenSSF 恶意包，自研归一化与版本引擎",
+                  "status": "optimal",
+                  "verdictTitle": "高性价比的混合演进策略",
+                  "feedback": "正确路线。以 OSV Schema 为统一内部情报模型，接入 OSV/GHSA/NVD/ossf-malicious-packages（均开放合规）快速冷启动，把自研精力放在多源去重、生态原生版本比较器与后续函数级漏洞指纹补全。"
+                },
+                {
+                  "label": "纯靠自建安全团队人工录入全部历史 CVE",
+                  "status": "warning",
+                  "verdictTitle": "冷启动周期失控",
+                  "feedback": "历史开源漏洞数以十万计，全靠人工从零建库无法在 1–3 个月上线。正确做法是开源结构化源打底，人工研判只聚焦高影响组件、0-day 提前捕获与函数级可达性指纹标注。"
+                }
+              ]
+            },
+            {
+              "name": "源码级开源许可证扫描与文本特征识别",
+              "layer": "Layer 1 / 合规模块",
+              "context": "客户希望识别仓库中隐蔽拷贝的开源协议文本，但产品需商业闭源交付。",
+              "options": [
+                {
+                  "label": "将 FOSSology 核心引擎静态打包进商业闭源后端",
+                  "status": "critical",
+                  "verdictTitle": "触发 GPL-2.0 强传染红线",
+                  "feedback": "FOSSology 主体遵循 GPL-2.0，将其核心代码直接链接或修改打包进闭源商业产品会触发严重的开源协议违约与法务风险，必须一票否决。"
+                },
+                {
+                  "label": "评估 ScanCode-Toolkit，同时梳理 CC-BY-4.0 署名义务",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾能力与双许可合规",
+                  "feedback": "老练的架构师判断！ScanCode-Toolkit 代码为 Apache-2.0，但配套的 ScanCode LicenseDB 为 CC-BY-4.0——看清“代码与知识库双许可”并在商业分发文档中履行署名义务，即可安全复用。"
+                },
+                {
+                  "label": "完全忽视 LicenseDB 协议，直接提取其规则私有化",
+                  "status": "critical",
+                  "verdictTitle": "隐蔽的数据集侵权雷区",
+                  "feedback": "很多团队只看了 GitHub 仓库主页的 Apache-2.0 徽章，却忽略了配套规则/数据集采用 CC-BY-4.0 或专有条款。剥离署名权私用会在客户合规审计或融资尽调时埋下大雷。"
+                }
+              ]
+            },
+            {
+              "name": "未来第三代壁垒：静态函数级可达性分析（预研与选型）",
+              "layer": "Layer 4 · Moat",
+              "context": "团队讨论第二阶段如何建设跨语言静态调用图，以对标 Endor Labs。",
+              "options": [
+                {
+                  "label": "在商业产品中内置 GitHub CodeQL CLI 扫描客户私有库",
+                  "status": "critical",
+                  "verdictTitle": "违反 CodeQL 商业授权条款",
+                  "feedback": "GitHub CodeQL 并非 OSI 开源软件，其条款明确禁止免费用于分析私有/商业闭源代码库（需购买 GHAS）。把它嵌进自家商业 SCA 卖给客户属于严重违约。"
+                },
+                {
+                  "label": "直接打包 Semgrep 官方规则库作为商业核心卖点",
+                  "status": "critical",
+                  "verdictTitle": "触碰竞品规则协议红线",
+                  "feedback": "Semgrep CE 引擎为 LGPL-2.1，且其官方维护规则集受 Semgrep Rules License v1.0 约束（限制用于竞品商业 SaaS）。既不能当成无约束免费品，且纯模式匹配也无法替代跨过程调用图。"
+                },
+                {
+                  "label": "Phase 1 在 IR 预留符号坐标，Phase 2 基于 AST/IR 自研或用宽松编译器前端",
+                  "status": "optimal",
+                  "verdictTitle": "聚焦长期护城河的正确节奏",
+                  "feedback": "完美符合“底座先行、壁垒自研”的哲学：第一阶段在 Layer 2 IR 与 Layer 3 漏洞模型中预留符号/函数位点字段，第二阶段基于语言原生工具链与宽松前端（如 Tree-sitter [MIT]、Go SSA、Java 字节码 OW2 ASM [BSD-3-Clause]；若引入 SootUp 须留意其 LGPL-2.1 动态链接边界）自研高价值可达性引擎。"
+                }
+              ]
+            },
+            {
+              "name": "多语言复杂构建依赖解析（如含私服/宏变量的 Maven/Gradle 项目）",
+              "layer": "Layer 1 · Sensors",
+              "context": "静态解析单个 pom.xml 经常算错传递依赖版本，需要高保真解析策略。",
+              "options": [
+                {
+                  "label": "分层策略：静态锁文件嵌入开源库 + 构建期在隔离沙箱跑 cdxgen/ORT 或自研插件",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾速度、安全与精度",
+                  "feedback": "工业界最佳组合！常规锁文件靠嵌入库毫秒级提取；遇到无锁文件或重度依赖构建变量的复杂项目（如 Maven 多模块/Gradle），按需调度隔离沙箱中的构建感知解析器，全部归一化汇入 Layer 2 IR。"
+                },
+                {
+                  "label": "在平台主服务宿主机上直接执行客户仓库的 mvn/npm install",
+                  "status": "critical",
+                  "verdictTitle": "严重供应链投毒与 RCE 安全漏洞",
+                  "feedback": "执行客户源码的包管理器构建脚本（如 npm postinstall、Gradle/setup.py）等同于在宿主机执行不可信代码！一旦扫描到恶意仓库或投毒包，扫描器本身就会沦陷。构建感知扫描必须在强隔离、最小权限沙箱中运行。"
+                },
+                {
+                  "label": "只解析根清单文件声明的直接依赖，忽略全部传递依赖",
+                  "status": "warning",
+                  "verdictTitle": "严重漏报（真实漏洞 70%+ 在传递层）",
+                  "feedback": "现代应用绝大多数漏洞藏在传递依赖中。只扫直接依赖会让产品能力退化到不可用状态，必须在 MVP 阶段就具备解析 Lockfile 与还原传递依赖树的能力。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道场景题不靠死记硬背，而是检验你是否真的内化了本课的架构判断标准。<strong>请先不要回翻正文，直接凭记忆作答。</strong>（注：每道题 4 个选项字数完全相等、结构对称，不存在字数或格式暗示。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0001 · 核心架构决策回忆测验",
+          "intro": "答完每题会立刻给出深度架构解析，用于校准潜在思维盲区。",
+          "questions": [
+            {
+              "prompt": "团队计划在 3 个月内交付 MVP，一位核心研发建议：“直接把 Trivy 扫描输出的 JSON 原样存进 PostgreSQL 作为系统核心资产表，既省工期又能复用它的所有生态。” 作为总架构师，这一方案最致命的长期架构隐患是什么？",
+              "options": [
+                "该工具采用传染协议，商业闭源交付将直接触发法务合规风险。",
+                "核心模型被上游绑架，后续接入可达性与多源融合将被迫重构。",
+                "该工具仅支持容器扫描，完全无法解析源码锁文件与语言依赖。",
+                "关系库无法存储树状数据，必须先替换为图数据库才能够上线。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Trivy 本身是 Apache-2.0（排除 A），也支持源码锁文件（排除 C），PostgreSQL 完全可以通过节点表+边表存依赖图（排除 D）。真正的致命伤在于让外部扫描器的输出 Schema 篡夺了平台 Layer 2 统一 IR 的主权，一旦要融合多个提取器或挂载函数可达性、AI-BOM 时将被迫推倒重写。"
+            },
+            {
+              "prompt": "你的商业闭源产品需要引入开源能力来辅助做许可证扫描或代码规则分析。下列哪一项关于开源许可证与商业集成边界的判断是准确的？",
+              "options": [
+                "静态链接 FOSSology 源码，其宽松协议不具传染风险。",
+                "商用集成 Semgrep 官方规则，不存在竞品服务限制条款。",
+                "批量调用 CodeQL 扫私有闭源，完全符合其默认免费授权。",
+                "引入 ScanCode 与许可库，须按要求履行数据署名义务。"
+              ],
+              "answerIndex": 3,
+              "explanation": "FOSSology 主体为 GPL-2.0 强传染协议（A 错）；Semgrep 官方维护规则采用 Semgrep Rules License v1.0，明确限制用于竞品商业 SaaS（B 错）；CodeQL 默认条款仅限开源代码或学术用途，禁用于商业私有代码库分析（C 错）。ScanCode-Toolkit 代码为 Apache-2.0，配套 LicenseDB 为 CC-BY-4.0，遵守署名等条款即可合规商用（D 对）。"
+            },
+            {
+              "prompt": "从工程解耦视角对比 Google OSV-SCALIBR 与直接封装全能 CLI 扫描器，为什么架构师往往优先在采集层（Layer 1）以「Go 库级嵌入」方式整合 OSV-SCALIBR？",
+              "options": [
+                "插件接口清晰可按需裁剪，且便于将提取结果直接映射至内部图谱。",
+                "内置完备的私有商业漏洞库，无需再建设任何漏洞归一化与匹配层。",
+                "原生覆盖函数级跨文件调用图，可直接替代全语言静态可达性引擎。",
+                "采用专有封闭二进制分发格式，可防止竞品通过逆向分析产品能力。"
+              ],
+              "answerIndex": 0,
+              "explanation": "OSV-SCALIBR 是 Apache-2.0 的模块化 Go 库，以 Extractor/Enricher/Detector 插件解耦，嵌入后可在内存内直接流式映射为平台的 Layer 2 内部 IR，并能随时关掉不精准插件或插入自研解析器。它对接的是开放的 OSV 数据（非私有商业库），也并非全语言函数调用图引擎。"
+            },
+            {
+              "prompt": "商业标杆 Snyk、Endor Labs 与 Socket.dev 在现代化 SCA 四层架构中采取了截然不同的研发聚焦策略。下列哪项关于三者核心护城河分布的拆解最准确？",
+              "options": [
+                "三者都将研发主力投向容器系统包提取，以此替代开源基础采集器。",
+                "三者均以自研跨生态包标识替代标准规范，借此建立封闭数据壁垒。",
+                "三者在标准底座之上分别押注情报研判、函数可达性与包行为分析。",
+                "三者共同放弃了传统已知漏洞匹配链路，全面转向纯动态沙箱拦截。"
+              ],
+              "answerIndex": 2,
+              "explanation": "全球标杆均建立在标准化的包标识与依赖图基础上，避免在基础提取层过度消耗：Snyk 押注 Layer 3/4 人工+自动化漏洞情报与修复图谱，Endor Labs 押注 Layer 4 函数级调用图可达性降噪，Socket.dev 押注 Layer 3/4 AST 行为红旗与实时恶意包拦截。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>不要只停留在二手综述。本课最推荐花 10 分钟直接翻阅两个顶级一手仓库的架构文档与目录结构：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener"><strong>google/osv-scalibr</strong></a>：重点看 README 中的架构图与 <code>extractor/</code>、<code>enricher/</code>、<code>detector/</code> 插件接口定义——这是 Google 实战验证过的 Layer 1 解耦典范。</li>
+          <li><a href="https://github.com/CycloneDX/specification" target="_blank" rel="noopener"><strong>CycloneDX/specification (ECMA-424)</strong></a>：快速浏览 <code>components</code>、<code>dependencies</code>、<code>vulnerabilities (VEX)</code> 与 <code>ML-BOM</code> 顶层结构，为下一课设计 Layer 2 统一 IR 热身。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>这篇微课只是起点，<strong>请随时回到对话中把任何存疑的地方抛给我</strong>，比如：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“我们团队主力语言不是 Go（比如 Java/Python/Rust），整合 OSV-SCALIBR / Syft 该怎么做跨语言架构？”</li>
+          <li>“沙盘里某个模块的权衡，结合我们具体目标客户（离线内网 / CI 并发）该怎么微调？”</li>
+          <li>“我完成了测验，帮我复盘错题并把核心概念沉淀进术语表，准备进入 Lesson 0002（Layer 2 统一 IR 与 PURL/CycloneDX 图模型）！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="../reference/sca-oss-landscape-and-4layer-map.html">速查卡 Ref 01：四层契约与开源协议矩阵</a>
+      <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">下一课：Lesson 0002 · Layer 2 统一 IR 与 PURL/CycloneDX 图模型 →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

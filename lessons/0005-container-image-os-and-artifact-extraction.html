@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0005：容器镜像、OS 发行版与制品分层采集原理</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004 · 开源提取底座拆解</a>
+        <a href="./0005-container-image-os-and-artifact-extraction.html" class="active">Lesson 0005 · 镜像与制品采集</a>
+        <a href="../reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0005</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 02 多语言与全形态采集提取引擎</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>容器镜像、OS 发行版与制品分层采集原理</h1>
+      <p class="subtitle">源码没有锁文件时是「盲区」，而交付上线前的容器镜像与编译产物才是运行态唯一真相。但千万别用 <code>docker run</code> 进容器敲命令——本课直击用户态 OCI 分层与 Whiteout 合成、Distroless 与三代 RPM 数据库解析、以及 Java Fat-JAR / Go / Rust 静态二进制的内嵌依赖采集底层。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握零挂载用户态镜像 Squash 算法、4 大 OS 包 DB（含源码包映射）与 3 类二进制内嵌段提取及防 Zip Bomb 边界</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> 我们敲定了以 <code>Syft + OSV-SCALIBR</code> 为核心的 Go 泳道 A，并把交付产物定义为 <strong>Tier 4（置信度 0.96–0.98）</strong> 权威源。今天揭开 Tier 4 的内部黑盒：为什么纯静态用户态扫描必须自己还原 <code>overlayfs</code> 语义？为什么扫出 <code>libssl3</code> 还不够，必须挖出 <code>Source: openssl</code>？以及如何拆解被剥离符号表的 Go/Rust 二进制与嵌套 JAR。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>OCI 镜像分层解剖与 Whiteout 虚拟文件系统合成</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>初代镜像扫描器常犯两个致命错误：要么在 Worker 里调用 <code>docker run</code> / <code>exec</code> 进容器执行 <code>dpkg -l</code> 或 <code>rpm -qa</code>；要么把每个层 Tarball 独立解压到宿主机或逐层扫描再拼并集。</p>
+      <p>前者的死穴在于：<strong>① 不可信镜像 Entrypoint 存在容器逃逸/RCE 风险</strong>；<strong>② Distroless / scratch 镜像压根没有 <code>/bin/sh</code> 和包管理器可执行文件</strong>；<strong>③ 跨架构镜像（如在 x86 扫描器扫 ARM64 镜像）无法直接执行</strong>。而逐层独立扫描不合成目录树，则会直接炸出“已删除文件仍在告警”的幽灵误报。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">为什么禁宿主机 mount？</span>
+        在 Kubernetes 多租户扫描 Pod 里调用内核 <code>mount -t overlay</code> 需要特权模式（<code>CAP_SYS_ADMIN</code>），直接把安全扫描器变成宿主机提权跳板，政企客户安全基线一票否决。<strong>现代底座一律采用纯用户态内存 VFS 合成。</strong>
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <p>工业级底座（如 <a href="https://github.com/anchore/stereoscope" target="_blank" rel="noopener">Anchore Stereoscope</a> 与 <a href="https://github.com/google/go-containerregistry" target="_blank" rel="noopener">Google go-containerregistry</a>，均为 <code>Apache-2.0</code>）严格遵循 <a href="https://github.com/opencontainers/image-spec/blob/main/layer.md" target="_blank" rel="noopener">OCI Image Spec</a>，在用户态流式解析 <code>manifest.json → config (diff_ids) → layer.tar.gz</code>，并按层号从底向上回放两类删除标记（Whiteout）：</p>
+      <ul>
+        <li><strong>单文件删除标记（<code>.wh.&lt;filename&gt;</code>）：</strong>同一层某目录下存在 <code>.wh.curl</code>，等价于声明“把所有更低层该路径下的 <code>curl</code> 文件或目录从最终视图中抹除”。</li>
+        <li><strong>不透明目录标记（<code>.wh..wh..opq</code>，Opaque Whiteout）：</strong>当上层构建命令清空并重建某目录时，该目录内会出现 <code>.wh..wh..opq</code>，意味着<strong>屏蔽全部更低层该目录下的所有兄弟文件与子目录</strong>，仅保留当前层及更高层新增内容。</li>
+      </ul>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Stereoscope 用户态多层叠加与 Squash 虚拟文件系统树（VFS）合成原理</strong>
+        <span>先解析索引与配置取得有序 <code>diff_ids</code>，再于内存构造每层索引树并合并为 <code>SquashedScope</code>（运行态真值）</span>
+      </figcaption>
+      <div class="layer-stack-grid">
+        <div class="layer-stack-col">
+          <div class="layer-slice layer-base">
+            <div class="layer-slice-head">
+              <span class="layer-slice-title">Layer 0 · Base OS + Legacy SDK</span>
+              <span class="wh-pill">diff_id[0]</span>
+            </div>
+            <ul class="layer-slice-files">
+              <li><span class="wh-pill add">+ ADD</span> <code>var/lib/dpkg/status</code> (openssl@3.0.11)</li>
+              <li><span class="wh-pill add">+ ADD</span> <code>opt/app/old-sdk.jar</code> (log4j@2.14.1)</li>
+              <li><span class="wh-pill add">+ ADD</span> <code>opt/app/conf/old.yaml</code></li>
+            </ul>
+          </div>
+
+          <div class="layer-slice layer-mid">
+            <div class="layer-slice-head">
+              <span class="layer-slice-title">Layer 1 · 安装临时工具 curl</span>
+              <span class="wh-pill">diff_id[1]</span>
+            </div>
+            <ul class="layer-slice-files">
+              <li><span class="wh-pill add">+ ADD</span> <code>usr/bin/curl</code></li>
+              <li><span class="wh-pill">MOD</span> <code>var/lib/dpkg/status</code> (+ curl@7.88.1)</li>
+            </ul>
+          </div>
+
+          <div class="layer-slice layer-top">
+            <div class="layer-slice-head">
+              <span class="layer-slice-title">Layer 2 · apt purge + 重建 /opt/app</span>
+              <span class="wh-pill">diff_id[2]</span>
+            </div>
+            <ul class="layer-slice-files">
+              <li><span class="wh-pill del">WHITEOUT</span> <code>usr/bin/.wh.curl</code> (删下层单文件)</li>
+              <li><span class="wh-pill opq">OPAQUE</span> <code>opt/app/.wh..wh..opq</code> (清目录全祖先)</li>
+              <li><span class="wh-pill add">+ ADD</span> <code>opt/app/service.jar</code> (log4j@2.23.1)</li>
+              <li><span class="wh-pill">MOD</span> <code>var/lib/dpkg/status</code> (已删 curl 条目)</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="sandbox-arrow-col">
+          <span class="sandbox-arrow-glyph">══▶</span>
+          <span>内存 VFS<br/>Squash 引擎</span>
+        </div>
+
+        <div class="layer-stack-col">
+          <div class="layer-slice layer-squash">
+            <div class="layer-slice-head">
+              <span class="layer-slice-title">SquashedScope · 运行态终态树（默认扫漏洞）</span>
+              <span class="badge badge-ok">Tier 4 真值</span>
+            </div>
+            <ul class="layer-slice-files">
+              <li><span class="wh-pill add">ACTIVE</span> <code>var/lib/dpkg/status</code> → <code>openssl@3.0.11</code></li>
+              <li><span class="wh-pill add">ACTIVE</span> <code>opt/app/service.jar</code> → <code>log4j@2.23.1</code></li>
+              <li><span class="wh-pill hidden">MASKED</span> <code>usr/bin/curl</code> (被 <code>.wh.curl</code> 遮蔽)</li>
+              <li><span class="wh-pill hidden">MASKED</span> <code>opt/app/old-sdk.jar</code> (被 <code>.wh..wh..opq</code> 遮蔽)</li>
+              <li><span class="wh-pill hidden">MASKED</span> <code>opt/app/conf/old.yaml</code> (同上被整目录屏蔽)</li>
+            </ul>
+          </div>
+
+          <div class="layer-slice">
+            <div class="layer-slice-head">
+              <span class="layer-slice-title">AllLayersScope · 历史层审计视图（可选旁路）</span>
+              <span class="badge badge-warn">仅审计/查密钥</span>
+            </div>
+            <ul class="layer-slice-files">
+              <li><strong>架构铁律：</strong>硬编码密钥（<code>.env</code>/私钥）一旦写进下层即便上层删除也仍在 Tarball 里，<strong>密钥扫描看 AllLayers</strong>；CVE 与组件台账默认<strong>只看 SquashedScope</strong>，被屏蔽层降级标为 <code>deleted_in_layer</code> 隔离。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>Linux 发行版包数据库与 Distroless 无包管理器镜像解析</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>合成出终态 VFS 后，Layer 1 采集器无需执行任何二进制程序，直接以只读方式读取各 Linux 发行版的静态包数据库文件与系统指纹（<code>/etc/os-release</code> 或 <code>/usr/lib/os-release</code>）。</p>
+      <p>这里藏着商业产品最容易踩穿的两大工程暗坑：<strong>① 路径与数据库引擎代际分裂</strong>（尤其是 Distroless 碎片化目录与 RHEL 9 SQLite 迁移）；<strong>② 丢失「二进制包 → 源码包（Source / Origin）」血缘字段</strong>。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">为何必须抓 Source / Origin？</span>
+        在 Debian/Ubuntu/Alpine 中，一个源码包（如 <code>openssl</code>）编译时会拆出十几个二进制子包（<code>libssl3</code>、<code>openssl-dev</code>），而 <strong>Debian Security Tracker 和 OSV 公告常常按源码包名发布</strong>！只记 <code>libssl3</code> 不写 <code>upstream=openssl</code>，Layer 3 匹配必定大批漏报。
+      </aside>
+    </div>
+
+    <div class="full-width">
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:15%" />
+            <col style="width:24%" />
+            <col style="width:19%" />
+            <col style="width:20%" />
+            <col style="width:22%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>发行版家族</th>
+              <th>静态数据库路径（含极简/现代路径）</th>
+              <th>存储格式与 Go 底座</th>
+              <th>关键提取字段与源码包映射</th>
+              <th>高危工程暗坑</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Debian / Ubuntu / Distroless</strong></td>
+              <td><code>/var/lib/dpkg/status</code><br/><code>/var/lib/dpkg/status.d/*</code></td>
+              <td>RFC 822 文本段（<code>Status: install ok installed</code>）；纯 Go 直接流式读取</td>
+              <td><code>Package</code>、<code>Version</code>（带 epoch/revision）、<code>Architecture</code>、<strong><code>Source</code></strong>（填入 PURL <code>upstream</code>）</td>
+              <td>Google <a href="https://github.com/GoogleContainerTools/distroless" target="_blank" rel="noopener">Distroless</a> 无 <code>status</code> 总表，只留每包独立文件于 <code>status.d/</code>；同时必须过滤非 <code>installed</code> 状态残留。</td>
+            </tr>
+            <tr>
+              <td><strong>Alpine Linux</strong></td>
+              <td><code>/lib/apk/db/installed</code></td>
+              <td>单字母行前缀 KV 文本块；纯 Go 直接解析</td>
+              <td><code>P:</code> 包名、<code>V:</code> 版本、<code>A:</code> 架构、<strong><code>o:</code> origin 父源码包</strong></td>
+              <td>忽略 <code>o:</code> 字段会导致子包（如 <code>musl-utils</code> 对应 <code>musl</code>）丢失源码包索引。</td>
+            </tr>
+            <tr>
+              <td><strong>RHEL / CentOS / Fedora / UBI</strong></td>
+              <td><code>/var/lib/rpm/*</code><br/><code>/usr/lib/sysimage/rpm/*</code><br/><code>/usr/share/rpm/*</code></td>
+              <td>三代格式：BDB <code>Packages</code> / NDB <code>Packages.db</code> / SQLite <code>rpmdb.sqlite</code>；底座 <a href="https://github.com/knqyf263/go-rpmdb" target="_blank" rel="noopener"><code>go-rpmdb</code></a> (MIT, 零 CGO)</td>
+              <td><code>Name</code>、<code>Epoch:Version-Release</code>、<code>Arch</code>、<strong><code>SourceRPM</code></strong>、<code>Vendor</code> / <code>ModularityLabel</code></td>
+              <td>RHEL 9 / Fedora 移除了传统 BerkeleyDB，迁移至 <code>/usr/lib/sysimage/rpm/rpmdb.sqlite</code>；如果 Go Worker 依赖 <code>librpm</code> CGO 绑定将直接丧失跨平台编译与镜像兼容能力。</td>
+            </tr>
+            <tr>
+              <td><strong>OS 身份识别</strong></td>
+              <td><code>/etc/os-release</code><br/><code>/usr/lib/os-release</code></td>
+              <td>Shell KV 文本；优先读 <code>/etc/os-release</code>，缺失回退 <code>/usr/lib/os-release</code></td>
+              <td><code>ID</code> + <code>VERSION_ID</code> → 组装 PURL <code>?distro=debian-12</code> / <code>rhel-9.4</code></td>
+              <td>忽略 <code>distro</code> 限定符会让 Layer 3 把 Debian 的 <code>3.0.11-1~deb12u2</code> 误当上游原生版本比对，引爆 Backport 误报灾难。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>编译交付制品深层提取：Java Fat-JAR、Go 与 Rust 二进制</h2>
+
+    <div class="prose-col">
+      <p>如果容器里跑的是一个把业务塞进 <code>FROM scratch</code> 的静态编译 Go/Rust 可执行文件，或者一个 100MB 的 Spring Boot Fat-JAR，OS 包数据库是空的——Layer 1 必须具备深入<strong>归档嵌套结构</strong>与<strong>二进制链接器专用段</strong>的解构能力。</p>
+    </div>
+
+    <div class="artifact-anatomy-grid full-width">
+      <!-- Java Card -->
+      <article class="artifact-card art-java">
+        <div>
+          <h3>1. Java JAR / Fat-JAR / Uber-JAR</h3>
+          <div class="artifact-sub">归档递归流式解压 vs Shade 打平盲区</div>
+        </div>
+        <ul class="artifact-seg-list">
+          <li class="artifact-seg seg-gold">
+            <strong>标准 &amp; Spring Boot 嵌套 JAR：</strong><br/>
+            识别 <code>BOOT-INF/lib/*.jar</code> 或 <code>WEB-INF/lib/*.jar</code>，递归提取内嵌 <code>META-INF/maven/&lt;g&gt;/&lt;a&gt;/pom.properties</code>（<code>groupId</code>、<code>artifactId</code>、<code>version</code>）与 <code>MANIFEST.MF</code>，记录 <code>virtual_path</code>（如 <code>app.jar!/BOOT-INF/lib/spring-web-6.1.4.jar</code>）。
+          </li>
+          <li class="artifact-seg seg-blind">
+            <strong>Maven Shade / Shadow Uber-JAR 盲区：</strong><br/>
+            Shade 插件把所有依赖 <code>.class</code> 打平合进同一个根目录，甚至做 <strong>Relocation 类路径重定位</strong>（<code>com.google</code> → <code>shaded.com.google</code>），且默认剥离或覆写 <code>pom.properties</code> 并生成抹除依赖的 <code>dependency-reduced-pom.xml</code>。
+          </li>
+          <li class="artifact-seg">
+            <strong>架构破局三连击：</strong><br/>
+            ① 允许流式提取但设定<strong>防 Zip Bomb 安全阈值</strong>（最大递归深度 3 层 + 累计解压字节限额 + 校验 ZipSlip <code>../</code>）；② 对无 <code>pom.properties</code> 的打平 JAR 用包名/常量池指纹低置信度标记提示；③ 最佳实践是在 CI 阶段 Shade 执行前用 <code>cyclonedx-maven-plugin</code> / ORT 采集 Tier 3 BOM 按制品 SHA-256 关联对齐。
+          </li>
+        </ul>
+      </article>
+
+      <!-- Go Card -->
+      <article class="artifact-card art-go">
+        <div>
+          <h3>2. Go 静态编译二进制（ELF / PE / Mach-O）</h3>
+          <div class="artifact-sub"><code>.go.buildinfo</code> 抗剥离段与标准库节点</div>
+        </div>
+        <ul class="artifact-seg-list">
+          <li class="artifact-seg seg-gold">
+            <strong>剥不掉的 <code>.go.buildinfo</code> 元数据段：</strong><br/>
+            Go 1.18+ 编译器把主模块、全部生效依赖与编译器版本写入专用节区。即便上线前执行 <code>go build -ldflags="-s -w"</code> 和 <code>strip</code> 删光了 DWARF 调试符号，通过标准库 <a href="https://pkg.go.dev/debug/buildinfo" target="_blank" rel="noopener"><code>debug/buildinfo</code></a> 依然完整可读！
+          </li>
+          <li class="artifact-seg seg-blind">
+            <strong>高频漏报与误报双坑：</strong><br/>
+            ① <strong>漏扫 Go 标准库：</strong><code>BuildInfo.GoVersion</code>（如 <code>go1.22.1</code>）必须主动生成一个 <code>pkg:golang/stdlib@1.22.1</code> 组件节点，否则 <code>net/http</code>、<code>crypto/tls</code> 漏洞全部漏报；② <strong>忽略 <code>Replace</code>：</strong>若某模块被 <code>replace</code> 替换为新版本或修复分支，必须优先入库生效的 <code>dep.Replace</code> 版本。
+          </li>
+          <li class="artifact-seg">
+            <strong>底座支撑：</strong><br/>
+            Syft 与 OSV-SCALIBR 均内置基于 <code>debug/buildinfo</code> 的二进制提取器，可在 <code>scratch</code> 镜像中 0 源码 100% 还原 Go 精确依赖清单（含 VCS Commit 与构建标签）。
+          </li>
+        </ul>
+      </article>
+
+      <!-- Rust Card -->
+      <article class="artifact-card art-rust">
+        <div>
+          <h3>3. Rust 编译二进制（ELF / PE / Mach-O）</h3>
+          <div class="artifact-sub">默认失明盲区 vs <code>cargo-auditable</code> <code>.dep-v0</code></div>
+        </div>
+        <ul class="artifact-seg-list">
+          <li class="artifact-seg seg-blind">
+            <strong>默认构建的黑盒痛点：</strong><br/>
+            不同于 Go，默认 <code>cargo build --release</code> 编译产物只保留机器码，一旦执行 <code>strip</code> 或丢弃源码仓里的 <code>Cargo.lock</code>，只看二进制文件几乎无法准确还原所用 Crate 的精确版本。
+          </li>
+          <li class="artifact-seg seg-gold">
+            <strong><code>cargo-auditable</code>（MIT/Apache-2.0）破局机制：</strong><br/>
+            在 CI 中用 <code>cargo auditable build --release</code> 编译，工具会将经过 <strong>zlib 压缩的确定性 JSON 依赖树</strong>（不含本地绝对路径与时间戳，保持可复现构建）直接嵌入二进制专用链接器段 <strong><code>.dep-v0</code></strong>。
+          </li>
+          <li class="artifact-seg">
+            <strong>底座对齐与生态推进：</strong><br/>
+            Syft（<code>&ge; v1.15.0</code>）与 OSV-SCALIBR 均原生支持自动识别并解压 <code>.dep-v0</code> 段还原完整 <code>pkg:cargo/*</code> 树。商业平台应在接入指南中把 <code>cargo-auditable</code> 作为 Rust 制品扫描的“黄金前置规范”，未嵌入时再降级提示使用源码 <code>Cargo.lock</code>。
+          </li>
+        </ul>
+      </article>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-label">Layer 1 归档与二进制解析的防 DoS 安全红线</div>
+      <p>容器与制品解压是极易遭遇恶意载荷（Zip Bomb / Tar Bomb）攻击的入口！无论是内存合成层 Tarball 还是递归解包 Fat-JAR/Wheel/TAR，底层代码必须强制注入四重硬限制：<strong>① 递归嵌套最大深度（如 &le; 3–5 层）</strong>；<strong>② 单文件与单归档累计解压字节上限（如使用 <code>io.LimitReader</code>，严禁无界 <code>io.ReadAll</code>）</strong>；<strong>③ 路径规范化拒绝 <code>../</code> ZipSlip 穿越与无限循环符号链接</strong>；<strong>④ 单个文件扫描超时熔断</strong>。</p>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>先在下方解剖实验台切换对比 4 种容器与二进制真实形态，观察“粗糙采集”如何产生致命误报或 100% 漏报，再完成 5 项 Layer 1 镜像与制品底座架构拍板。</p>
+    </div>
+
+    <!-- INTERACTIVE OCI & ARTIFACT LAB -->
+    <section class="widget-panel full-width" data-widget="oci-artifact-lab">
+      <script type="application/json" class="oci-lab-data">
+        {
+          "title": "交互实验台：OCI 分层合成与编译制品解剖台（4 大场景 × 反模式对比）",
+          "intro": "点击上方场景切换镜像分层、Distroless/RPM DB、Java Fat-JAR/Shade 与 Go/Rust 二进制，并切换「反模式」与「推荐方案」对照 Layer 2 IR 落库变化。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "镜像与制品分层采集架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在定型商业 SCA 平台 Worker 的容器与二进制采集模块，需兼顾多租户 SaaS 安全性、Linux 多发行版兼容度与最小误报率。",
+          "summary": {
+            "optimal": "全部 {optimal} 项容器与制品采集决策均严丝合缝！你的引擎兼具零提权用户态安全、全 Linux 发行版与源码包精准映射、Go/Rust/Java 深层覆盖及防 Zip Bomb 抗打击能力。",
+            "warning": "没有触发致命逃逸或大面积误报红线，但有 {warning} 项在特殊形态（如 Shade 重定位或归档抗攻击）存在覆盖折中（标黄项），建议补全工程兜底。",
+            "critical": "当前设计存在 {critical} 处容器安全逃逸风险、100% 漏报盲区或大规模幽灵误报（标红项）！请先修正标红项再交付研发。"
+          },
+          "modules": [
+            {
+              "name": "多租户 SaaS 环境中读取 OCI 镜像文件系统与还原分层删除的方式",
+              "layer": "L1 · OCI 分层合成",
+              "context": "平台每天需并发扫描数万个来源不可信的多层容器镜像，且运行环境为普通无特权 Kubernetes Pod。",
+              "options": [
+                {
+                  "label": "引入 Stereoscope / go-containerregistry 在用户态内存逐层回放 .wh. 与 .wh..wh..opq，默认产出 SquashedScope",
+                  "status": "optimal",
+                  "verdictTitle": "零特权、跨架构且彻底消除历史删除层噪音",
+                  "feedback": "工业界标准正解！无需宿主机 mount 权限也无需启动容器进程，既阻断了恶意 Entrypoint RCE，又用 Whiteout 合成守住了运行态真值。"
+                },
+                {
+                  "label": "把每个镜像用 docker run 拉起，在容器里 exec 执行 dpkg -l / rpm -qa / find / 扫全盘",
+                  "status": "critical",
+                  "verdictTitle": "高危逃逸风险 + Distroless/scratch 与跨架构全盘崩溃",
+                  "feedback": "不可信镜像一旦执行入口点即可能尝试逃逸；此外 Distroless 和 scratch 根本没有 shell 和包管理器命令，扫描直接报错挂掉。"
+                },
+                {
+                  "label": "为防漏报，把每层 Tarball 解包后直接做全层并集（AllLayers）当成当前运行组件入库",
+                  "status": "critical",
+                  "verdictTitle": "必然爆发大规模已卸载构建工具的 Ghost CVE 误报",
+                  "feedback": "Dockerfile 中第 2 层装、第 3 层用完删除的编译器和临时库会永久留在历史 Tarball 里，直接并集入库会让生产告警单充满虚假漏洞。"
+                }
+              ]
+            },
+            {
+              "name": "Debian/Distroless 与 RHEL 9 OS 包数据提取及 PURL 规范化策略",
+              "layer": "L1 → L2 · OS 数据库与溯源",
+              "context": "企业客户镜像同时包含 gcr.io/distroless/base-debian12 与 redhat/ubi9-minimal。",
+              "options": [
+                {
+                  "label": "统一仅读取 /var/lib/dpkg/status 与 /var/lib/rpm/Packages，只记录二进制包名与裸版本号",
+                  "status": "critical",
+                  "verdictTitle": "Distroless 与 RHEL 9 双重 0 检出，且丢失 Backport 匹配上下文",
+                  "feedback": "Distroless 只有 /var/lib/dpkg/status.d/*，RHEL 9 把数据库换成了 /usr/lib/sysimage/rpm/rpmdb.sqlite；而丢失 distro 与 Source/SourceRPM 会让 L3 漏洞匹配彻底失准。"
+                },
+                {
+                  "label": "全路径扫描 status + status.d/* 与 go-rpmdb（兼容 BDB/NDB/SQLite），并把 Source/origin/sourceRpm 写入 upstream、os-release 写入 distro",
+                  "status": "optimal",
+                  "verdictTitle": "全代际兼容且打通发行版 Backport 与源码包公告索引",
+                  "feedback": "满分设计！纯 Go 零 CGO 解决所有现代极简镜像与 RHEL 9 SQLite 兼容问题，upstream + distro 让 L3 精确匹配源码级安全公告。"
+                },
+                {
+                  "label": "通过 CGO 直接链接宿主机系统的 librpm.so 和 libapt-pkg 来读容器内的数据库文件",
+                  "status": "warning",
+                  "verdictTitle": "跨平台交叉编译噩梦且常因宿主机/镜像 RPM 版本差读取失败",
+                  "feedback": "强绑宿主机 C 库会让静态容器镜像构建变得极为脆弱，甚至出现老版本宿主机 librpm 打不开新版容器 rpmdb.sqlite 的故障。"
+                }
+              ]
+            },
+            {
+              "name": "应对 Java Spring Boot Fat-JAR 与 Maven Shade 重定位 Uber-JAR 的工程策略",
+              "layer": "L1 · Java 制品深度采集",
+              "context": "金融客户习惯在镜像里直接部署单个 app.jar，其中部分团队使用 maven-shade-plugin 打平并重定位了第三方包路径。",
+              "options": [
+                {
+                  "label": "对 nested JAR 流式读取 BOOT-INF/lib；对 Shade Uber-JAR 结合字节码特征低置信度提示，并推进 CI 在 Shade 前生成 Tier 3 SBOM 按 SHA-256 关联",
+                  "status": "optimal",
+                  "verdictTitle": "诚实面对二进制物理边界，以“制品提取 + 构建前置融合”闭环",
+                  "feedback": "非常务实的架构方案！Nested JAR 拿满 Tier 4 实锤，而对信息已被不可逆剥离/重定位的 Shade 包则靠字节码指纹兜底并引导 CI 补齐前置真值。"
+                },
+                {
+                  "label": "只扫描外层 app.jar 根目录的 META-INF/MANIFEST.MF，不对内层 JAR 包做任何解包读取",
+                  "status": "critical",
+                  "verdictTitle": "Spring Boot 业务全部传递依赖 100% 漏报",
+                  "feedback": "Spring Boot 应用上百个核心开源库全部打包在 BOOT-INF/lib/*.jar 内部，不递归读取等于完全没扫业务依赖。"
+                },
+                {
+                  "label": "完全放弃任何二进制 JAR 扫描，强制要求所有客户改源码仓只准提交 pom.xml",
+                  "status": "warning",
+                  "verdictTitle": "丧失外采黑盒成品包与镜像上线前阻断能力",
+                  "feedback": "第三方供应商交付的闭源/成品 JAR 镜像根本没有源码仓，放弃制品递归扫描会在商业场景失去核心审计能力。"
+                }
+              ]
+            },
+            {
+              "name": "扫描 scratch 镜像内 stripped Go 与 Rust 二进制可执行文件的技术路线",
+              "layer": "L1 · 静态编译二进制",
+              "context": "云原生微服务大量采用 CGO_ENABLED=0 go build -ldflags=\"-s -w\" 与 Rust release 二进制打包进 scratch。",
+              "options": [
+                {
+                  "label": "尝试跑 objdump / nm 读取 DWARF 调试符号表来反推引入的函数和版本号",
+                  "status": "critical",
+                  "verdictTitle": "遇到 -ldflags=\"-s -w\" 与 strip 后彻底失明归零",
+                  "feedback": "生产环境几乎所有 Go/Rust 镜像都会 strip 掉调试符号以缩减体积，依赖符号表提取在真实交付场景完全不可用。"
+                },
+                {
+                  "label": "直接用 debug/buildinfo 读 .go.buildinfo（必生成 pkg:golang/stdlib 且优先取 Replace），原生解析 Rust .dep-v0 并推 cargo-auditable",
+                  "status": "optimal",
+                  "verdictTitle": "精准穿透 strip 限制并覆盖 Go 标准库漏洞盲区",
+                  "feedback": "抓住了两种现代系统语言的核心元数据设计！Go 不漏标准库和 replace，Rust 靠 .dep-v0 达成可审计闭环。"
+                },
+                {
+                  "label": "只提取 Go .go.buildinfo 里的第三方依赖列表，忽略 GoVersion 和 replace 字段以减少节点数",
+                  "status": "warning",
+                  "verdictTitle": "漏报标准库严重漏洞（net/http 等）且误报已被 replace 的版本",
+                  "feedback": "Go 标准库每个季度都有高危 CVE（如 HTTP/2 Rapid Reset），不建 stdlib 节点与不按 replace 改写版本都会直接击穿准确率。"
+                }
+              ]
+            },
+            {
+              "name": "在 Worker 中实现容器 Tarball 与嵌套 Fat-JAR 解压时的防 DoS 与安全校验设计",
+              "layer": "L1 · 采集稳定性与安全",
+              "context": "恶意或异常构建制品可能包含超高压缩比 Zip Bomb（10MB 膨胀至 100GB）或恶意路径 ../etc/cron。",
+              "options": [
+                {
+                  "label": "使用标准库 unzip/untar 全量解压到宿主机 /tmp 目录再交给提取器扫描",
+                  "status": "critical",
+                  "verdictTitle": "瞬时打满磁盘/OOM 崩服，且暴露 ZipSlip 任意文件覆写漏洞",
+                  "feedback": "未限流落盘解压遇到 42.zip 炸弹或恶意符号链接即可直接瘫痪整个扫描集群甚至覆写宿主机敏感配置。"
+                },
+                {
+                  "label": "纯内存流式读取（禁落盘写覆盖），配合 io.LimitReader 字节上限、嵌套最大深度限制、路径穿越与符号链接过滤",
+                  "status": "optimal",
+                  "verdictTitle": "以极小内存代价筑牢解压引擎的抗畸形载荷防线",
+                  "feedback": "所有商业化文件解析引擎必须标配的安全契约：不相信任何外部压缩包的尺寸声明与路径字符串。"
+                },
+                {
+                  "label": "仅检查上传压缩包本身文件大小是否小于 500MB，合格即不设限直接全量解压",
+                  "status": "warning",
+                  "verdictTitle": "无法防御高压缩比（1000:1）构造的嵌套 Zip Bomb",
+                  "feedback": "一个仅几 MB 的压缩包完全可以递归膨胀出数十 GB 零字节流，校验压缩前体积对解压爆炸完全无效。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道真实工程排障题覆盖 <strong>OCI Whiteout 语义、Distroless/RPM 数据库与源码包映射、Go/Rust 二进制元数据段、以及 Java 嵌套/Shade 归档</strong>。<strong>先凭记忆独立作答，再查看解析。</strong>（注：每题 4 个选项字数严格相等，答案位置均匀分布。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0005 · 容器镜像分层、OS 数据库与制品采集回忆测验",
+          "intro": "重点检验跨层遮蔽逻辑、极简镜像盲区与静态二进制提取边界。",
+          "questions": [
+            {
+              "prompt": "在 OCI 多层容器镜像第 0 层存在 /opt/app/old.jar 和 /opt/app/conf.yml；第 2 层仅包含 /opt/app/.wh..wh..opq 与新增文件 /opt/app/new.jar。用户态 Squash 引擎合成最终运行态（SquashedScope）文件系统树时应如何处理该目录？",
+              "options": [
+                "保留下层全部原有文件并仅追加新版文件，让运行态保留完整历史档案供追踪。",
+                "清空下层该目录下全部子文件与目录树，仅保留本层及更高层写入的全新内容。",
+                "仅按同名路径规则覆盖存在冲突的旧文件，下层未撞名的旧文件依旧保持活跃。",
+                "直接把整个容器镜像标记为非法损坏包，拒绝输出任何层级的软件包资产清单。"
+              ],
+              "answerIndex": 1,
+              "explanation": ".wh..wh..opq 是 OCI 规范定义的不透明目录标记（Opaque Whiteout）：它会屏蔽当前目录在所有更低层中继承下来的全部子文件与子目录（包括未撞名的 conf.yml 与 old.jar），最终只呈现该层及后续高层写入的新内容（new.jar）（B 正确）。"
+            },
+            {
+              "prompt": "安全团队扫描 Google Distroless Debian 镜像时，尽管容器内明明运行着 OpenSSL 动态库，某些老旧扫描器却报出 0 个 OS 包；而在 RHEL 9 UBI 镜像上即使读出了二进制包名，也常漏报按源码包发布的 CVE。造成这两个故障的最准确原因组合是？",
+              "options": [
+                "因为极简镜像加密了磁盘文件，同时新系统把源码包名全写入了运行时环境变量。",
+                "因为极简镜像删光了静态库表，同时新系统只能在联网之后去官方仓库拉取清单。",
+                "因为极简镜像关闭了远程接口，同时新系统禁止外部程序读取内核态包管理内存。",
+                "因为极简镜像拆散了状态文件，同时提取环节漏抓了源码包映射与新库路径格式。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Google Distroless 删除了传统的单文件 /var/lib/dpkg/status，改为把每个包的元数据存放在 /var/lib/dpkg/status.d/* 碎片目录下；而 RHEL 9 将 RPM 数据库从旧版 BDB 迁至 /usr/lib/sysimage/rpm/rpmdb.sqlite，且如果不抓取 Debian Source / RPM SourceRPM 映射到 PURL upstream 并附带 distro，按源码包归档的安全公告就会漏报或误报（D 正确）。"
+            },
+            {
+              "prompt": "业务团队上线了一个跑在 FROM scratch 容器里的 Go 后端服务（编译时加了 -ldflags=\"-s -w\" 且经过 strip 裁剪），以及一个用 cargo auditable build 编译的 Rust 服务。关于这两个无源码二进制产物的 Layer 1 提取行为，哪项工程判断完全准确？",
+              "options": [
+                "专用信息段依然可读且须生成标准库节点，同时需要解析压入的压缩段还原依赖树。",
+                "调试符号已被删光所以两款产品都已失明，只能通过启发式字符串正则去盲猜版本。",
+                "裁剪标志同时抹除了全部模块列表记录，只有重新拉起源代码仓构建才能还原版本。",
+                "标准库漏洞直接归入操作系统内核统计，采集器只需抓取第三方开源库并忽略替换。"
+              ],
+              "answerIndex": 0,
+              "explanation": "Go 的 -ldflags=\"-s -w\" 与 strip 仅裁剪 DWARF/符号表，不会删除 .go.buildinfo 元数据段，debug/buildinfo 依然可读，且采集器必须根据 GoVersion 生成独立的 pkg:golang/stdlib 节点并优先应用 replace 版本；而通过 cargo-auditable 编译的 Rust 二进制会在 .dep-v0 链接器段嵌入 zlib 压缩 JSON 依赖图供 Syft/SCALIBR 原生解析（A 正确）。"
+            },
+            {
+              "prompt": "某金融微服务既打成了 Spring Boot 可执行包（内含 BOOT-INF/lib/*.jar），其中某子库又是用 maven-shade-plugin 重定位打平的 Uber-JAR。在构建商业 SCA 平台的 Layer 1 解包器时，最符合防 DoS 安全红线与真实物理边界的设计方案是？",
+              "options": [
+                "采用无上限的同步全量落盘解包穷尽所有嵌套层，并把所有打平类按文件名改写为官方库版本。",
+                "完全跳过所有压缩归档内部的二进制与属性文件，统一要求业务把全量依赖人工录入手工台账。",
+                "限定嵌套深度与解压字节防炸弹并读内嵌库属性，对重定位打平包则结合构建期前序清单补全。",
+                "直接在容器内部拉起本地虚拟机执行该可执行包，通过拦截运行期加载类列表反推源码级版本。"
+              ],
+              "answerIndex": 2,
+              "explanation": "嵌套 JAR 解包必须流式执行并严格设定深度、io.LimitReader 字节上限与 ZipSlip 路径防穿越以防御 Zip Bomb（排除 A）；直接跳过嵌套目录会漏报全部 Spring Boot 业务依赖（排除 B）；在扫描器里直接运行不可信 Java 制品会引入 RCE 逃逸风险且无法覆盖未走到的分支（排除 D）。正确做法是安全受控提取 BOOT-INF/lib，同时正视 Shade 打平不可逆抹除元数据的问题，引导在 CI Shade 前产出 Tier 3 BOM 按制品 Digest 融合对齐（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>编写容器镜像合成器、OS DB 提取器与二进制制品插件时，建议对照以下一手规范与商用合规代码库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/opencontainers/image-spec/blob/main/layer.md" target="_blank" rel="noopener"><strong>OCI Image Spec · Layers</strong></a>：<code>.wh.&lt;name&gt;</code> 与 <code>.wh..wh..opq</code> 官方变更集语义定义。</li>
+          <li><a href="https://github.com/anchore/stereoscope" target="_blank" rel="noopener"><strong>Anchore Stereoscope</strong></a>（Apache-2.0）&amp; <a href="https://github.com/knqyf263/go-rpmdb" target="_blank" rel="noopener"><strong>go-rpmdb</strong></a>（MIT）：用户态 Squash 虚拟树合成与 BDB/NDB/SQLite 零 CGO 解析标杆。</li>
+          <li><a href="https://pkg.go.dev/debug/buildinfo" target="_blank" rel="noopener"><strong>Go <code>debug/buildinfo</code></strong></a> &amp; <a href="https://github.com/rust-secure-code/cargo-auditable" target="_blank" rel="noopener"><strong>Rust <code>cargo-auditable</code></strong></a>（MIT/Apache-2.0）：<code>.go.buildinfo</code> 与 <code>.dep-v0</code> 内嵌依赖段规范。</li>
+          <li><a href="https://maven.apache.org/plugins/maven-shade-plugin/" target="_blank" rel="noopener"><strong>Maven Shade Plugin</strong></a>：理解 Uber-JAR 重定位、<code>dependency-reduced-pom.xml</code> 陷阱与前置 SBOM 生成必要性。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>完成解剖实验台、架构沙盘与 4 道主动回忆测验后，<strong>欢迎带着你的问题与真实业务镜像场景回到对话中</strong>：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“我们客户大量跑信创国产 OS（如麒麟/欧拉/Anolis）或定制精简根文件系统，OS 数据库与 <code>distro</code> 该怎么扩展适配？”</li>
+          <li>“如果在容器扫描中发现某些老旧 Java Uber-JAR 彻底没保留 <code>pom.properties</code> 且历史构建不可重建，字节码指纹识别该怎么做？”</li>
+          <li>“我已掌握容器镜像与制品分层采集原理，准备进入 <strong>Lesson 0006（高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0004-oss-extractors-architecture-and-orchestration.html">← 上一课：Lesson 0004 · 开源提取底座拆解</a>
+      <a href="../reference/layer1-resolution-and-extractor-matrix.html">配套速查卡：Ref 03 · 提取器与解析矩阵</a>
+      <a href="../index.html">返回课程总览 · 预告 Lesson 0006（多触点采集架构） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/oci-artifact-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

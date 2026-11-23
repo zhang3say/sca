@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>现代化全场景 SCA 与 AI 时代供应链安全 · 架构师课程总览</title>
+  <link rel="stylesheet" href="./assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="./index.html" class="active">课程首页 · 全局路线图</a>
+        <a href="./lessons/0005-container-image-os-and-artifact-extraction.html">当前课程 · Lesson 0005</a>
+        <a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
+        <a href="./reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 字典</a>
+        <a href="./reference/sca-oss-landscape-and-4layer-map.html">Ref 01 · 四层与协议矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header" style="max-width:100%;">
+      <div class="lesson-kicker">
+        <span>CHIEF ARCHITECT &amp; CORE R&amp;D SYLLABUS</span>
+        <span class="sep">/</span>
+        <span>0→1 全场景现代化 SCA 产品矩阵</span>
+      </div>
+      <h1>第三代 SCA 与 AI 时代供应链安全：系统架构师课程总览</h1>
+      <p class="subtitle">坚持<strong>「自研核心底座与高价值壁垒 + 科学整合 Apache-2.0/MIT 顶级开源生态 + 对标全球商业标杆」</strong>的工程哲学。全课程共 <strong>3 大演进阶段 · 6 个核心章节 · 22 节高密度交互微课</strong>，每课 15–20 分钟，直击底层原理、数据结构与真实选型权衡。</p>
+
+      <div class="hero-stats">
+        <div class="stat-card">
+          <div class="stat-label">课程进度</div>
+          <div class="stat-value">5 / 22 课</div>
+          <div class="stat-sub">已发布 5 课 · 下一课 0006</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">当前主攻阶段</div>
+          <div class="stat-value">Phase 1</div>
+          <div class="stat-sub">1–3 个月 · 统一底座架构</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">商用协议红线</div>
+          <div class="stat-value">Apache / MIT</div>
+          <div class="stat-sub">严防 GPL/AGPL 与竞品规则陷阱</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">速查卡片库</div>
+          <div class="stat-value">3 / 4 份</div>
+          <div class="stat-sub">可打印架构、IR 与提取器矩阵</div>
+        </div>
+      </div>
+
+      <div class="hero-actions">
+        <a class="btn-link-primary" href="./lessons/0005-container-image-os-and-artifact-extraction.html">进入当前课程：Lesson 0005 →</a>
+        <a class="btn-link-secondary" href="./reference/layer1-resolution-and-extractor-matrix.html">打开最新速查卡：Ref 03 提取器与解析矩阵</a>
+      </div>
+    </header>
+
+    <div class="callout mission" style="max-width:100%;">
+      <div class="callout-label">动态 ZPD 路线图说明</div>
+      <p>这份 22 课总纲是围绕你的产品全局目标制定的架构蓝图。学习遵循<strong>最近发展区（ZPD）原则</strong>：先在 Phase 1 彻底夯实 L1–L3 统一底座，再平滑向 Phase 2 的可达性、恶意包、二进制同源与 AI-BOM 推进。每完成一课，我们会依据你的测验反馈、技术栈约束和实战痛点动态微调后续顺序——<strong>随时可以在对话中指定跳学或加急某个专题。</strong></p>
+    </div>
+
+    <!-- INTERACTIVE FILTER BAR -->
+    <section class="filter-panel no-print" data-widget="curriculum-filter">
+      <div class="filter-row">
+        <span class="filter-row-label">演进阶段</span>
+        <button type="button" class="filter-pill active" data-filter-group="phase" data-filter-value="all">全部阶段 (22)</button>
+        <button type="button" class="filter-pill" data-filter-group="phase" data-filter-value="p1">Phase 1 · 统一底座 (10)</button>
+        <button type="button" class="filter-pill" data-filter-group="phase" data-filter-value="p2">Phase 2 · 三代与 AI 壁垒 (9)</button>
+        <button type="button" class="filter-pill" data-filter-group="phase" data-filter-value="p3">Phase 3 · 企业级闭环 (3)</button>
+      </div>
+      <div class="filter-row">
+        <span class="filter-row-label">架构层级</span>
+        <button type="button" class="filter-pill active" data-filter-group="layer" data-filter-value="all">全部层级</button>
+        <button type="button" class="filter-pill" data-filter-group="layer" data-filter-value="L1">L1 采集提取</button>
+        <button type="button" class="filter-pill" data-filter-group="layer" data-filter-value="L2">L2 统一 IR</button>
+        <button type="button" class="filter-pill" data-filter-group="layer" data-filter-value="L3">L3 情报引擎</button>
+        <button type="button" class="filter-pill" data-filter-group="layer" data-filter-value="L4">L4 决策壁垒</button>
+        <button type="button" class="filter-pill" data-filter-group="layer" data-filter-value="AI">AI 供应链</button>
+        <button type="button" class="filter-pill" data-filter-group="layer" data-filter-value="SYS">全局架构</button>
+      </div>
+      <div class="filter-row">
+        <span class="filter-row-label">课程状态</span>
+        <button type="button" class="filter-pill active" data-filter-group="status" data-filter-value="all">全部状态</button>
+        <button type="button" class="filter-pill" data-filter-group="status" data-filter-value="ready">已发布 · 可学习</button>
+        <button type="button" class="filter-pill" data-filter-group="status" data-filter-value="next">下一课 · ZPD</button>
+        <button type="button" class="filter-pill" data-filter-group="status" data-filter-value="planned">规划中</button>
+      </div>
+      <div class="filter-meta">
+        <span data-role="visible-count">当前显示 22 / 22 课</span>
+        <button type="button" class="btn-secondary" style="padding:0.25rem 0.7rem;font-size:0.78rem;" data-action="reset-filters">重置筛选</button>
+      </div>
+    </section>
+
+    <!-- ================================================================
+         PHASE 1: UNIFIED FOUNDATION (CH 1 - CH 3, LESSONS 0001 - 0010)
+         ================================================================ -->
+    <div class="phase-divider phase-1" data-phase="p1">
+      <div class="phase-divider-title">Phase 1 · 统一底座架构（当前主攻 · 1–3 个月拍板落地）</div>
+      <div class="phase-divider-meta">Chapters 1–3 · Lessons 0001–0010 · 打牢全场景不重构的平台脊椎</div>
+    </div>
+
+    <!-- CHAPTER 1 -->
+    <section class="chapter-block" data-phase="p1">
+      <div class="chapter-head">
+        <div>
+          <h2 class="chapter-title" style="max-width:none;"><span class="ch-num">CH 01</span>总体架构与开源边界（Architecture &amp; Strategy）</h2>
+          <p class="chapter-goal">拍板四层解耦契约、商业闭源协议红线与平台核心中间表示（Layer 2 IR）主权。</p>
+        </div>
+        <span class="badge badge-build">2 课 · 核心基石</span>
+      </div>
+      <ul class="lesson-list">
+        <li class="lesson-row is-available" data-phase="p1" data-layer="SYS,L1,L2" data-status="ready">
+          <div class="lesson-num">0001</div>
+          <div>
+            <div class="lesson-main-title">
+              <a href="./lessons/0001-decoupled-sca-architecture-and-oss-boundary.html">第三代 SCA 四层解耦架构与「借力 vs 自研」边界划分</a>
+            </div>
+            <p class="lesson-desc">剖析“扫描器即平台”为何在 6 个月内推倒重写；建立 L1–L4 解耦契约；实测排雷 Apache-2.0/MIT 底座与 GPL/LGPL/专有规则雷区。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">全局架构</span>
+              <span class="tag-chip">OSV-SCALIBR / Syft / cdxgen / Trivy</span>
+              <span class="tag-chip">标杆：Snyk · Endor · Socket</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-ok">已发布 · 可学习</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L2" data-status="ready">
+          <div class="lesson-num">0002</div>
+          <div>
+            <div class="lesson-main-title">
+              <a href="./lessons/0002-unified-ir-purl-and-cyclonedx-graph.html">统一中间表示（Layer 2 IR）设计：PURL 为何淘汰 CPE 与 CycloneDX 1.7 图模型</a>
+            </div>
+            <p class="lesson-desc">深拆 ECMA-427 PURL 命名空间与限定符规范；设计双层身份组件依赖图库表（直接/传递/Scope/证据链），兼顾 CycloneDX 1.7 与 SPDX 3.0 双向投影及 VEX/可达性/AI-BOM 预留槽。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L2 统一 IR</span>
+              <span class="tag-chip">ECMA-427 PURL · ECMA-424 CycloneDX 1.7</span>
+              <span class="tag-chip">SPDX 3.0 · Dependency-Track v5</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-ok">已发布 · 可学习</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- CHAPTER 2 -->
+    <section class="chapter-block" data-phase="p1">
+      <div class="chapter-head">
+        <div>
+          <h2 class="chapter-title" style="max-width:none;"><span class="ch-num">CH 02</span>多语言与全形态采集提取引擎（Layer 1 Sensors）</h2>
+          <p class="chapter-goal">吃透源码/构建/镜像/制品采集的真实失真点，设计「开源库嵌入 + 隔离沙箱 + 自研补强」的插件化采集架构。</p>
+        </div>
+        <span class="badge badge-blue">4 课 · L1 引擎</span>
+      </div>
+      <ul class="lesson-list">
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L1" data-status="ready">
+          <div class="lesson-num">0003</div>
+          <div>
+            <div class="lesson-main-title">
+              <a href="./lessons/0003-source-dependency-resolution-traps.html">源码依赖解析的底层真相：Manifest、Lockfile 与构建期解析陷阱</a>
+            </div>
+            <p class="lesson-desc">拆解 Maven BOM/依赖调解、Gradle 动态配置、npm workspaces、Python uv/Poetry 与 Go MVS 的版本裁决差异；厘清静态解析精度天花板与构建期沙箱防 RCE 隔离边界。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L1 采集提取</span>
+              <span class="tag-chip">Maven / npm / PyPI / Go</span>
+              <span class="tag-chip">构建期沙箱安全</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-ok">已发布 · 可学习</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L1,L2" data-status="ready">
+          <div class="lesson-num">0004</div>
+          <div>
+            <div class="lesson-main-title">
+              <a href="./lessons/0004-oss-extractors-architecture-and-orchestration.html">开源提取底座源码级拆解：OSV-SCALIBR、Syft、cdxgen 与 ORT 组合编排</a>
+            </div>
+            <p class="lesson-desc">对照四大 Apache-2.0 引擎的插件接口与能力互补矩阵；设计反腐败适配器（Adapter）与多提取器置信度融合消歧算法，避免重复造轮子又保住核心掌控力。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L1 采集提取</span>
+              <span class="tag-chip">OSV-SCALIBR · Syft · cdxgen · ORT</span>
+              <span class="tag-chip">多源证据融合</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-ok">已发布 · 可学习</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L1" data-status="ready">
+          <div class="lesson-num">0005</div>
+          <div>
+            <div class="lesson-main-title">
+              <a href="./lessons/0005-container-image-os-and-artifact-extraction.html">容器镜像、OS 发行版与制品分层采集原理</a>
+            </div>
+            <p class="lesson-desc">剖析 OCI 镜像分层与 Whiteout 删除语义、dpkg/rpm/apk 数据库解析、Distroless 无包管理器镜像识别，以及 Java Fat-JAR / Uber-JAR 与 Go/Rust 静态编译符号段提取。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L1 采集提取</span>
+              <span class="tag-chip">OCI Layers · Stereoscope · go-rpmdb</span>
+              <span class="tag-chip">镜像 &amp; 制品</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-ok">已发布 · 可学习</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row is-next" data-phase="p1" data-layer="L1,SYS" data-status="next">
+          <div class="lesson-num">0006</div>
+          <div>
+            <div class="lesson-main-title">高并发多触点采集架构：IDE、PR 门禁、CI 流水线与异步持续重算</div>
+            <p class="lesson-desc">打通开发者本地、PR 增量 Diff 扫描、CI 缓存加速与服务端“一次采集、持续重算”事件流水线（深度借鉴 OWASP Dependency-Track 与 Snyk 工作流架构）。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L1 + 全局</span>
+              <span class="tag-chip">Dependency-Track · 增量 Diff</span>
+              <span class="tag-chip">多触点体验</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- CHAPTER 3 -->
+    <section class="chapter-block" data-phase="p1">
+      <div class="chapter-head">
+        <div>
+          <h2 class="chapter-title" style="max-width:none;"><span class="ch-num">CH 03</span>漏洞情报底座与精确匹配引擎（Layer 3 Intelligence）</h2>
+          <p class="chapter-goal">构建超越 NVD 的高准确度多源情报管线、生态原生版本比较引擎、离线分发包与许可证合规推理内核。</p>
+        </div>
+        <span class="badge badge-warn">4 课 · L3 情报</span>
+      </div>
+      <ul class="lesson-list">
+        <li class="lesson-row" data-phase="p1" data-layer="L3" data-status="planned">
+          <div class="lesson-num">0007</div>
+          <div>
+            <div class="lesson-main-title">OSV Schema 与多源漏洞汇聚去重架构（OSV / GHSA / NVD / 发行版）</div>
+            <p class="lesson-desc">吃透 <code>ossf/osv-schema</code> 结构与 CVE/GHSA/OSV 别名图谱归一化；解决 NVD 滞后、字段污染与多源冲突裁决问题，参考 Google <code>deps.dev</code> 与 Snyk 情报研判管线。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L3 情报引擎</span>
+              <span class="tag-chip">OSV Schema · deps.dev · GHSA</span>
+              <span class="tag-chip">标杆：Snyk VulnDB</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p1" data-layer="L3" data-status="planned">
+          <div class="lesson-num">0008</div>
+          <div>
+            <div class="lesson-main-title">生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS</div>
+            <p class="lesson-desc">剖析跨生态版本排序规则的暗坑（预发布标签、Epoch、Maven 限定符），重点拆解 Debian/RHEL 发行版安全回溯补丁（Backport Patch）导致的经典误报成因与消除算法。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L3 情报引擎</span>
+              <span class="tag-chip">VERS 规范 · Backport 消误报</span>
+              <span class="tag-chip">核心自研算法</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p1" data-layer="L3" data-status="planned">
+          <div class="lesson-num">0009</div>
+          <div>
+            <div class="lesson-main-title">离线/私有化漏洞库分发、增量更新与高并发匹配索引设计</div>
+            <p class="lesson-desc">拆解 Trivy OCI/BoltDB 与 Grype SQLite 本地库架构；设计基于 PURL 前缀与版本区间的内存/倒排索引，实现万级组件毫秒级匹配与内网断网环境的安全增量同步。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L3 情报引擎</span>
+              <span class="tag-chip">Trivy DB · Grype DB · OCI 分发</span>
+              <span class="tag-chip">离线私有化</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p1" data-layer="L3,L4" data-status="planned">
+          <div class="lesson-num">0010</div>
+          <div>
+            <div class="lesson-main-title">开源许可证合规引擎与传染性兼容性推理</div>
+            <p class="lesson-desc">实现 SPDX 表达式语法树求值（<code>AND / OR / WITH</code> 异常处理）、基于分发形态与链接方式的传染性策略矩阵、ScanCode 双许可合规集成与合规 Notice 自动生成。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L3/L4 合规</span>
+              <span class="tag-chip">SPDX Expression · ORT · ScanCode</span>
+              <span class="tag-chip">传染性推理</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ================================================================
+         PHASE 2: 3RD-GEN MOATS & AI SUPPLY CHAIN (CH 4 - CH 5, 0011 - 0019)
+         ================================================================ -->
+    <div class="phase-divider phase-2" data-phase="p2">
+      <div class="phase-divider-title">Phase 2 · 第三代高价值差异化壁垒与 AI 时代供应链安全（3–9 个月构建护城河）</div>
+      <div class="phase-divider-meta">Chapters 4–5 · Lessons 0011–0019 · 在统一底座上长出商业溢价能力</div>
+    </div>
+
+    <!-- CHAPTER 4 -->
+    <section class="chapter-block" data-phase="p2">
+      <div class="chapter-head">
+        <div>
+          <h2 class="chapter-title" style="max-width:none;"><span class="ch-num">CH 04</span>可达性分析、智能降噪与安全修复（Layer 4 Core Moat）</h2>
+          <p class="chapter-goal">用静态调用图、运行时上下文、EPSS/VEX 与无破坏性升级求解器，把传统 SCA 90%+ 的告警噪音压成开发者愿意修的精准清单。</p>
+        </div>
+        <span class="badge badge-build">4 课 · L4 核心壁垒</span>
+      </div>
+      <ul class="lesson-list">
+        <li class="lesson-row" data-phase="p2" data-layer="L4" data-status="planned">
+          <div class="lesson-num">0011</div>
+          <div>
+            <div class="lesson-main-title">静态函数级可达性（Call Graph）底层原理与跨语言工程挑战</div>
+            <p class="lesson-desc">拆解 CHA / RTA / 指针分析精度与性能权衡；逐语言解析 Java 字节码、Go SSA、JS/Python 动态派发难点，以及 L3 漏洞函数级符号指纹如何驱动调用路径剪枝。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L4 核心壁垒</span>
+              <span class="tag-chip">Call Graph · AST/SSA/Bytecode</span>
+              <span class="tag-chip">标杆：Endor Labs</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="L4,L1" data-status="planned">
+          <div class="lesson-num">0012</div>
+          <div>
+            <div class="lesson-main-title">动态运行时可达性与容器裁剪：用真实执行上下文击穿误报</div>
+            <p class="lesson-desc">对比静态分析盲区（反射/DI 框架/容器冗余 OS 包）与运行时探针（JVM 类加载、eBPF/文件系统访问跟踪）；设计「静态 + 动态」融合置信度判定模型。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L4 核心壁垒</span>
+              <span class="tag-chip">Runtime Context · 静动态融合</span>
+              <span class="tag-chip">标杆：Wiz / Endor</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="L4,L3" data-status="planned">
+          <div class="lesson-num">0013</div>
+          <div>
+            <div class="lesson-main-title">超越 CVSS：EPSS、CISA KEV 与 VEX（OpenVEX / CycloneDX / CSAF）协同降噪</div>
+            <p class="lesson-desc">构建多维度优先级评分模型（可达性 × EPSS 在野利用概率 × KEV × 业务暴露面）；落地标准 VEX 四态工作流与理由码，实现可审计、跨团队流转的误报豁免闭环。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L4 降噪</span>
+              <span class="tag-chip">FIRST EPSS · OpenVEX · CSAF · CycloneDX VEX</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="L4" data-status="planned">
+          <div class="lesson-num">0014</div>
+          <div>
+            <div class="lesson-main-title">无破坏性自动修复与升级路径求解器（Guided Remediation）</div>
+            <p class="lesson-desc">研究 Google OSV-Scanner v2 Guided Remediation 与 Snyk 修复图谱；基于依赖图与版本区间约束求解“最小破坏性升级路径”，结合 API 变更检测自动发起安全 PR。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L4 自动修复</span>
+              <span class="tag-chip">OSV-Scanner v2 · 约束求解</span>
+              <span class="tag-chip">标杆：Snyk PR</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- CHAPTER 5 -->
+    <section class="chapter-block" data-phase="p2">
+      <div class="chapter-head">
+        <div>
+          <h2 class="chapter-title" style="max-width:none;"><span class="ch-num">CH 05</span>投毒防御、同源检测与 AI 时代供应链安全（Malware, Binary &amp; AI-BOM）</h2>
+          <p class="chapter-goal">补齐商业闭环中“无 CVE 威胁”与“无清单代码/二进制”盲区，并率先抢占大模型与 Agentic AI（MCP/Skills）供应链安全新高地。</p>
+        </div>
+        <span class="badge badge-warn">5 课 · 前沿壁垒</span>
+      </div>
+      <ul class="lesson-list">
+        <li class="lesson-row" data-phase="p2" data-layer="L3,L4" data-status="planned">
+          <div class="lesson-num">0015</div>
+          <div>
+            <div class="lesson-main-title">恶意包与供应链投毒检测引擎（对标 Socket.dev）</div>
+            <p class="lesson-desc">冷启动集成 <code>ossf/malicious-packages</code>；设计包发布实时流分析架构、AST 静态行为红旗规则（网络外联/读 <code>.env</code>/<code>postinstall</code>/混淆）、包名抢注与维护者接管异常检测。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L3/L4 投毒防御</span>
+              <span class="tag-chip">ossf/malicious-packages · AST 行为</span>
+              <span class="tag-chip">标杆：Socket.dev</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="L1,L3,L4" data-status="planned">
+          <div class="lesson-num">0016</div>
+          <div>
+            <div class="lesson-main-title">开源代码片段同源检测与无源码二进制 SCA 底层原理</div>
+            <p class="lesson-desc">拆解源码复制粘贴（Copy-Paste）的抗修改哈希指纹（Winnowing / Token / AST 特征）与 C/C++ 无源码二进制（字符串常量/导出符号/函数 CFG 特征）的大规模指纹库架构。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">L1/L3 同源检测</span>
+              <span class="tag-chip">Snippet Fingerprinting · Binary SCA</span>
+              <span class="tag-chip">C/C++ 与黑盒制品</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="AI,L2" data-status="planned">
+          <div class="lesson-num">0017</div>
+          <div>
+            <div class="lesson-main-title">AI-BOM 统一建模：模型权重、数据集与推理框架血缘（CycloneDX ML-BOM / SPDX 3.0）</div>
+            <p class="lesson-desc">对齐 OWASP <code>LLM03</code>，在现有 Layer 2 统一图谱上扩展基座模型、LoRA 适配器、训练数据集与推理框架（PyTorch/vLLM/ONNX）血缘关系及模型许可证风险识别。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">AI 供应链</span>
+              <span class="tag-chip">CycloneDX ML-BOM · SPDX 3.0 AI Profile</span>
+              <span class="tag-chip">OWASP LLM03</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="AI,L1,L4" data-status="planned">
+          <div class="lesson-num">0018</div>
+          <div>
+            <div class="lesson-main-title">模型序列化安全与恶意载荷扫描（Pickle RCE vs Safetensors）</div>
+            <p class="lesson-desc">剖析 <code>.pkl/.pt/.ckpt</code> 反序列化字节码注入执行原理，学习 <code>safetensors</code> 零代码执行机制与 Protect AI ModelScan 静态操作码检测范式，设计模型制品门禁扫描器。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">AI 供应链</span>
+              <span class="tag-chip">Pickle Opcodes · Safetensors · ModelScan</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p2" data-layer="AI,L4" data-status="planned">
+          <div class="lesson-num">0019</div>
+          <div>
+            <div class="lesson-main-title">Agentic AI 与 MCP 服务器供应链治理（OWASP ASI04）</div>
+            <p class="lesson-desc">直面 AI Agent 时代新攻击面：第三方 MCP Server 与 Agent Skills 依赖清单采集、工具描述投毒（Tool Poisoning）检测、密钥外联审计与最小权限运行网关设计。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">AI 供应链</span>
+              <span class="tag-chip">MCP Security · Agent Skills · OWASP ASI04</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ================================================================
+         PHASE 3: TRUSTED SUPPLY CHAIN & ENTERPRISE SCALE (CH 6, 0020 - 0022)
+         ================================================================ -->
+    <div class="phase-divider phase-3" data-phase="p3">
+      <div class="phase-divider-title">Phase 3 · 可信溯源闭环、大规模平台工程与商业产品总装（9–12+ 个月规模化领跑）</div>
+      <div class="phase-divider-meta">Chapter 6 · Lessons 0020–0022 · 从技术内核到企业级产品矩阵</div>
+    </div>
+
+    <!-- CHAPTER 6 -->
+    <section class="chapter-block" data-phase="p3">
+      <div class="chapter-head">
+        <div>
+          <h2 class="chapter-title" style="max-width:none;"><span class="ch-num">CH 06</span>溯源证明、平台扩展性与商业矩阵总装（SLSA &amp; Enterprise Scale）</h2>
+          <p class="chapter-goal">把单点检测升级为“防篡改溯源 + 秒级 0-day 全网定位 + 清晰商业差异化矩阵”的企业级供应链安全平台。</p>
+        </div>
+        <span class="badge badge-ok">3 课 · 规模化收官</span>
+      </div>
+      <ul class="lesson-list">
+        <li class="lesson-row" data-phase="p3" data-layer="SYS,L2" data-status="planned">
+          <div class="lesson-num">0020</div>
+          <div>
+            <div class="lesson-main-title">构建溯源与密码学证明：SLSA v1.2、in-toto 与 Sigstore 闭环</div>
+            <p class="lesson-desc">超越事后成分扫描：基于 SLSA v1.2 Build/Source Track 生成与验签 Provenance 和 VSA 证明，结合 Trusted Publishers 与 Sigstore 无密钥签名建立端到端防篡改信任链。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">全局架构</span>
+              <span class="tag-chip">SLSA v1.2 · in-toto · Sigstore</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~18 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p3" data-layer="SYS,L2,L3" data-status="planned">
+          <div class="lesson-num">0021</div>
+          <div>
+            <div class="lesson-main-title">企业级海量资产台账、全图谱检索与 0-day 秒级应急响应架构</div>
+            <p class="lesson-desc">攻克数万项目、数亿依赖边下的冷热存储分层、组件去重归档、策略引擎热更新（OPA/CEL），实现 Log4Shell 级 0-day 爆发后 10 秒内定位全公司受影响应用与负责人。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">全局架构</span>
+              <span class="tag-chip">图谱存储扩展 · 策略门禁 · 0-day 响应</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+
+        <li class="lesson-row" data-phase="p3" data-layer="SYS,L4,AI" data-status="planned">
+          <div class="lesson-num">0022</div>
+          <div>
+            <div class="lesson-main-title">总架构师收官实战：全场景 SCA 产品矩阵、研发配比与竞品攻防蓝图</div>
+            <p class="lesson-desc">汇总全课程架构决策，制定你的 12 个月分阶段研发人力配比模型（底座维护 vs 壁垒攻坚）、商业化版本分层锚点与对标 Snyk/Endor/Socket/Wiz 的核心打法。</p>
+            <div class="lesson-tags">
+              <span class="tag-chip">总装收官</span>
+              <span class="tag-chip">产品矩阵 · R&amp;D 资源分配 · 商业壁垒</span>
+            </div>
+          </div>
+          <div class="lesson-status-col">
+            <span class="badge badge-blue">规划中</span>
+            <span class="lesson-duration">~20 min</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- REFERENCE SHELF -->
+    <section class="full-width" style="margin-top:3rem;">
+      <h2 style="margin-top:0;"><span class="sec-num">REF</span>可打印速查参考库（Reference Cards）</h2>
+      <p style="max-width:var(--content-width);font-size:0.9rem;color:var(--ink-muted);">课程用来理解原理与实战演练，速查参考卡用来在架构评审与代码设计时随时翻阅。每完成关键模块，这里都会沉淀一份高密度速查卡。</p>
+      <div class="ref-grid">
+        <div class="ref-card">
+          <div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
+            <h4><a href="./reference/sca-oss-landscape-and-4layer-map.html">Ref 01 · 第三代 SCA 四层契约与开源协议排雷矩阵</a></h4>
+            <p style="margin-top:0.35rem;">L1–L4 输入输出契约、Apache-2.0/MIT 底座 vs GPL/LGPL/专有条款红线表、Snyk/Endor/Socket 壁垒定位。</p>
+          </div>
+          <div style="font-size:0.8rem;"><a href="./reference/sca-oss-landscape-and-4layer-map.html">打开速查卡 →</a></div>
+        </div>
+
+        <div class="ref-card">
+          <div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
+            <h4><a href="./reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL (ECMA-427) 与 Layer 2 统一 IR 数据字典</a></h4>
+            <p style="margin-top:0.35rem;">8 大生态 PURL 编码与暗坑速查、双层身份 PostgreSQL 核心表字典、CycloneDX 1.7 / SPDX 3.0 双向投影矩阵及 MIT/Apache SDK 清单。</p>
+          </div>
+          <div style="font-size:0.8rem;"><a href="./reference/purl-and-layer2-ir-dictionary.html">打开速查卡 →</a></div>
+        </div>
+
+        <div class="ref-card">
+          <div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
+            <h4><a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 多语言依赖解析陷阱与开源提取器能力矩阵</a></h4>
+            <p style="margin-top:0.35rem;">Maven/Gradle/npm/PyPI/Go/Rust 解析边界对比与 OSV-SCALIBR / Syft / cdxgen / ORT 选型路由与融合铁律。</p>
+          </div>
+          <div style="font-size:0.8rem;"><a href="./reference/layer1-resolution-and-extractor-matrix.html">打开速查卡 →</a></div>
+        </div>
+
+        <div class="ref-card planned">
+          <div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-blue">随 Ch 03 &amp; Ch 05 生成</span></div>
+            <h4>Ref 04 · 跨生态版本区间语义与 AI 供应链威胁速查卡</h4>
+            <p style="margin-top:0.35rem;">SemVer/Maven/PEP 440/Debian EVR 比较边界、Backport 规则，以及 AI-BOM / Pickle / MCP 威胁对照表。</p>
+          </div>
+          <div style="font-size:0.8rem;color:var(--ink-muted);">待解锁</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <span>工作区指南：可在对话中随时输入 <code>/teach</code> 继续下一课、点播任意章节，或调整学习目标</span>
+      <a href="./lessons/0005-container-image-os-and-artifact-extraction.html">开始 / 继续 Lesson 0005 →</a>
+    </footer>
+  </main>
+
+  <script src="./assets/curriculum.js"></script>
+</body>
+</html>
