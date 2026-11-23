@@ -49,3 +49,4 @@
 
 ## Workspace Maintenance Rule
 - 每次新增课程或速查卡后，同步更新根目录 `index.html` 的课程状态、链接与进度计数，并在新课顶部导航栏保持指向 `../index.html`。
+- **自动部署 GitHub Pages**：每完成一课（完成课程 HTML、速查卡、`index.html` 与 `NOTES.md` 状态同步后），自动在工作区根目录执行 `git add -A && git commit -m "feat(lesson): complete lesson XXXX ..." && git push`（本仓库已配置 `gh` HTTPS 凭据助手，直接推送 `origin/main` 即可自动触发 `https://zhang3say.github.io/sca/` 更新）。
