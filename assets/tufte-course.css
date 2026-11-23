@@ -2680,3 +2680,92 @@ pre code,
     break-inside: avoid;
   }
 }
+
+/* ==========================================================================
+   Lesson 0008+ Components: Multi-Ecosystem Version Comparator & VERS Lab
+   ========================================================================== */
+
+.ver-form-grid {
+  display: grid;
+  grid-template-columns: 165px 1fr 1fr;
+  gap: 0.7rem;
+  margin-bottom: 0.9rem;
+  align-items: end;
+}
+
+.ver-range-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+  align-items: end;
+}
+
+@media (max-width: 780px) {
+  .ver-form-grid,
+  .ver-range-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ver-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.ver-field label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
+.ver-select {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.62rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+.ver-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  background: var(--surface);
+}
+
+.ver-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.ver-token-chip {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0.14rem 0.45rem;
+  border-radius: 3px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  color: var(--ink-secondary);
+}
+
+.ver-token-chip.is-special {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.ver-token-chip.is-epoch {
+  background: var(--accent-soft);
+  border-color: #dfc0c5;
+  color: var(--accent);
+  font-weight: 700;
+}

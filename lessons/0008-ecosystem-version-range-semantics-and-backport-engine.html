@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0008：生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007 · 多源漏洞汇聚</a>
+        <a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html" class="active">Lesson 0008 · 版本区间语义引擎</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0008</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 03 漏洞情报底座与精确匹配引擎</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>生态原生版本区间语义引擎：SemVer、Maven、PEP 440、Debian EVR 与 VERS</h1>
+      <p class="subtitle">拿到 <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> 的干净 <code>canonical_match_rules</code> 后，最容易让架构师掉以轻心的一句话是“不就是比版本号大小吗？”。现实是：把所有生态硬转成 SemVer、拿包管理器的选包 Specifier 当漏洞匹配器、或跨命名空间比对发行版 Backport 版本，上线当天就会制造系统性的<strong>静默漏报与误报风暴</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>划清「全序比较器 vs 选包约束」边界，吃透 6 大生态原生排序暗坑、<code>vers:</code> 规范化与 Backport 彻底隔离架构</span>
+        <span><strong>先修底座：</strong><a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a> · <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">承上启下（对齐你的 Mission）</div>
+      <p>在 <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> 中，<code>canonical_match_rules</code> 表把漏洞影响范围收敛成了标准化的 <code>range_type (SEMVER | ECOSYSTEM | GIT)</code>、<code>events_json</code> 与 <code>distro_qualifier</code>。本课要拍板<strong>消费这张规则表的核心计算引擎</strong>——如何在 Go 核心中科学整合 <code>osv-scalibr/semantic</code>、<code>grype/version</code> 等 Apache-2.0/MIT 比较器，自研 <code>vers:</code> 规范化器，并在引擎层彻底封死发行版 Backport 误报。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>第一原则：彻底分离「全序比较器」与「选包约束（Specifier）」</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>许多工程团队写 Layer 3 匹配引擎时，图省事直接把待测依赖版本丢进生态现成的范围求值库——例如 Node 侧直接调 <code>node-semver</code> 的 <code>semver.satisfies(ver, "&lt;1.2.4")</code>，Python 侧直接调 <code>packaging.specifiers.SpecifierSet("&lt;1.0.0")</code>。<strong>这是极其危险的语义错配！</strong></p>
+      <p>原因在于<strong>依赖解析（Layer 1 / Layer 4）</strong>与<strong>漏洞区间求值（Layer 3）</strong>遵循两套完全不同的数学假设：</p>
+      <ul>
+        <li><strong>包管理器 Specifier（防意外升级不稳定版）：</strong>根据 <a href="https://github.com/npm/node-semver#prerelease-tags" target="_blank" rel="noopener"><code>npm/node-semver</code> 预发布规则</a>，如果一条范围里没有任何比较子带预发布标签且拥有相同的 <code>[major, minor, patch]</code> 元组，所有预发布版本一律被拒绝匹配。Python <a href="https://peps.python.org/pep-0440/#exclusive-ordered-comparison" target="_blank" rel="noopener">PEP 440</a> 更严格：<code>SpecifierSet("&lt;1.0.0")</code> 即使显式传入 <code>prereleases=True</code>，对 <code>1.0.0a1</code> 依然返回 <code>False</code>（因为按 PEP 440 排他比较定义，<code>&lt;V</code> 禁止匹配属于 <code>V</code> 发布周期的预发布版）。</li>
+        <li><strong>漏洞区间 Comparator（全序覆盖一切已运行代码）：</strong>依据 <a href="https://ossf.github.io/osv-schema/#affectedranges-field" target="_blank" rel="noopener">OpenSSF OSV Schema</a>，<code>SEMVER</code> 与 <code>ECOSYSTEM</code> 区间必须基于该生态的<strong>全序关系（Total Order）</strong>求值。只要系统里装了 <code>1.2.4-alpha.1</code> 或 <code>1.0.0a1</code>，且漏洞直到正式版 <code>1.2.4</code> / <code>1.0.0</code> 才修复（即全序满足 <code>introduced &le; v &lt; fixed</code>），该预发布包同样存在漏洞！</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">Go 模块 <code>semver</code> 的两个细节</span>
+        Go 官方库 <a href="https://pkg.go.dev/golang.org/x/mod/semver" target="_blank" rel="noopener"><code>golang.org/x/mod/semver</code></a>（BSD-3-Clause）<strong>强制要求版本号带小写 <code>v</code> 前缀</strong>（如 <code>v1.2.3</code>），而 OSV <code>SEMVER</code> 规范恰好<strong>禁止</strong>带 <code>v</code> 前缀——适配器边界必须做统一校验补全。此外，按 <a href="https://go.dev/ref/mod#pseudo-versions" target="_blank" rel="noopener">Go Modules Reference</a>，伪版本（<code>v0.0.0-20200101000000-abcdef</code>）按 SemVer 预发布时间戳自然排序，<code>+incompatible</code> 则按构建元数据参与同路径比较但排序时忽略。
+      </aside>
+    </div>
+
+    <div class="callout warning">
+      <div class="callout-label">架构师硬约束：L1/L4 与 L3 双引擎接口分离</div>
+      <p>自研平台内核必须显式拆出两个接口，严禁混用：<code>Comparator.Compare(eco, a, b) &rarr; {-1, 0, 1}</code> 专供 <strong>Layer 3 漏洞区间求值与 <code>vers:</code> 化简</strong>；<code>Specifier.Satisfies(eco, v, constraint)</code> 专供 <strong>Layer 1 依赖树求解与 Layer 4 自动升级规划</strong>。此外，OSV <code>events[]</code> 的上界有两种截然不同的闭开语义——<code>fixed</code> 是<strong>开区间上界（<code>&lt;</code>）</strong>，而 <code>last_affected</code> 是<strong>闭区间上界（<code>&le;</code>）</strong>。</p>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>六大主流生态原生排序暗坑与 Token 算法拆解</h2>
+
+    <div class="prose-col has-sidenote">
+      <p>没有“通用版本号算法”。不同包管理器的历史演化决定了它们对字母、标点、数字和修订后缀截然相反的排序哲学。任何试图用正则剥掉后缀再转成 <code>major.minor.patch</code> 比较的通用库，都会在下面的边界案例中全线翻车：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">Maven 未知后缀与 Debian vs RPM 反转</span>
+        同一个字符串 <code>1.0a</code> vs <code>1.0</code>：在 <strong>Debian <code>dpkg</code></strong> 中 <code>1.0 &lt; 1.0a</code>（空串早于字母）；在 <strong>RPM <code>rpmvercmp</code></strong> 中同样 <code>1.0 &lt; 1.0a</code>（前缀耗尽时较长者胜），但遇到 <code>1.0.beta</code> vs <code>1.0.1</code> 时 <strong>数字段永远压倒字母段</strong>（<code>1.0.beta &lt; 1.0.1</code>）；而在 <strong>Maven</strong> 中，<code>1.0-redhat-00001</code> 这类未知修饰符居然排在正式版 <code>1.0</code> <strong>之后</strong>！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:15%" />
+          <col style="width:21%" />
+          <col style="width:32%" />
+          <col style="width:32%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>生态 / 标准</th>
+            <th>语法骨架与特殊段</th>
+            <th>精确全序链（由旧到新）</th>
+            <th>SCA 工程必踩暗坑</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>SemVer 2.0.0</strong><br/>（npm / Crates / Go）</td>
+            <td><code>MAJOR.MINOR.PATCH[-pre][+build]</code></td>
+            <td><code>1.0.0-1 &lt; 1.0.0-alpha &lt; 1.0.0-alpha.1 &lt; 1.0.0-beta.2 &lt; 1.0.0-beta.11 &lt; 1.0.0-rc.1 &lt; 1.0.0 == 1.0.0+build.9</code></td>
+            <td>预发布纯数字段按整数比较且<strong>小于字母段</strong>；<code>+build</code>（含 Go <code>+incompatible</code>）排序完全忽略；Go 伪版本按 UTC 时间戳排。</td>
+          </tr>
+          <tr>
+            <td><strong>Apache Maven</strong><br/><a href="https://maven.apache.org/pom.html#Version_Order_Specification" target="_blank" rel="noopener"><code>ComparableVersion</code></a></td>
+            <td><code>.</code> 分隔项；<code>-</code> 与数字/字母切换创建嵌套子列表；大小写不敏感</td>
+            <td><code>alpha(a) &lt; beta(b) &lt; milestone(m) &lt; rc(cr) &lt; snapshot &lt; ""/ga/final/release &lt; sp &lt; <strong>未知字符(如 redhat-1)</strong> &lt; 下一整数(.1)</code></td>
+            <td><strong>两大致命误区：</strong>① <code>1-alpha-1 == 1.0.0-alpha-1</code>（末尾 <code>0/ga/final</code> 归一化剥除）；② <code>1.0 &lt; 1.0-sp &lt; 1.0-foo &lt; 1.0.1</code>，若拿 SemVer 解析 <code>1.0-redhat-00001</code> 会误判成小于 <code>1.0</code>！</td>
+          </tr>
+          <tr>
+            <td><strong>Python PEP 440</strong><br/><a href="https://peps.python.org/pep-0440/" target="_blank" rel="noopener">PEP 440 Spec</a></td>
+            <td><code>[N!]N(.N)*[{a|b|rc}N][.postN][.devN][+local]</code></td>
+            <td><code>1.0.dev1 &lt; 1.0a1.dev1 &lt; 1.0a1 &lt; 1.0b1 &lt; 1.0rc1 &lt; 1.0 &lt; 1.0+local &lt; 1.0.post1.dev1 &lt; 1.0.post1 &lt; 1!0.1</code></td>
+            <td><code>N!</code>（Epoch）压倒一切；<code>.post1</code> <strong>大于正式版</strong>（<code>&lt;=1.0</code> 不含 <code>1.0.post1</code>）；<code>.devN</code> 挂在谁后面就排在谁之前；<code>==1.0</code> 忽略 <code>+local</code> 但全序比较 <code>1.0 &lt; 1.0+local</code>。</td>
+          </tr>
+          <tr>
+            <td><strong>Debian EVR</strong><br/><a href="https://man7.org/linux/man-pages/man7/deb-version.7.html" target="_blank" rel="noopener"><code>deb-version(7)</code></a></td>
+            <td><code>[epoch:]upstream[-debian_revision]</code></td>
+            <td>单字符权重：<br/><code>~~ &lt; ~ &lt; [空串] &lt; 字母(A-Za-z) &lt; 非字母(+ / .)</code><br/>（<code>1.0~rc1 &lt; 1.0 &lt; 1.0a &lt; 1.0+deb12u1</code>）</td>
+            <td><strong>波浪线 <code>~</code> 排序低于空串</strong>，专门用于预发布与回溯包（<code>~bpo11+1</code>）；<strong>字母排序低于 <code>+</code>/<code>.</code></strong>（与常规 ASCII 相反！）；前导零剥离后按纯大整数比对。</td>
+          </tr>
+          <tr>
+            <td><strong>RPM EVR</strong><br/><a href="https://rpm-software-management.github.io/rpm/manual/dependencies.html#versioning" target="_blank" rel="noopener"><code>rpmvercmp</code></a></td>
+            <td><code>[epoch:]version[-release]</code>；非字母数字视作分隔符（<code>~</code> 与 <code>^</code> 除外）</td>
+            <td><code>1.0~rc1 &lt; 1.0 &lt; 1.0^git1 &lt; 1.0.1</code><br/>分段对齐：<strong>数字段恒大于字母段</strong>（<code>1.0.beta &lt; 1.0.1</code>）；前缀耗尽时剩余串胜（<code>1.0 &lt; 1.0a</code>）</td>
+            <td><code>~</code> 早于空串（预发布），<strong><code>^</code>（脱字符）晚于空串但早于正式下一小版</strong>（RHEL/Fedora 后发布快照常用）；<code>-release</code> 中的 <code>.el9_4.1</code> 承载关键安全 Backport 递增。</td>
+          </tr>
+          <tr>
+            <td><strong>Alpine <code>apk</code></strong><br/><a href="https://wiki.alpinelinux.org/wiki/APKBUILD_Reference#pkgver" target="_blank" rel="noopener">APK Version Spec</a></td>
+            <td><code>N(.N)*[a-z][_suffixN][~hash][-rN]</code></td>
+            <td><code>_alpha &lt; _beta &lt; _pre &lt; _rc &lt; [无后缀] &lt; _cvs &lt; _svn &lt; _git &lt; _hg &lt; _p</code>，最后才比 <code>-rN</code></td>
+            <td><code>1.0.0_rc1-r99 &lt; 1.0.0-r0</code>：<code>-rN</code> 打包修订号只在同一基础版本内决定胜负，不可越过后缀压制正式版或 <code>_p</code> 补丁后缀。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>VERS 规范化与发行版 Backport 消误报工程闭环</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 VERS（<code>vers:</code>）标准与三条规范化铁律</h3>
+      <p>当 Layer 2 需要通过 <a href="https://cyclonedx.org/docs/1.7/json/#components_items_versionRange" target="_blank" rel="noopener">CycloneDX 1.7</a> 的 <code>versionRange</code> 或 <code>vulnerabilities[].affects[].versions[].range</code> 交换区间，或自研引擎需要把不同来源的区间统一化简存储时，应遵循 Package-URL 社区制定的 <a href="https://github.com/package-url/vers-spec" target="_blank" rel="noopener"><strong>VERS（Version Range Specifier）规范</strong></a>：</p>
+      <p>语法形态为 <code>vers:&lt;versioning-scheme&gt;/&lt;constraint1&gt;|&lt;constraint2&gt;|...</code>（例如 <code>vers:npm/&gt;=1.0.0|!=1.2.3|&lt;2.0.0</code> 或全集 <code>vers:pypi/*</code>）。工程上编写自研 VERS 规范化器必须守住<strong>三条规范铁律</strong>：</p>
+      <ol>
+        <li><strong>零空白符：</strong>严格形式禁止任何空格或制表符（必须是 <code>!=1.2.3</code>，不可写 <code>!= 1.2.3</code>）。</li>
+        <li><strong>按生态全序升序排列：</strong>管道符 <code>|</code> 分隔的每个约束子句，必须先用该生态原生 Comparator 按版本号从小到大排序。</li>
+        <li><strong>版本唯一性与区间化简（Canonical Simplification）：</strong>同一个版本号在一条 VERS 串中只能出现一次（禁止同时出现 <code>&gt;=1.0.0</code> 与 <code>!=1.0.0</code>），重叠或相邻区间须先合并化简为唯一标准形式，才能做缓存键去重与高效求值。</li>
+      </ol>
+      <aside class="sidenote">
+        <span class="sidenote-title">开源唯一参考标杆：<code>univers</code></span>
+        AboutCode 团队维护的 <a href="https://github.com/aboutcode-org/univers" target="_blank" rel="noopener"><code>aboutcode-org/univers</code></a>（<code>Apache-2.0 AND BSD-3-Clause AND MIT</code>）是目前开源界对 VERS 区间合并化简（<code>VersionRange.normalize()</code>）实现最完整的 Python 库，非常适合作为我们编写纯 Go 版本区间化简器的算法蓝本。
+      </aside>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.2 根除发行版 Backport 误报/漏报：为什么不能跨命名空间比对？</h3>
+      <p>以真实的高危漏洞 <strong>OpenSSH <code>CVE-2024-6387</code>（regreSSHion）</strong> 为例，上游源码受影响区间是 <code>[8.5p1, 9.8p1)</code>。看看如果直接把 Linux 发行版软件包拿去比对上游区间，会同时引爆多么荒谬的<strong>误报与漏报双重灾难</strong>：</p>
+      <ul>
+        <li><strong>陷阱 A · 剥离 Epoch 硬比上游（误报）：</strong>Debian 12 已在 <a href="https://www.debian.org/security/2024/dsa-5724" target="_blank" rel="noopener"><code>DSA-5724-1</code></a> 中将补丁回溯（Backport）合入 <code>1:9.2p1-2+deb12u3</code>；RHEL 9 已在 <a href="https://access.redhat.com/errata/RHSA-2024:4312" target="_blank" rel="noopener"><code>RHSA-2024:4312</code></a> 中修复至 <code>8.7p1-38.el9_4.1</code>。如果剥去发行后缀按上游版本比，<code>9.2p1 &lt; 9.8p1</code>、<code>8.7p1 &lt; 9.8p1</code>，所有已打补丁的容器全线误报！</li>
+        <li><strong>陷阱 B · 带着 Epoch 硬比上游（灾难级漏报！）：</strong>Debian 的 <code>openssh</code> 带有 <code>Epoch = 1</code>（<code>1:9.2p1-2+deb12u1</code>，一个<strong>尚未修复</strong>的易受攻击老包），而上游 <code>9.8p1</code> 的隐式 Epoch 为 <code>0</code>。按 EVR 规则 <code>1:9.2p1 &gt; 0:9.8p1</code>——未修补的高危服务器会被静默放行！</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">RHEL CSAF VEX 的行业标杆转向</span>
+        Red Hat 已将安全公告主力切换至 <a href="https://docs.redhat.com/en/documentation/red_hat_security_data_api/" target="_blank" rel="noopener">CSAF VEX 文档</a>：直接按每个 RHEL 小版本分支（如 <code>rhel-9.4</code>）精确列出每个 CVE 对应的 <code>fixed</code> RPM NEVRA 与 <code>not_affected</code> 判定（如 RHEL 8 的 <code>8.0p1</code> 本就不含 <code>8.5p1</code> 引入的缺陷），彻底绕开上游版本号纠缠。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 3 双轨隔离版本匹配引擎（Upstream Comparator Lane vs Distro Backport Lane）</strong>
+        <span>按 PURL 类型与 <code>distro_qualifier</code> 硬切路由，物理阻断“上游 CVE 区间污染发行版 Backport 包”的通道</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Step 1 · 规范化 PURL 路由闸门（Namespace &amp; Distro Gate）</span>
+            <span class="orch-stage-kicker">PURL Type + Source Package + Distro Qualifier</span>
+          </div>
+          <p class="orch-stage-desc">
+            读取 Layer 2 IR 组件的 <code>base_purl</code>、<code>distro_qualifier</code>（如 <code>debian-12</code> / <code>rhel-9</code> / <code>alpine-3.20</code>）及 OS 二进制包映射出的 <strong>Source Package Name</strong>（如 <code>openssh-server</code> &rarr; <code>openssh</code>）。语言包走左轨，OS 发行版包强制锁定走右轨。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 严禁跨轨借用规则（呼应 Lesson 0007 <code>UPSTREAM_OF</code> 隔离） &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Lane A · 上游语言生态全序求值轨</span>
+              <span class="badge badge-ok">npm / PyPI / Maven / Go / Cargo</span>
+            </div>
+            <ul>
+              <li><strong>规则作用域：</strong><code>rule_scope = 'UPSTREAM_PKG'</code>。</li>
+              <li><strong>算法内核：</strong>直接调用生态原生 <strong>Total-Order Comparator</strong>（禁止调包管理器 Specifier！）。</li>
+              <li><strong>区间裁决：</strong>对 OSV <code>events[]</code>（闭下界 <code>introduced</code>、开上界 <code>fixed</code> / 闭上界 <code>last_affected</code>）或化简后的 <code>vers:</code> 区间求值；同步处理 <code>~</code> / Go <code>v</code> 前缀 / Maven 归一化。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Lane B · 发行版 Backport 真值轨</span>
+              <span class="badge badge-build">deb / rpm / apk (Distro Isolated)</span>
+            </div>
+            <ul>
+              <li><strong>规则作用域：</strong>仅查询匹配当前 <code>distro_qualifier</code> 的 <code>DISTRO_BACKPORT</code> 规则（Debian DSA / Ubuntu UCT / RHEL CSAF VEX / Alpine SecDB）。</li>
+              <li><strong>算法内核：</strong>严格使用 <code>dpkg verrevcmp</code> / <code>rpmvercmp</code> / <code>apk</code> EVR 全序，<strong>永不剥离也永不跨系统对比 Epoch</strong>。</li>
+              <li><strong>盲区兜底：</strong>遇到无发行版安全追踪器的小众自编译包（非 distro 包管理器安装），回退到显式标注 <code>LOW_CONFIDENCE</code> 的 <code>CPE_FALLBACK</code>。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col">
+      <h3>3.3 开源版本比较底座选型与 Go 工程落地策略</h3>
+      <p>既然我们已在 <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> 与 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 确立了<strong>“Single Go Core”</strong>架构（同时服务本地 MCP/Hook/LSP 与云端扫描 Worker），版本比较引擎也必须用纯 Go 内嵌进同一核心，绝对不能为了比个版本号去拉起 Python 或 JVM 子进程！对照目前主流商用合规开源组件：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:24%" />
+          <col style="width:16%" />
+          <col style="width:32%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源组件 / 包路径</th>
+            <th>许可协议</th>
+            <th>核心覆盖与源码级特性</th>
+            <th>自研平台整合定位</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener"><code>google/osv-scalibr</code></a></strong><br/>（<code>semantic</code> 包）</td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>纯 Go，紧贴 OSV Schema <code>SEMVER</code> / <code>ECOSYSTEM</code> 规范（含 npm/Maven/PyPI/Go/Debian/Red Hat/Alpine 等多生态 testdata）。</td>
+            <td><strong>首选语言生态内核</strong>：直接库级嵌入 Go Core，天然对齐 Lesson 0007 的 OSV 入库模型。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/anchore/grype" target="_blank" rel="noopener"><code>anchore/grype</code></a></strong><br/>（<code>grype/version</code>）</td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>纯 Go，针对 OS 发行版（<code>deb</code> / <code>rpm</code> / <code>apk</code> / <code>portage</code> / <code>kb</code>）与语言包的完整约束求值器，经大规模容器实战淬炼。</td>
+            <td><strong>OS 比较与测试基准参照</strong>：可借鉴或抽取其 <code>deb/rpm/apk</code> 边界用例与比较逻辑（注意裁剪不引入整套 Grype DB 耦合）。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/aquasecurity/go-version" target="_blank" rel="noopener"><code>aquasecurity/go-version</code></a></strong> &amp; <code>knqyf263/go-deb-version</code> / <code>go-rpm-version</code></td>
+            <td><span class="badge badge-ok">Apache-2.0</span> / <span class="badge badge-ok">MIT</span></td>
+            <td>轻量单一职责 Go 模块（含 <code>go-pep440-version</code>），无重型依赖，分别精确实现了 SemVer/PEP 440/dpkg/rpmvercmp。</td>
+            <td><strong>轻量补充备选</strong>：适合需要极致精简依赖树时按需独立嵌入。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/aboutcode-org/univers" target="_blank" rel="noopener"><code>aboutcode-org/univers</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0 AND BSD-3 AND MIT</span></td>
+            <td>Python 库，完整实现了 <code>vers:</code> 语法解析、排序去重、连续区间化简及多生态映射。</td>
+            <td><strong>VERS 算法蓝本</strong>：不直接进 Go 运行时，而是参考其区间合并算法自研 500 行纯 Go <code>vers</code> 规范化器。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心版本引擎契约设计：Comparator 与 Backport Distro Gate</strong>
+        <span>纯 Go 零外部进程依赖 · 复用同一个内核服务全触点</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> VersionComparator <span class="tok-kw">interface</span> {
+    <span class="tok-cmt">// Compare 实现生态原生全序比较 (-1, 0, +1)，禁止使用包管理器 Specifier 语义</span>
+    Compare(a, b <span class="tok-type">string</span>) (<span class="tok-type">int</span>, <span class="tok-type">error</span>)
+}
+
+<span class="tok-kw">func</span> MatchComponent(comp IRComponent, rules []CanonicalMatchRule) []Finding {
+    <span class="tok-cmt">// 1. OS 发行版强制走 Distro Backport 隔离轨，严禁匹配无 distro_qualifier 的上游规则</span>
+    <span class="tok-kw">if</span> comp.IsDistroPackage() {
+        <span class="tok-kw">return</span> evalDistroBackportRules(comp.SourcePkgName, comp.Version, comp.DistroQualifier, rules)
+    }
+    <span class="tok-cmt">// 2. 应用语言包按 PURL Type 路由到对应生态 Total-Order Comparator</span>
+    cmp := Registry.MustGetComparator(comp.PurlType)
+    <span class="tok-kw">var</span> hits []Finding
+    <span class="tok-kw">for</span> _, r := <span class="tok-kw">range</span> rules {
+        <span class="tok-kw">if</span> !r.IsEnabled || r.RuleScope != <span class="tok-str">"UPSTREAM_PKG"</span> { <span class="tok-kw">continue</span> }
+        <span class="tok-kw">if</span> evalOSVEvents(cmp, comp.Version, r.Events) { <span class="tok-cmt">// introduced <= v && (v < fixed || v <= last_affected)</span>
+            hits = append(hits, NewFinding(comp, r))
+        }
+    }
+    <span class="tok-kw">return</span> hits
+}</code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>下面提供两个实战工作台：先在<strong>多生态原生版本比较实验台</strong>切换 5 大真实暗坑（或手动输入任意版本号测试 Token 拆解与 OSV/VERS 区间），再完成 <strong>5 项 Layer 3 版本引擎架构拍板</strong>。</p>
+    </div>
+
+    <!-- INTERACTIVE VERSION RANGE LAB -->
+    <section class="widget-panel full-width" data-widget="version-range-lab">
+      <script type="application/json" class="version-range-lab-data">
+        {
+          "title": "交互实验台：6 大生态原生全序比较、选包 Specifier 漏报与 Backport 边界验证",
+          "intro": "点击预设场景或自行修改版本号与 OSV [introduced, fixed) 区间（按 Enter 更新），直观对比通用 SemVer/字典序与生态原生算法的裁决差异。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 3 版本区间语义引擎架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在拍板商业 SCA 平台 Layer 3 的核心匹配计算层，要求兼顾高并发 Go Core（本地 MCP/Hook 与云端 Worker 共用）以及政企容器零误报交付。",
+          "summary": {
+            "optimal": "全部 {optimal} 项版本语义架构决策严密无懈！你已彻底避开预发布漏报、Maven 修饰符误判、Epoch 跨界与 VERS 缓存雪崩坑，可以稳健进入 Lesson 0009 离线索引与分发。",
+            "warning": "没有触发致命误报/漏报红线，但在 {warning} 项上存在性能损耗或工程冗余（标黄项），建议按单核嵌入式方向收口。",
+            "critical": "当前架构存在 {critical} 处会直接引爆线上漏报或误报风暴的高危缺陷（标红项）！请修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "匹配 OSV 预发布版本（如 npm 1.2.4-alpha.1 或 PyPI 1.0.0a1）时的求值器选型",
+              "layer": "语义边界 · 消除静默漏报",
+              "context": "安全公告声明 fixed: '1.2.4'（或 '1.0.0'），而客户项目的 Lockfile 里锁定了一个尚未转正的预发布版本 '1.2.4-alpha.1'（或 '1.0.0a1'）。",
+              "options": [
+                {
+                  "label": "直接复用生态包管理器的依赖解析范围函数（如 node-semver '<1.2.4' 或 Python SpecifierSet('<1.0.0')）做漏洞匹配",
+                  "status": "critical",
+                  "verdictTitle": "选包约束默认屏蔽预发布版，造成线上系统静默漏报",
+                  "feedback": "依赖解析函数的设计目的是“防止用户误安装不稳定版”；PEP 440 SpecifierSet('<1.0.0') 甚至在 prereleases=True 时也拒绝匹配 1.0.0a1！漏洞匹配必须改用全序比较器。"
+                },
+                {
+                  "label": "统一使用生态原生全序比较器（Total-Order Comparator）求值 introduced <= v < fixed，预发布版显式按偏序落入区间",
+                  "status": "optimal",
+                  "verdictTitle": "严格对齐 OSV 规范：不漏掉任何处于修复版之前的预发布制品",
+                  "feedback": "精准架构！全序比较器只问“在版本时间轴上是否早于 fixed”，将选包策略与安全漏洞覆盖彻底解耦。"
+                },
+                {
+                  "label": "干脆在漏洞库里把所有带 '-' 或 'a/b/rc' 的待测版本号全部当作未知版本直接跳过不报",
+                  "status": "critical",
+                  "verdictTitle": "大面积盲区漏报：内部灰度包与开源预发布依赖完全失明",
+                  "feedback": "现代开源生态大量使用 -rc / -alpha 版本推进，直接跳过等同于放弃预发布组件的安全防护。"
+                }
+              ]
+            },
+            {
+              "name": "Apache Maven 修饰符（如 1.0-redhat-00001 / 1.0-sp / 1.0-ga）的比较实现",
+              "layer": "JVM 生态 · ComparableVersion",
+              "context": "企业 Java 项目广泛使用红帽/厂商定制版 JAR（如 1.0-redhat-00001）与 Service Pack（1.0-sp）。",
+              "options": [
+                {
+                  "label": "用正则把 '-' 后面的所有字符串当成 SemVer pre-release，认为 1.0-sp 和 1.0-redhat-00001 都小于 1.0",
+                  "status": "critical",
+                  "verdictTitle": "方向完全颠倒：把已发布补丁与厂商定制版错判成旧版导致误报",
+                  "feedback": "在 Maven ComparableVersion 中，只有 alpha/beta/milestone/rc/snapshot 小于正式版，sp 与未知修饰符一律排在正式版 1.0 之后！"
+                },
+                {
+                  "label": "在 Go 核心内精确实现 Maven ComparableVersion 状态机（归一化末尾 0/ga/final，区分已知/未知修饰符顺序）",
+                  "status": "optimal",
+                  "verdictTitle": "纯 Go 零 JVM 依赖达到 100% 与 Maven 官方完全一致的排序结果",
+                  "feedback": "既保留了 Single Go Core 的毫秒级响应，又完美消灭了 Java 企业依赖最常见的 -sp/-redhat/-jre 误报。"
+                },
+                {
+                  "label": "每比一次 Maven 版本号就通过 exec 调一次本地 Java 进程跑 org.apache.maven.artifact.versioning.ComparableVersion",
+                  "status": "warning",
+                  "verdictTitle": "性能不可接受且破坏本地单二进制轻量化体验",
+                  "feedback": "ComparableVersion 解析器仅有不到 300 行逻辑，为了比较两个字符串去拉起 JVM 会把高并发漏洞匹配拖垮几个数量级。"
+                }
+              ]
+            },
+            {
+              "name": "Debian/RHEL 容器 OS 包（如 OpenSSH 1:9.2p1-2+deb12u3）遇到上游 CVE（fixed: 9.8p1）的路由裁决",
+              "layer": "Backport 消误报 · 跨命名空间隔离",
+              "context": "容器镜像提取出 pkg:deb/debian/openssh@1:9.2p1-2+deb12u3?distro=debian-12，同时库里有 CVE-2024-6387 上游规则 <9.8p1 和 Debian DSA-5724-1 规则。",
+              "options": [
+                {
+                  "label": "剥掉 Epoch 和 +deb12u3 后缀，拿 9.2p1 直接去比上游 <9.8p1，再人工加白名单消警",
+                  "status": "critical",
+                  "verdictTitle": "引爆海啸级 Backport 误报，安全团队每天陷入白名单地狱",
+                  "feedback": "Linux 长期支持发行版全靠 Backport 修复漏洞，上游版本号几乎永远低于上游修复版本。"
+                },
+                {
+                  "label": "保留完整 1:9.2p1-2+deb12u3 直接用 dpkg 算法去比上游 9.8p1（隐式 Epoch 0:）",
+                  "status": "critical",
+                  "verdictTitle": "更隐蔽的灾难级漏报：Epoch 1: 压倒上游 0:，未修补老包也被判安全",
+                  "feedback": "哪怕容器里跑的是未修复漏洞的 1:9.2p1-2+deb12u1，因为 1 > 0 也会被判大于 9.8p1 而放行！"
+                },
+                {
+                  "label": "按 PURL 类型与 distro_qualifier 路由至 Distro Backport 轨，仅消费 Debian DSA / RHEL CSAF VEX 并用 SourcePkgName + EVR 比较",
+                  "status": "optimal",
+                  "verdictTitle": "物理阻断跨命名空间比较，从架构根源同时消灭 Backport 误报与 Epoch 漏报",
+                  "feedback": "与 Lesson 0007 的 UPSTREAM_OF 图模型完美呼应：上游 CVE 负责关联展示，发行版安全真值负责匹配裁决。"
+                }
+              ]
+            },
+            {
+              "name": "Layer 2/3 内部及 CycloneDX 对外交换时 VERS（vers:）区间的规范化处理",
+              "layer": "VERS 规范 · 互操作性",
+              "context": "不同来源对同一包给出等价但写法杂乱的区间，如 'vers:npm/<2.0.0 | >=1.0.0 | != 1.5.0'。",
+              "options": [
+                {
+                  "label": "原样存储各上游提交的原始区间字符串，不做空格清洗、排序和重叠化简",
+                  "status": "warning",
+                  "verdictTitle": "违反 VERS 严格规范，导致 CycloneDX 校验报错及缓存命中率低下",
+                  "feedback": "VERS 规范明确禁止空白字符、要求按生态全序排序且版本唯一；不化简会导致相同区间生成多个冗余规则。"
+                },
+                {
+                  "label": "参考 univers 算法在 Go 中自研 VERS 规范化器：去空白、按生态全序排序、版本去重并合并重叠/相邻区间",
+                  "status": "optimal",
+                  "verdictTitle": "生成全平台唯一的标准 VERS 表达式，直接提升缓存与索引压缩率",
+                  "feedback": "既满足 CycloneDX 1.7 与 Ecma 标准互操作，又让下游 Lesson 0009 的离线索引体积大幅瘦身。"
+                },
+                {
+                  "label": "把所有 VERS 表达式强制转写为 'vers:semver/*' 以简化后端存储",
+                  "status": "critical",
+                  "verdictTitle": "丢失 PyPI/Maven/Debian 原生排序语义，导致区间边界彻底算错",
+                  "feedback": "scheme 前缀（npm/pypi/maven/deb）决定了比较语义本身，绝不可强行擦除成 semver。"
+                }
+              ]
+            },
+            {
+              "name": "商业闭源 Go 核心版本比较引擎的开源选型策略",
+              "layer": "商用合规 · 工程复用",
+              "context": "需要为 10+ 种语言与 OS 生态补齐版本比较能力，同时坚守 Apache-2.0 / MIT 商业闭源底线。",
+              "options": [
+                {
+                  "label": "直接把 Python aboutcode-org/univers 塞进容器作为独立 RPC 进程供 Go 扫描器跨进程调用",
+                  "status": "warning",
+                  "verdictTitle": "虽然许可合规，但把本地亚秒级单核弄得笨重不堪，延迟暴增",
+                  "feedback": "univers 应作为学习 VERS 化简算法的绝佳参考，而不是在 Go 本地扫描热路径里塞进 Python 解释器。"
+                },
+                {
+                  "label": "在 Go Core 内直接库级集成 Apache-2.0 google/osv-scalibr/semantic 与 Apache/MIT OS EVR 库，并自研轻量 VERS 化简器",
+                  "status": "optimal",
+                  "verdictTitle": "全纯 Go、零传染性开源债、亚微秒级求值，所有触点共用同一内核",
+                  "feedback": "标准「借力顶级 Apache-2.0/MIT 底座 + 自研规范胶水层」典范，完美适配 Lesson 0006 确立的三模单核本地守护架构。"
+                },
+                {
+                  "label": "全部 10 多种生态的版本解析器一个字不借用，安排团队从零手写全部正则并自行维护测试集",
+                  "status": "warning",
+                  "verdictTitle": "重复造轮子消耗数月研发资源，且极易漏掉 Debian/RPM/Maven 边缘用例",
+                  "feedback": "osv-scalibr/semantic 与 grype/version 已经沉淀了海量真实生态边界 testdata，直接嵌入站上巨人肩膀才是明智之选。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核场景题涵盖 <strong>Comparator vs Specifier 陷阱、Maven 修饰符顺序、Debian EVR Epoch 双重误区与 VERS / RPM <code>~ ^</code> 语义</strong>。<strong>先凭记忆作答，再看解析。</strong>（每题 4 个选项字数严格等长，答案分布均匀。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0008 · 生态原生版本区间语义引擎回忆测验",
+          "intro": "重点检验跨生态全序比较、预发布漏报与 OS Backport 隔离机制。",
+          "questions": [
+            {
+              "prompt": "某 PyPI 组件的高危漏洞在 OSV 中标记为 fixed: '1.0.0'，而你的企业项目锁定了预发布版本 '1.0.0a1'。如果开发人员在 Layer 3 错误调用 Python 官方 packaging.specifiers.SpecifierSet('<1.0.0')（甚至显式传入 prereleases=True）来做漏洞匹配，实际会发生什么结果？",
+              "options": [
+                "求值器认为预发布版本号始终小于正式版而正常触发漏洞告警，但会在报告中丢失修复版本提示。",
+                "求值器因内部报错抛出非法版本格式异常，导致整个依赖树扫描流水线中断并被迫全量降级兜底。",
+                "求值器将该预发布包自动归一化成正式版本，导致原本应匹配的其它前置区间同时重复产出告警。",
+                "求值器会依据排他比较原则拒绝匹配同周期的预发布版本，直接返回不命中而造成线上静默漏报。"
+              ],
+              "answerIndex": 3,
+              "explanation": "按 Python PEP 440 规范，SpecifierSet('<1.0.0')（即使设置 prereleases=True）遵循 Exclusive Ordered Comparison 语义：绝对禁止匹配拥有相同基础版本 1.0.0 的预发布版本（如 1.0.0a1），防止 pip 意外选包。同样地，npm node-semver 也有同元组预发布拦截规则。因此 Layer 3 漏洞匹配绝不能复用包管理器的选包 Specifier，必须使用 Total-Order Comparator（1.0.0a1 < 1.0.0，应判定命中漏洞）（D 正确）。"
+            },
+            {
+              "prompt": "企业 Java 项目依赖一个包含厂商定制补丁的构件，版本号为 '1.0-redhat-00001'。根据 Apache Maven ComparableVersion 规范，以下哪一组由旧到新的精确排序完全正确？",
+              "options": [
+                "1.0-rc1 < 1.0-SNAPSHOT < 1.0-ga < 1.0-sp < 1.0-redhat-00001 < 1.0.1",
+                "1.0-redhat-00001 < 1.0-rc1 < 1.0-SNAPSHOT < 1.0-ga < 1.0-sp < 1.0.1",
+                "1.0-SNAPSHOT < 1.0-rc1 < 1.0-redhat-00001 < 1.0-ga < 1.0.1 < 1.0-sp",
+                "1.0-rc1 < 1.0-SNAPSHOT < 1.0-redhat-00001 < 1.0-ga < 1.0-sp < 1.0.1"
+              ],
+              "answerIndex": 0,
+              "explanation": "Apache Maven ComparableVersion 的硬性排序链为：alpha(a) < beta(b) < milestone(m) < rc(cr) < snapshot < 空/ga/final/release < sp < 未知字符串修饰符（如 redhat-00001）< 下一数字小版（1.0.1）。如果错误套用 SemVer，会把 -sp 或 -redhat-00001 当成 pre-release 排到 1.0 之前，引发误报（A 正确）。"
+            },
+            {
+              "prompt": "在排查 OpenSSH 漏洞 CVE-2024-6387（上游 introduced: 8.5p1, fixed: 9.8p1）时，某 Debian 12 容器内跑着一个尚未打补丁的易受攻击包 '1:9.2p1-2+deb12u1'。假如自研引擎允许该包带着 Epoch 直接与上游修复版本 '9.8p1' 用 dpkg 算法比大小，会导致什么后果？",
+              "options": [
+                "因为上游版本号的补丁后缀明显更长，引擎会把已修补的正式发布包反复标记为高危漏洞而引发严重误报。",
+                "因为 Debian Epoch 1 大于上游隐式 0，引擎会误判当前版本高于修复版而静默漏报。",
+                "因为波浪线与加号在跨生态解析时会触发溢出异常，导致容器镜像层的其它所有软件包扫描全线崩溃中断。",
+                "因为 dpkg 算法无法识别带字母 p 的上游版本号，会自动强制降级为按字符串字典序执行匹配。"
+              ],
+              "answerIndex": 1,
+              "explanation": "这就是跨命名空间对比发行版与上游版本的双向陷阱：剥掉 Epoch 去比上游 <9.8p1 会导致已回溯修补的 1:9.2p1-2+deb12u3 误报；而如果不隔离作用域、直接带着 Epoch 1: 用 dpkg 算法去比上游 9.8p1（隐式 Epoch 0），则 1:9.2p1 > 0:9.8p1，连未修复漏洞的 1:9.2p1-2+deb12u1 都会被判成“已高于修复版”而静默漏报！因此必须按 distro_qualifier 隔离路由至 Debian DSA / Red Hat CSAF VEX 真值轨（B 正确）。"
+            },
+            {
+              "prompt": "关于 RPM 版本比较器（rpmvercmp）的特殊符号以及 CycloneDX 采用的 VERS（vers:）规范化要求，下列哪项架构描述完全准确？",
+              "options": [
+                "RPM 中波浪线 '~' 与脱字符 '^' 都早于空串；而 VERS 允许用空格分隔且优先保留原始顺序。",
+                "RPM 中 '~' 早于空串且数字段小于字母段；而 VERS 为兼容多源规则允许重复出现同一版本号并集。",
+                "RPM 中 '~' 早于空串而 '^' 晚于空串且数字段恒赢；VERS 禁空白且须按生态全序排序与去重。",
+                "RPM 中 '^' 早于空串且所有符号权重等同于点号；VERS 必须把所有生态前缀改写为 semver。"
+              ],
+              "answerIndex": 2,
+              "explanation": "rpmvercmp 的核心规则是：'~' 早于空串（预发布，1.0~rc1 < 1.0），'^' 晚于空串但早于正式下一版本（后发布快照，1.0 < 1.0^git1 < 1.0.1），分段对比时数字段永远大于字母段（1.0.beta < 1.0.1）；同时 VERS 规范严格禁止任何空白符，要求约束子句按生态全序升序排列且同一版本号只能出现一次，区间须先合并化简（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>编写自研版本比较调度层与 <code>vers:</code> 规范化器时，建议对照以下一手规范与商用合规库源码：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/package-url/vers-spec" target="_blank" rel="noopener"><strong><code>package-url/vers-spec</code></strong></a> &amp; <a href="https://github.com/aboutcode-org/univers" target="_blank" rel="noopener"><strong><code>aboutcode-org/univers</code></strong></a>：VERS 严格格式、排序去重与区间合并化简算法蓝本。</li>
+          <li><a href="https://maven.apache.org/pom.html#Version_Order_Specification" target="_blank" rel="noopener"><strong>Maven Version Order Spec</strong></a> &amp; <a href="https://peps.python.org/pep-0440/" target="_blank" rel="noopener"><strong>Python PEP 440</strong></a>：修饰符归一化、未知后缀顺序与 Epoch/Pre/Post/Dev 全序语义。</li>
+          <li><a href="https://man7.org/linux/man-pages/man7/deb-version.7.html" target="_blank" rel="noopener"><strong><code>deb-version(7)</code></strong></a>、<a href="https://rpm-software-management.github.io/rpm/manual/dependencies.html#versioning" target="_blank" rel="noopener"><strong>RPM Versioning (<code>~</code>/<code>^</code>)</strong></a> &amp; <a href="https://wiki.alpinelinux.org/wiki/APKBUILD_Reference#pkgver" target="_blank" rel="noopener"><strong>Alpine APK Spec</strong></a>：Linux 三大包管理器底层排序算法与 <a href="https://docs.redhat.com/en/documentation/red_hat_security_data_api/" target="_blank" rel="noopener">Red Hat CSAF VEX</a> Backport 治理。</li>
+          <li><a href="https://github.com/google/osv-scalibr" target="_blank" rel="noopener"><strong>Google <code>osv-scalibr/semantic</code></strong></a> &amp; <a href="https://github.com/anchore/grype" target="_blank" rel="noopener"><strong>Anchore <code>grype/version</code></strong></a>（Apache-2.0）：纯 Go 嵌入式多生态比较器与测试数据集（<code>testdata</code>）。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>向你的架构导师追问（Follow-up）</h3>
+        <p>完成第 8 课后，Layer 3 的情报入库与精确匹配内核已经咬合！带着思考回到对话中继续追问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“针对 OSV <code>GIT</code> 类型区间（只给 Git Commit Hash 链而不给语义版本号的 C/C++ 或 Go 源码），引擎在没有完整 Git 仓库克隆的离线环境里怎么求值？”</li>
+          <li>“在编写纯 Go 的 <code>vers:</code> 区间化简器时，遇到 <code>!=1.2.3</code> 排除点或开闭边界交错，如何建模成离散/连续线段树？”</li>
+          <li>“我已掌握跨生态版本区间语义与 Backport 消误报机制，准备进入 <strong>Lesson 0009（离线/私有化漏洞库分发、增量更新与高并发匹配索引设计）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">← 上一课：Lesson 0007 · 多源漏洞情报汇聚</a>
+      <a href="../reference/layer3-intel-and-version-matrix.html">配套速查卡：Ref 04 · L3 情报、版本与合规矩阵</a>
+      <a href="../index.html">返回课程总览 · 下一课 Lesson 0009（离线库与高并发索引） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/version-range-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
