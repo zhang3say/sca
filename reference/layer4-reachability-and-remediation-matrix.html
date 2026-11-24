@@ -29,7 +29,7 @@
       <h1>Layer 4 可达性分析、智能降噪与安全修复速查矩阵</h1>
       <p class="subtitle">供 Layer 4 静态调用图前端、L3 漏洞符号映射管线、生态预计算拼接（Stitching）、四态置信度护栏与后续运行时/VEX/自动修复评审时随时翻阅（当前已覆盖 Lesson 0011，并将随 Chapter 04 推进扩展至 0012–0014）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与基准：</strong>CycloneDX 1.7 <code>evidence.callstack</code> · OSV <code>ecosystem_specific.imports[].symbols</code> · Go VTA · Reif et al. ISSTA 2019 <em>Judge</em> (<code>opalj/JCG</code>) · <code>cs-au-dk/jelly</code> · PyCG / JARVIS</span>
+        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV <code>ecosystem_specific</code></a> · <a href="https://pkg.go.dev/golang.org/x/tools/go/callgraph/vta" target="_blank" rel="noopener">Go VTA</a> · <a href="https://doi.org/10.1145/3293882.3330555" target="_blank" rel="noopener">Reif et al. ISSTA 2019 <em>Judge</em></a> (<a href="https://github.com/opalj/JCG" target="_blank" rel="noopener"><code>opalj/JCG</code></a>) · <a href="https://github.com/cs-au-dk/jelly" target="_blank" rel="noopener"><code>cs-au-dk/jelly</code></a> · <a href="https://arxiv.org/abs/2103.00587" target="_blank" rel="noopener">PyCG</a> / <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener">JARVIS</a></span>
         <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a>（后续将接入 0012–0014）</span>
       </div>
     </header>
@@ -123,33 +123,33 @@
           <tbody>
             <tr>
               <td><strong>Go 生态</strong></td>
-              <td><code>golang.org/x/tools</code> + <code>x/vuln</code>（<code>BSD-3-Clause</code>）；<code>vuln.go.dev</code>（<code>CC-BY-4.0</code>）</td>
+              <td><a href="https://pkg.go.dev/golang.org/x/tools/go/callgraph/vta" target="_blank" rel="noopener"><code>golang.org/x/tools</code></a> + <a href="https://go.dev/doc/security/vuln/" target="_blank" rel="noopener"><code>x/vuln</code></a>（<code>BSD-3-Clause</code>）；<code>vuln.go.dev</code>（<code>CC-BY-4.0</code>）</td>
               <td><code>go/packages</code> &rarr; <code>ssa</code> &rarr; VTA；强制将 <code>init()</code> 与异步协程 <code>go fn()</code> 设为入口根节点。</td>
               <td>直接嵌入 Go Core；复用 <code>vuln.go.dev</code> 符号数据须保留 <code>CC-BY-4.0</code> 署名。</td>
             </tr>
             <tr>
               <td><strong>Java / JVM</strong></td>
-              <td><code>OW2 ASM</code>（<code>BSD-3-Clause</code>） / <code>OPAL</code>（<code>BSD-2-Clause</code>） / <code>WALA</code>（<code>EPL-2.0</code>）</td>
+              <td><a href="https://asm.ow2.io/" target="_blank" rel="noopener"><code>OW2 ASM</code></a>（<code>BSD-3-Clause</code>） / <a href="https://github.com/opalj/opal" target="_blank" rel="noopener"><code>OPAL</code></a>（<code>BSD-2-Clause</code>） / <a href="https://github.com/wala/WALA" target="_blank" rel="noopener"><code>WALA</code></a>（<code>EPL-2.0</code>）</td>
               <td>基于编译 <code>.class</code>/<code>.jar</code> 分析；合成 Spring DI（<code>@PostMapping</code>）入口；L3 标注反序列化 Trigger API。</td>
-              <td><span class="badge badge-danger">严禁</span> 将 <strong><code>SootUp</code>（<code>LGPL-2.1</code>）</strong> 静态打进闭源 Fat-JAR，亦严禁内嵌 <strong>CodeQL</strong> 商用！</td>
+              <td><span class="badge badge-danger">严禁</span> 将 <a href="https://github.com/soot-oss/SootUp" target="_blank" rel="noopener"><strong><code>SootUp</code></strong></a>（<code>LGPL-2.1</code>）静态打进闭源 Fat-JAR，亦严禁内嵌 <a href="https://codeql.github.com/" target="_blank" rel="noopener"><strong>CodeQL</strong></a> 商用！</td>
             </tr>
             <tr>
               <td><strong>JavaScript / TypeScript</strong></td>
-              <td><code>TypeScript API</code>（<code>Apache-2.0</code>）+ <code>cs-au-dk/jelly</code>（<code>BSD-3-Clause</code>）</td>
+              <td><a href="https://github.com/microsoft/TypeScript" target="_blank" rel="noopener"><code>TypeScript API</code></a>（<code>Apache-2.0</code>）+ <a href="https://github.com/cs-au-dk/jelly" target="_blank" rel="noopener"><code>cs-au-dk/jelly</code></a>（<code>BSD-3-Clause</code>）</td>
               <td>采用 Indirection-Bounded（ECOOP 2024）穿透高阶回调；<strong>必开 Level 1 顶层导入副作用</strong>捕获恶意初始化。</td>
-              <td>独立 Node Worker 封装；Tree-sitter（MIT）不可用于跨文件 JS 调用解析。</td>
+              <td>独立 Node Worker 封装；<a href="https://github.com/tree-sitter/tree-sitter" target="_blank" rel="noopener">Tree-sitter</a>（<code>MIT</code>）不可用于跨文件 JS 调用解析。</td>
             </tr>
             <tr>
               <td><strong>Python</strong></td>
-              <td><code>PyCG</code>（<code>Apache-2.0</code>）+ JARVIS（ICSE 2023）按需流敏感类型图</td>
+              <td><a href="https://github.com/vitsalis/PyCG" target="_blank" rel="noopener"><code>PyCG</code></a>（<code>Apache-2.0</code>）+ <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener">JARVIS（<code>arXiv:2305.05949</code>）</a>按需流敏感类型图</td>
               <td>采用应用为中心按需构图防止全依赖树卡死；遇 <code>getattr()</code>/<code>eval</code>/C 扩展触发 <code>UNKNOWN_DYNAMIC</code> 降级。</td>
               <td>切勿因 PyCG ~69.9% 召回上限而把未连通路径直接标为安全豁免。</td>
             </tr>
             <tr>
               <td><strong>L3→L4 符号库 &amp; 预计算拼接</strong></td>
-              <td><code>Tree-sitter</code>（<code>MIT</code>）做 Patch-Diff + 自研 Summary 缓存</td>
+              <td><a href="https://github.com/tree-sitter/tree-sitter" target="_blank" rel="noopener"><code>Tree-sitter</code></a>（<code>MIT</code>）做 Patch-Diff + 自研 Summary 缓存</td>
               <td>Fix Commit AST 提符 + LLM 初筛 + 专家精校 Trigger API；云端按 <code>(purl, version)</code> 预计算库摘要，PR 在线仅拼接第一方。</td>
-              <td>避免在 PR 门禁重算全量 180+ 传递依赖；<code>osv-scanner --call-analysis=rust</code> 会执行 <code>build.rs</code> 须进 Tier 3 沙箱。</td>
+              <td>避免在 PR 门禁重算全量 180+ 传递依赖；<a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener"><code>osv-scanner</code></a> <code>--call-analysis=rust</code> 会执行 <code>build.rs</code> 须进 Tier 3 沙箱。</td>
             </tr>
           </tbody>
         </table>

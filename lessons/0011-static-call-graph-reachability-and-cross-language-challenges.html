@@ -96,7 +96,7 @@
           <tr>
             <td><strong>VTA（Variable Type Analysis）</strong><br/><small>Sundaresan et al., OOPSLA 2000 · Go <code>govulncheck</code></small></td>
             <td>在 SSA IR 上构建<strong>变量级类型传播图</strong>（Type Propagation Graph）：按赋值、传参、返回值边传播每个变量自身实际可能持有的类型集。</td>
-            <td><strong>商业甜点区（主力）</strong>：显著优于 RTA，免疫无关测试包实例污染；复杂度接近图边数线性，可扩展至十万行级服务。</td>
+            <td>显著优于 RTA，免疫无关测试包实例污染；复杂度接近图边数线性，可扩展至十万行级服务。</td>
             <td><span class="badge badge-ok">商业甜点区（主力）</span> Go 官方 <code>golang.org/x/tools/go/callgraph/vta</code> 已在生产验证，Java/强类型语言核心首选。</td>
           </tr>
           <tr>
@@ -114,16 +114,24 @@
         <strong>Go 生产级原型：基于 <code>golang.org/x/tools/go/callgraph/vta</code> 的 SSA 可达性与 CycloneDX Callstack 投影</strong>
         <span>纯 BSD-3-Clause 商业安全底座（对标 govulncheck 核心链路）</span>
       </div>
-      <pre><code><span class="tok-cmt">// 1. 加载完整类型化 AST 与 SSA 中间表示（Go 编译器前端保障跨包符号精确消歧）</span>
-pkgs, _ := packages.Load(&amp;packages.Config{Mode: packages.LoadAllSyntax}, <span class="tok-str">"./..."</span>)
+      <pre><code><span class="tok-cmt">// 1. 显式按需组合 packages.Need* 标志位（替代已废弃旧加载模式），加载类型化 AST 与依赖</span>
+cfg := &amp;packages.Config{
+    Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+        packages.NeedImports | packages.NeedDeps | packages.NeedTypes |
+        packages.NeedTypesSizes | packages.NeedSyntax | packages.NeedTypesInfo,
+}
+pkgs, err := packages.Load(cfg, <span class="tok-str">"./..."</span>)
+<span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> || packages.PrintErrors(pkgs) &gt; <span class="tok-num">0</span> {
+    <span class="tok-kw">return</span> markReachabilityUnknown(<span class="tok-str">"GO_LOAD_ERROR"</span>) <span class="tok-cmt">// 四态护栏：构建失败绝不谎报不可达</span>
+}
 prog, _ := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
 prog.Build()
 
-<span class="tok-cmt">// 2. 先用 CHA 构筑粗边界作为种子，再跑 VTA 逐变量传播类型集合剪除假虚调用边</span>
+<span class="tok-cmt">// 2. CHA 粗边作种子 + VTA 逐变量传播类型集（govulncheck 会先按入口过滤 CHA 子集以加速）</span>
 initialCG := cha.CallGraph(prog)
 vtaCG := vta.CallGraph(ssautil.AllFunctions(prog), initialCG)
 
-<span class="tok-cmt">// 3. 从 main()、init() 及已知 HTTP Entrypoint 出发 BFS，对照 OSV ecosystem_specific.imports[].symbols</span>
+<span class="tok-cmt">// 3. 从 main()、init() 及 HTTP Entrypoint 出发 BFS，对照 OSV ecosystem_specific.imports[].symbols</span>
 <span class="tok-kw">for</span> _, framePath := <span class="tok-kw">range</span> bfsToVulnSymbols(vtaCG, entrypoints, vulnSymbols) {
     <span class="tok-cmt">// 命中！写入 CycloneDX 1.7 /components/[]/evidence/callstack/frames[]</span>
     emitCycloneDXCallstack(framePath)
@@ -187,7 +195,7 @@ vtaCG := vta.CallGraph(ssautil.AllFunctions(prog), initialCG)
             <td><strong>Python</strong></td>
             <td>Python AST + 跨过程赋值流 / 按需类型图</td>
             <td>① 无静态类型标注的鸭子类型（Duck Typing）；② <code>@decorator</code> 语法糖包装；③ <code>getattr()</code> / <code>importlib</code> 动态派发；④ C 扩展（<code>.so</code> / NumPy）跨语言边界。</td>
-            <td>Salis 等 <a href="https://arxiv.org/abs/2103.00587" target="_blank" rel="noopener">ICSE 2021 <em>PyCG</em></a>（基准 ~99.2% 精确率 / ~69.9% 召回率）；Huang 等 <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener">ICSE 2023 <em>JARVIS</em></a>（按需流敏感类型图提速增准）。</td>
+            <td>Salis 等 <a href="https://arxiv.org/abs/2103.00587" target="_blank" rel="noopener">ICSE 2021 <em>PyCG</em></a>（基准 ~99.2% 精确率 / ~69.9% 召回率）；Huang 等 <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener">arXiv:2305.05949 <em>JARVIS</em></a>（2023/2024 预印本，按需流敏感类型图提速增准）。</td>
             <td>借鉴 <strong>JARVIS</strong>「应用为中心按需构图」避免全依赖树不动点卡死；<code>getattr</code>/<code>eval</code> 处硬触发 <code>POTENTIALLY_REACHABLE</code> 护栏移交运行时。</td>
           </tr>
         </tbody>
@@ -502,9 +510,9 @@ vtaCG := vta.CallGraph(ssautil.AllFunctions(prog), initialCG)
               "prompt": "为什么在商业 SCA 产品中不能只用单一的 Tree-sitter 语法树引擎来替代分语言的语义前端（如 Go SSA、Java 字节码分析或 Jelly/PyCG）做跨语言函数级可达性？",
               "options": [
                 "Tree-sitter 缺类型解析与跨文件符号绑定，遇接口派发、注解 DI 或别名导入极易断链漏报。",
-                "Tree-sitter 基于 GPL 强传染协议发布且仅支持 C 语言家族，商业闭源产品完全禁止集成它。",
+                "Tree-sitter 基于 GPL 强传染协议发布且仅限 C 语言族，商业闭源产品完全禁止集成它。",
                 "Tree-sitter 每次解析均强制执行全程序字节码编译，导致单文件延迟高达数分钟而无法服务门禁。",
-                "Tree-sitter 会自动把全部动态 getattr 反射直接判定为安全不可达，致使无法捕获正常调用边。"
+                "Tree-sitter 会把全部动态 getattr 反射直接判为安全不可达，致使无法捕获正常调用边。"
               ],
               "answerIndex": 0,
               "explanation": "Tree-sitter 本身采用宽松的 MIT 协议且极快，但它只输出单文件具体语法树（CST），不包含跨文件模块解析、多态类型推导或框架注解/字节码语义，因此最适合用来在云端 L3 解析 Fix Commit Patch-Diff 符号，绝不能替代各语言的深度调用图语义前端（A 正确）。"
@@ -513,9 +521,9 @@ vtaCG := vta.CallGraph(ssautil.AllFunctions(prog), initialCG)
               "prompt": "关于 L3 漏洞库与 L4 静态调用图衔接时的“反序列化 / 框架触发盲区”及开源分析底座的商业闭源合规边界，以下哪项决策最稳健？",
               "options": [
                 "直接将 LGPL-2.1 的 SootUp 与闭源核心静态打包交付，且 L3 只记录补丁修改的内部私有方法名。",
-                "内置 GitHub CodeQL 引擎为商业客户扫描私有仓库，并用默认二进制匹配直接覆盖静态函数断链告警。",
-                "让 L3 忽略漏洞触发点与公开 Trigger API 区别，把所有未连向私有方法的一律静默标为安全豁免。",
-                "L3 须标注公开 Trigger API 锚点，Java 选 BSD/EPL 底座并避开 SootUp 静态合包。"
+                "内置 GitHub CodeQL 引擎为商业客户扫描私有仓库，并用默认二进制匹配直接全盘覆盖静态函数断链告警。",
+                "让 L3 忽略漏洞触发点与公开 Trigger API 之间区别，把所有未连向私有方法的一律静默标为安全豁免。",
+                "L3 须标注公开 Trigger API 锚点，Java 选 BSD 底座并严禁将 SootUp 静态合包交付。"
               ],
               "answerIndex": 3,
               "explanation": "在反序列化或 JNDI 注入漏洞中，静态调用链往往在到达公开 Trigger API（如 ObjectMapper.readValue 或 logger.error）后通过多态反射跳跃触发，L3 符号库必须把 Trigger API 标为 Sink 锚点；同时商业闭源产品必须规避 GitHub CodeQL 的非商用条款与 SootUp (LGPL-2.1) 静态打进 Fat-JAR 的重链接风险，优选 BSD 协议的 ASM/OPAL 或隔离的 EPL-2.0 WALA（D 正确）。"
@@ -523,10 +531,10 @@ vtaCG := vta.CallGraph(ssautil.AllFunctions(prog), initialCG)
             {
               "prompt": "在企业 CI/PR 门禁中落地多语言函数级可达性时，面对数百个传递依赖包与 Python/JS 中的动态派发（如 getattr / 回调），哪项架构设计最能兼顾 SLA 与零致命漏报？",
               "options": [
-                "每次 PR 均重算全部传递依赖的 0-CFA 调用图，并将动态断链一律判为安全 UNREACHABLE。",
+                "每次 PR 均重算全部传递依赖组件的 0-CFA 调用图，并将动态断链一律判为安全 UNREACHABLE。",
                 "云端按预计算摘要在 PR 仅拼接第一方调用图，并将动态断链降级为 POTENTIALLY_REACHABLE。",
-                "完全跳过静态调用图与模块顶层导入副作用分析，全靠安全团队在 PR 阶段逐行手审全部传递依赖与函数调用栈。",
-                "强制要求所有语言仓库在每次 PR 阶段运行全量生产流量压测与动态探针录制，否则一律阻断所有代码合入并告警。"
+                "完全跳过静态调用图与模块顶层导入副作用分析，全靠安全团队在 PR 阶段逐行手审全部传递依赖源码与函数调用栈。",
+                "强制要求所有语言仓库在每次 PR 阶段运行全量生产流量压测与动态探针录制，否则一律阻断合入并触发门禁告警。"
               ],
               "answerIndex": 1,
               "explanation": "按 (purl, version) 在云端离线工厂预计算传递库「导出函数→内部 Sink」摘要，使 PR 在线 Worker 只需解析第一方代码并做图拼接（Stitching），把耗时压到 30s SLA 内；同时遵循 Soundiness 原则，在 getattr()/反射或模块顶层副作用处严禁谎报安全，必须降级为 POTENTIALLY_REACHABLE 并衔接运行时探针核验（B 正确）。"
@@ -545,7 +553,7 @@ vtaCG := vta.CallGraph(ssautil.AllFunctions(prog), initialCG)
           <li><a href="https://pkg.go.dev/golang.org/x/tools/go/callgraph/vta" target="_blank" rel="noopener"><strong>Go VTA (<code>x/tools/go/callgraph/vta</code>)</strong></a> &amp; <a href="https://go.dev/doc/security/vuln/" target="_blank" rel="noopener"><strong><code>govulncheck</code> 设计</strong></a>（<code>BSD-3-Clause</code>）：基于 SSA 的工业界标杆级 VTA 实现与 OSV <code>imports[].symbols</code> 消费规范。</li>
           <li><a href="https://doi.org/10.1145/3293882.3330555" target="_blank" rel="noopener"><strong>Reif et al. (ISSTA 2019, <em>Judge</em>)</strong></a>（<a href="https://github.com/opalj/JCG" target="_blank" rel="noopener"><code>opalj/JCG</code></a>）&amp; <a href="https://arxiv.org/abs/1806.05893" target="_blank" rel="noopener"><strong>Ponta et al. (ICSME 2018, Eclipse Steady)</strong></a>：Java 调用图 Unsoundness 分类学与代码级可达性奠基实证。</li>
           <li><a href="https://github.com/cs-au-dk/jelly" target="_blank" rel="noopener"><strong><code>cs-au-dk/jelly</code> (ISSTA 2021 / ECOOP 2024)</strong></a>（<code>BSD-3-Clause</code>）：面向 Node.js / TypeScript 高阶回调的模块化与 Indirection-Bounded 调用图实现。</li>
-          <li><a href="https://arxiv.org/abs/2103.00587" target="_blank" rel="noopener"><strong>PyCG (ICSE 2021)</strong></a> &amp; <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener"><strong>JARVIS (ICSE 2023)</strong></a>：Python 静态调用图基准与按需流敏感类型图架构范式。</li>
+          <li><a href="https://arxiv.org/abs/2103.00587" target="_blank" rel="noopener"><strong>PyCG (ICSE 2021)</strong></a> &amp; <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener"><strong>JARVIS (arXiv:2305.05949)</strong></a>：Python 静态调用图基准与按需流敏感类型图架构范式。</li>
         </ul>
       </div>
 

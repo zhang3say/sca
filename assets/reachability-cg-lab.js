@@ -14,6 +14,71 @@
       .replace(/"/g, "&quot;");
   }
 
+  function renderNodeHtml(n) {
+    return `
+      <div class="rcg-node ${n.cls}">
+        <div class="rcg-node-tag">${escapeHtml(n.tag)}</div>
+        <div class="rcg-node-name">${escapeHtml(n.name)}</div>
+        <div class="rcg-node-meta">${escapeHtml(n.meta)}</div>
+      </div>
+    `;
+  }
+
+  function renderEdgeHtml(e) {
+    return `
+      <div class="rcg-edge ${e.cls}">
+        <span>&rarr;</span>
+        <small>${escapeHtml(e.label)}</small>
+      </div>
+    `;
+  }
+
+  function renderTopologyHtml(res) {
+    if (res.branches && res.branches.length > 0) {
+      const trunkHtml = res.trunk
+        .map((item, idx) => {
+          const edge = res.trunkEdges && res.trunkEdges[idx] ? renderEdgeHtml(res.trunkEdges[idx]) : "";
+          return renderNodeHtml(item) + edge;
+        })
+        .join("");
+
+      const branchesHtml = res.branches
+        .map((br) => {
+          const steps = br.nodes
+            .map((n, i) => {
+              const e = br.edges[i] ? renderEdgeHtml(br.edges[i]) : "";
+              return e + renderNodeHtml(n);
+            })
+            .join("");
+          return `
+            <div class="rcg-branch-row">
+              <span class="rcg-branch-tag">${escapeHtml(br.label)}</span>
+              ${steps}
+            </div>
+          `;
+        })
+        .join("");
+
+      return `
+        <div class="rcg-fork-wrap">
+          <div class="rcg-trunk-group">${trunkHtml}</div>
+          <div class="rcg-branch-stack">${branchesHtml}</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="rcg-flow-row">
+        ${res.nodes
+          .map((n, i) => {
+            const edgeHtml = i < res.edges.length ? renderEdgeHtml(res.edges[i]) : "";
+            return renderNodeHtml(n) + edgeHtml;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
   function initReachabilityLab(container) {
     const dataEl = container.querySelector("script.reachability-cg-lab-data");
     let config = {};
@@ -63,8 +128,8 @@
         let verdictTone = "is-ok";
         let verdictBadge = "UNREACHABLE（精准消噪）";
         let verdictSummary = "";
-        let edge2Label = "Type Flow";
-        let edge2Cls = "is-pruned";
+        let vulnEdgeLabel = "VTA 剪枝";
+        let vulnEdgeCls = "is-pruned";
         let vulnNodeCls = "is-pruned";
         let reasoning = "";
 
@@ -74,8 +139,8 @@
           verdictBadge = "REACHABLE（误报 FP）";
           verdictSummary =
             "CHA 仅看方法签名与接口实现关系：只要 VulnXMLParser 实现了 Parser.Parse，哪怕全工程从未实例化它，也必连入调用图并误报。";
-          edge2Label = "签名匹配 (CHA)";
-          edge2Cls = "is-fp";
+          vulnEdgeLabel = "CHA 签名匹配 (FP)";
+          vulnEdgeCls = "is-fp";
           vulnNodeCls = "is-sink";
           reasoning =
             "CHA（Class Hierarchy Analysis）不追踪对象分配点（new / &T{}）。当多个结构体实现同一接口时，调用边呈扇形爆炸，产生大量不可执行假路径。";
@@ -86,8 +151,8 @@
             verdictBadge = "REACHABLE（误报 FP）";
             verdictSummary =
               "RTA 只维护“全程序已实例化类型全局集合”：测试/废弃函数里存在 &VulnXMLParser{}，RTA 就认为所有 Parser 接口变量都可能指向它！";
-            edge2Label = "全局实例化集合 (RTA)";
-            edge2Cls = "is-fp";
+            vulnEdgeLabel = "RTA 全局实例化污染 (FP)";
+            vulnEdgeCls = "is-fp";
             vulnNodeCls = "is-sink";
             reasoning =
               "RTA（Rapid Type Analysis）比 CHA 进一步要求类型被实例化，但不区分实例流向了哪个变量；在微服务或大仓库中极易被死代码或测试分支污染。";
@@ -97,63 +162,61 @@
             verdictBadge = "UNREACHABLE（RTA 暂消噪）";
             verdictSummary =
               "当前工程没有任何地方实例化 VulnXMLParser，RTA 得以剪掉该边；但一旦其他无关模块出现 new(VulnXMLParser)，RTA 立即退化误报。";
-            edge2Label = "全局未实例化 (剪枝)";
-            edge2Cls = "is-pruned";
+            vulnEdgeLabel = "全局未实例化 (剪枝)";
+            vulnEdgeCls = "is-pruned";
             vulnNodeCls = "is-pruned";
             reasoning =
               "RTA 缺乏过程间变量数据流追踪，结果极易受无关测试模块或相邻包初始化代码影响，稳定性不足以支撑企业级门禁。";
           }
         } else {
-          // VTA
           reachable = false;
           verdictTone = "is-ok";
           verdictBadge = "UNREACHABLE（VTA 精准消噪）";
           verdictSummary =
             "VTA 在 Go SSA 上构建变量级类型传播图，证明 handleWebhook(p Parser) 的参数变量 p 仅接收过 *SafeJSONParser，精准剪断至 VulnXMLParser 的虚调用边。";
-          edge2Label = "VTA 剪枝（仅流向 SafeJSON）";
-          edge2Cls = "is-pruned";
+          vulnEdgeLabel = "VTA 逐变量剪枝";
+          vulnEdgeCls = "is-pruned";
           vulnNodeCls = "is-pruned";
           reasoning =
             "这正是 Go 官方 govulncheck（golang.org/x/tools/go/callgraph/vta）的核心机制：逐变量传播类型集合，既防止全局污染又维持近线性扩展性能。";
         }
 
-        const nodes = [
-          { tag: "ENTRYPOINT", name: "cmd/api.main()", meta: "HTTP Server 启动入口", cls: "is-entry" },
-          { tag: "1ST-PARTY", name: "handleWebhook(p Parser)", meta: "传入具体实参 &SafeJSONParser{}", cls: "is-mid" },
-          { tag: "SAFE PATH", name: "SafeJSONParser.Parse()", meta: "唯一实际流经的变量具体类型", cls: "is-safe" },
-          {
-            tag: "CVE-202X SINK",
-            name: "VulnXMLParser.Parse()",
-            meta: unusedNew ? "虽在其他废弃模块被实例化，但未流入 handleWebhook" : "全工程未被任何变量路径触达",
-            cls: vulnNodeCls,
-          },
-        ];
-
         const jsonPreview = reachable
           ? {
-              analysis: {
-                state: "affected_fp_risk",
+              layer2IR: {
+                purl: "pkg:golang/github.com/acme/xmlparser@1.4.2",
                 reachabilityConfidence: "REACHABLE",
                 algorithm: algo,
+                note: "算法保守连边（实际受限于分析精度产生假阳性）",
               },
-              evidence: {
-                callstack: {
-                  frames: [
-                    { package: "cmd/api", function: "main" },
-                    { package: "internal/webhook", function: "handleWebhook" },
-                    { package: "github.com/acme/xmlparser", function: "VulnXMLParser.Parse" },
-                  ],
+              cyclonedx17Projection: {
+                analysis: {
+                  state: "in_triage",
+                },
+                evidence: {
+                  callstack: {
+                    frames: [
+                      { package: "cmd/api", module: "main.go", function: "main", line: 28 },
+                      { package: "internal/webhook", module: "handler.go", function: "handleWebhook", line: 64 },
+                      { package: "github.com/acme/xmlparser", module: "parser.go", function: "VulnXMLParser.Parse", line: 112 },
+                    ],
+                  },
                 },
               },
             }
           : {
-              bomRef: "pkg:golang/github.com/acme/xmlparser@1.4.2",
-              vexAnalysis: {
-                state: "not_affected",
-                justification: "code_not_reachable",
+              layer2IR: {
+                purl: "pkg:golang/github.com/acme/xmlparser@1.4.2",
                 reachabilityConfidence: "UNREACHABLE",
                 algorithm: algo,
-                prunedEdge: "handleWebhook -> VulnXMLParser.Parse",
+                prunedEdge: "handleWebhook(p) -> VulnXMLParser.Parse",
+              },
+              cyclonedx17Projection: {
+                analysis: {
+                  state: "not_affected",
+                  justification: "code_not_reachable",
+                  detail: "Verified unreachable by " + algo + " interface type-flow pruning.",
+                },
               },
             };
 
@@ -162,11 +225,31 @@
           verdictBadge,
           verdictSummary,
           reasoning,
-          nodes,
-          edges: [
-            { label: "直接调用", cls: "is-reachable" },
-            { label: "接口派发", cls: "is-pruned" },
-            { label: edge2Label, cls: edge2Cls },
+          trunk: [
+            { tag: "ENTRYPOINT", name: "cmd/api.main()", meta: "HTTP Server 启动入口", cls: "is-entry" },
+            { tag: "1ST-PARTY", name: "handleWebhook(p Parser)", meta: "实参仅传入 &SafeJSONParser{}", cls: "is-mid" },
+          ],
+          trunkEdges: [{ label: "直接调用", cls: "is-reachable" }],
+          branches: [
+            {
+              label: "分支 A · 真实分支",
+              edges: [{ label: "实参类型流", cls: "is-pruned" }],
+              nodes: [
+                { tag: "SAFE PATH", name: "SafeJSONParser.Parse()", meta: "唯一实际流经 handleWebhook 的具体实现", cls: "is-safe" },
+              ],
+            },
+            {
+              label: "分支 B · 漏洞目标",
+              edges: [{ label: vulnEdgeLabel, cls: vulnEdgeCls }],
+              nodes: [
+                {
+                  tag: "CVE-202X SINK",
+                  name: "VulnXMLParser.Parse()",
+                  meta: unusedNew ? "虽在其他废弃模块被实例化，但未流入 handleWebhook" : "全工程未被任何变量路径触达",
+                  cls: vulnNodeCls,
+                },
+              ],
+            },
           ],
           jsonPreview,
           controlsHtml: `
@@ -191,8 +274,8 @@
         const hasSpring = state.javaSpringEntry;
         const hasTrigger = state.javaL3TriggerApi;
 
-        let verdictTone = "is-ok";
-        let verdictBadge = "REACHABLE（真阳命中 · 证据链完整）";
+        let verdictTone = "is-bad";
+        let verdictBadge = "REACHABLE（Level 2 真阳命中 · P0 阻断）";
         let verdictSummary = "";
         let reasoning = "";
         let e1Cls = "is-reachable";
@@ -227,7 +310,7 @@
           verdictTone = "is-bad";
           verdictBadge = "UNREACHABLE（反序列化 Sink 映射断裂导致漏报 FN！）";
           verdictSummary =
-            "调用图虽到达 ObjectMapper.readValue()，但 L3 漏洞库只填了补丁修复的内部私有方法 Gadget.exec()；反射动态实例化无法静态连向该私有方法，导致危险反序列化被误判不可达！";
+            "调用图虽到达 ObjectMapper.readValue()，但 L3 漏洞库只填了补丁修复的内部私有方法 GadgetClass.invoke()；反射动态实例化无法静态连向该私有方法，导致危险反序列化被误判不可达！";
           reasoning =
             "对于反序列化/表达式注入/JNDI（如 Jackson、Log4Shell），漏洞在多态构造链或反射链内部触发。L3 符号映射管线必须把公开触发 API（Trigger API，如 readValue / logger.error）纳入 Sink 锚点。";
           e3Cls = "is-fn";
@@ -272,28 +355,50 @@
         const jsonPreview =
           hasSpring && hasTrigger
             ? {
-                bomRef: "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0",
-                reachabilityConfidence: "REACHABLE",
-                tier: "Level 2 (Function + Trigger API)",
-                evidence: {
-                  callstack: {
-                    frames: [
-                      { package: "com.acme.orders", module: "OrderController", function: "create" },
-                      {
-                        package: "com.fasterxml.jackson.databind",
-                        module: "ObjectMapper",
-                        function: "readValue",
-                        parameters: ["jsonPayload", "OrderDTO.class"],
-                      },
-                    ],
+                layer2IR: {
+                  purl: "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0",
+                  reachabilityConfidence: "REACHABLE",
+                  tier: "Level 2 (Function + Trigger API)",
+                },
+                cyclonedx17Projection: {
+                  analysis: {
+                    state: "exploitable",
+                  },
+                  evidence: {
+                    callstack: {
+                      frames: [
+                        {
+                          package: "com.acme.orders",
+                          module: "OrderController",
+                          function: "create",
+                          line: 45,
+                          fullFilename: "src/main/java/com/acme/orders/OrderController.java",
+                        },
+                        {
+                          package: "com.fasterxml.jackson.databind",
+                          module: "ObjectMapper",
+                          function: "readValue",
+                          parameters: ["jsonPayload", "OrderDTO.class"],
+                          line: 3580,
+                        },
+                      ],
+                    },
                   },
                 },
               }
             : {
-                bomRef: "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0",
-                dangerWarning: "FALSE_NEGATIVE_TRAP",
-                reportedStatus: "UNREACHABLE (误消警!)",
-                missingLink: !hasSpring ? "Spring @PostMapping Synthetic Entrypoint" : "L3 Trigger API Tag on readValue()",
+                layer2IR: {
+                  purl: "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0",
+                  dangerWarning: "FALSE_NEGATIVE_TRAP",
+                  missingLink: !hasSpring ? "Spring @PostMapping Synthetic Entrypoint" : "L3 Trigger API Tag on readValue()",
+                },
+                cyclonedx17Projection: {
+                  analysis: {
+                    state: "not_affected",
+                    justification: "code_not_reachable",
+                    warning: "错误消警风险：真实反序列化路径被静默放行！",
+                  },
+                },
               };
 
         return {
@@ -341,7 +446,7 @@
           verdictTone = "is-warn";
           verdictBadge = "POTENTIALLY_REACHABLE（Level 1 命中顶层导入；回调仍断链）";
           verdictSummary =
-            "Level 1 模块导入检测成功捕获 require('evil-init') 顶层副作用风险，但对 Express 中间件注册的 legacy-jwt.verify() 仍无法追出函数调用链。";
+            "Level 1 模块导入检测成功捕获 import 'evil-init' 顶层副作用风险，但对 Express 中间件注册的 legacy-jwt.verify() 仍无法追出函数调用链。";
           reasoning =
             "当高阶函数与事件回调未建模时，开启 Level 1 至少能防止带顶层初始化/恶意投毒载荷的包被错杀为不可达，同时将动态回调降级为 POTENTIALLY_REACHABLE。";
         } else {
@@ -354,44 +459,29 @@
             "Nielsen 等（ISSTA 2021）与 Chakraborty/Møller（ECOOP 2024）证明：限定间接层数（Indirection-Bounded）的流不敏感分析可以在可控毫秒级开销内穿透 Node.js 模块边界与异步回调。";
         }
 
-        const nodes = [
-          { tag: "ENTRY MODULE", name: "src/server.ts", meta: "Node.js 服务主入口", cls: "is-entry" },
-          {
-            tag: "SIDE-EFFECT (L1)",
-            name: "import 'evil-init'",
-            meta: hasSideEffect ? "Level 1 捕获：模块加载即执行顶层语句" : "未检测顶层副作用（盲区）",
-            cls: hasSideEffect ? "is-sink" : "is-blind",
-          },
-          {
-            tag: "HIGHER-ORDER",
-            name: "app.use(verifyMiddleware)",
-            meta: hasBounded ? "Indirection-Bounded 解析回调注册流" : "仅视为普通传参，回调实体断开",
-            cls: hasBounded ? "is-mid" : "is-blind",
-          },
-          {
-            tag: "CVE SINK (L2)",
-            name: "legacy-jwt.verify()",
-            meta: hasBounded ? "成功连通回调内部危险验签函数" : "因回调断链而未能连接",
-            cls: hasBounded ? "is-sink" : "is-pruned",
-          },
-        ];
-
         const jsonPreview = {
-          ecosystem: "npm",
-          reachabilityLevel: hasBounded ? "Level 2 (Function)" : hasSideEffect ? "Level 1 (Module Side-Effect)" : "Missed",
-          confidence: hasBounded ? "REACHABLE" : hasSideEffect ? "POTENTIALLY_REACHABLE" : "UNREACHABLE_FN",
-          topLevelImportSideEffects: hasSideEffect ? ["pkg:npm/evil-init@0.9.1 (index.js:1)"] : [],
-          evidence: hasBounded
-            ? {
-                callstack: {
-                  frames: [
-                    { package: "acme-api", module: "src/server.ts", function: "<top-level>" },
-                    { package: "acme-api", module: "src/auth.ts", function: "verifyMiddleware" },
-                    { package: "legacy-jwt", module: "verify.js", function: "verify" },
-                  ],
-                },
-              }
-            : undefined,
+          layer2IR: {
+            ecosystem: "npm",
+            reachabilityLevel: hasBounded ? "Level 2 (Function)" : hasSideEffect ? "Level 1 (Module Side-Effect)" : "Missed",
+            reachabilityConfidence: hasBounded ? "REACHABLE" : hasSideEffect ? "POTENTIALLY_REACHABLE" : "UNKNOWN",
+            topLevelImportSideEffects: hasSideEffect ? ["pkg:npm/evil-init@0.9.1 (index.js:1)"] : [],
+          },
+          cyclonedx17Projection: {
+            analysis: {
+              state: hasBounded ? "exploitable" : "in_triage",
+            },
+            evidence: hasBounded
+              ? {
+                  callstack: {
+                    frames: [
+                      { package: "acme-api", module: "src/server.ts", function: "<top-level>", line: 12 },
+                      { package: "acme-api", module: "src/auth.ts", function: "verifyMiddleware", line: 31 },
+                      { package: "legacy-jwt", module: "verify.js", function: "verify", line: 87 },
+                    ],
+                  },
+                }
+              : undefined,
+          },
         };
 
         return {
@@ -399,11 +489,44 @@
           verdictBadge,
           verdictSummary,
           reasoning,
-          nodes,
-          edges: [
-            { label: hasSideEffect ? "顶层执行" : "被忽略", cls: hasSideEffect ? "is-reachable" : "is-fn" },
-            { label: "回调注册", cls: hasBounded ? "is-reachable" : "is-fn" },
-            { label: hasBounded ? "Bounded Flow" : "回调断链", cls: hasBounded ? "is-reachable" : "is-fn" },
+          trunk: [
+            { tag: "ENTRY MODULE", name: "src/server.ts", meta: "Node.js 服务主入口", cls: "is-entry" },
+          ],
+          trunkEdges: [],
+          branches: [
+            {
+              label: "路径 A · Level 1",
+              edges: [{ label: hasSideEffect ? "模块导入副作用" : "被忽略 (FN)", cls: hasSideEffect ? "is-reachable" : "is-fn" }],
+              nodes: [
+                {
+                  tag: "SIDE-EFFECT (L1)",
+                  name: "import 'evil-init'",
+                  meta: hasSideEffect ? "Level 1 捕获：模块加载即执行顶层语句" : "未检测顶层副作用（盲区）",
+                  cls: hasSideEffect ? "is-sink" : "is-blind",
+                },
+              ],
+            },
+            {
+              label: "路径 B · Level 2",
+              edges: [
+                { label: "传入回调", cls: hasBounded ? "is-reachable" : "is-unknown" },
+                { label: hasBounded ? "Bounded Flow" : "回调断链 (FN)", cls: hasBounded ? "is-reachable" : "is-fn" },
+              ],
+              nodes: [
+                {
+                  tag: "HIGHER-ORDER",
+                  name: "app.use(verifyMiddleware)",
+                  meta: hasBounded ? "Indirection-Bounded 解析回调注册流" : "仅视为普通传参，回调实体断开",
+                  cls: hasBounded ? "is-mid" : "is-blind",
+                },
+                {
+                  tag: "CVE SINK (L2)",
+                  name: "legacy-jwt.verify()",
+                  meta: hasBounded ? "成功连通回调内部危险验签函数" : "因回调断链而未能连接",
+                  cls: hasBounded ? "is-sink" : "is-pruned",
+                },
+              ],
+            },
           ],
           jsonPreview,
           controlsHtml: `
@@ -465,18 +588,34 @@
         ],
         jsonPreview: guardOn
           ? {
-              bomRef: "pkg:pypi/pyyaml@5.3.1",
-              reachabilityConfidence: "POTENTIALLY_REACHABLE",
-              reasonCode: "UNKNOWN_DYNAMIC_DISPATCH",
-              dynamicSite: "views.py:42 (getattr)",
-              importedVulnerableModule: true,
-              nextAction: "Route to Lesson 0012 Runtime Probe / Manual Review",
+              layer2IR: {
+                purl: "pkg:pypi/pyyaml@5.3.1",
+                reachabilityConfidence: "POTENTIALLY_REACHABLE",
+                reasonCode: "UNKNOWN_DYNAMIC_DISPATCH",
+                dynamicSite: "views.py:42 (getattr)",
+                importedVulnerableModule: true,
+                nextAction: "Route to Lesson 0012 Runtime Probe",
+              },
+              cyclonedx17Projection: {
+                analysis: {
+                  state: "in_triage",
+                  detail: "Unresolved getattr() dispatch in module importing pyyaml; queued for runtime verification.",
+                },
+              },
             }
           : {
-              bomRef: "pkg:pypi/pyyaml@5.3.1",
-              reachabilityConfidence: "UNREACHABLE",
-              criticalBug: "SILENT_FALSE_NEGATIVE",
-              warning: "在存在未解 getattr() 反射的动态语言中强行输出 not_affected 将引发 P0 安全漏报！",
+              layer2IR: {
+                purl: "pkg:pypi/pyyaml@5.3.1",
+                reachabilityConfidence: "UNREACHABLE",
+                criticalBug: "SILENT_FALSE_NEGATIVE",
+              },
+              cyclonedx17Projection: {
+                analysis: {
+                  state: "not_affected",
+                  justification: "code_not_reachable",
+                  warning: "在存在未解 getattr() 反射的动态语言中强行输出 not_affected 将引发 P0 安全漏报！",
+                },
+              },
             },
         controlsHtml: `
           <label class="rcg-toggle-label">
@@ -493,24 +632,18 @@
       const hitRate = state.cacheHitRate / 100;
       const rawCves = state.rawCves;
 
+      // baseTruePosRate (~10% true reachable) + algorithm over-approximation FP overhead
+      const baseTruePosRate = 0.10;
       const algoSpec = {
-        CHA: { mult: 0.45, fpRate: 0.48, unknownRate: 0.16, ramMult: 0.55, note: "最快但大量接口虚边误报（降噪率偏低）" },
-        RTA: { mult: 0.72, fpRate: 0.31, unknownRate: 0.14, ramMult: 0.78, note: "受全局实例化集合污染，噪声仍偏高" },
-        VTA: { mult: 1.15, fpRate: 0.16, unknownRate: 0.12, ramMult: 1.0, note: "Go/Java 甜点区：精确消噪且扩展性优异" },
-        "0-CFA": { mult: 3.8, fpRate: 0.11, unknownRate: 0.10, ramMult: 2.6, note: "全程序指针分析在 PR 门禁极易超时爆内存" },
+        CHA: { mult: 0.45, flaggedRate: 0.48, unknownRate: 0.16, ramMult: 0.55, note: "最快但大量接口虚边误报（降噪率偏低）" },
+        RTA: { mult: 0.72, flaggedRate: 0.31, unknownRate: 0.14, ramMult: 0.78, note: "受全局实例化集合污染，噪声仍偏高" },
+        VTA: { mult: 1.15, flaggedRate: 0.16, unknownRate: 0.12, ramMult: 1.0, note: "Go/Java 甜点区：精确消噪且扩展性优异" },
+        "0-CFA": { mult: 3.8, flaggedRate: 0.11, unknownRate: 0.10, ramMult: 2.6, note: "全程序指针分析在 PR 门禁极易超时爆内存" },
       }[state.calcAlgo];
 
-      // Whole-program rebuild: must parse & analyze 1st-party + all transitive libs on every PR
-      const wholeSec = +(
-        (2.4 + kloc * 0.19 + pkgs * 0.46) *
-        algoSpec.mult
-      ).toFixed(1);
-      const wholeRamGb = +(
-        (0.55 + kloc * 0.008 + pkgs * 0.016) *
-        algoSpec.ramMult
-      ).toFixed(2);
+      const wholeSec = +((2.4 + kloc * 0.19 + pkgs * 0.46) * algoSpec.mult).toFixed(1);
+      const wholeRamGb = +((0.55 + kloc * 0.008 + pkgs * 0.016) * algoSpec.ramMult).toFixed(2);
 
-      // Pre-computed summary + stitching: 1st-party analysis + miss penalty + tiny summary stitch
       const missPkgs = pkgs * (1 - hitRate);
       const stitchSec = +(
         1.1 +
@@ -526,10 +659,12 @@
       ).toFixed(2);
 
       const speedup = (wholeSec / Math.max(stitchSec, 0.1)).toFixed(1);
-      const reachableCount = Math.max(1, Math.round(rawCves * algoSpec.fpRate));
+      const reachableCount = Math.max(1, Math.round(rawCves * algoSpec.flaggedRate));
+      const truePosApprox = Math.max(1, Math.min(reachableCount, Math.round(rawCves * baseTruePosRate)));
+      const algoFpApprox = Math.max(0, reachableCount - truePosApprox);
       const potentialCount = Math.max(1, Math.round(rawCves * algoSpec.unknownRate));
       const unreachableCount = Math.max(0, rawCves - reachableCount - potentialCount);
-      const suppressedPct = (((unreachableCount) / rawCves) * 100).toFixed(0);
+      const suppressedPct = ((unreachableCount / rawCves) * 100).toFixed(0);
 
       return {
         algoSpec,
@@ -539,6 +674,7 @@
         stitchRamGb,
         speedup,
         reachableCount,
+        algoFpApprox,
         potentialCount,
         unreachableCount,
         suppressedPct,
@@ -571,27 +707,7 @@
 
           <div class="rcg-graph-stage">
             <div class="vlab-section-label">调用路径与可达性剪枝拓扑（Entrypoint &rarr; Sink）</div>
-            <div class="rcg-flow-row">
-              ${res.nodes
-                .map((n, i) => {
-                  const edgeHtml =
-                    i < res.edges.length
-                      ? `<div class="rcg-edge ${res.edges[i].cls}">
-                           <span>&rarr;</span>
-                           <small>${escapeHtml(res.edges[i].label)}</small>
-                         </div>`
-                      : "";
-                  return `
-                    <div class="rcg-node ${n.cls}">
-                      <div class="rcg-node-tag">${escapeHtml(n.tag)}</div>
-                      <div class="rcg-node-name">${escapeHtml(n.name)}</div>
-                      <div class="rcg-node-meta">${escapeHtml(n.meta)}</div>
-                    </div>
-                    ${edgeHtml}
-                  `;
-                })
-                .join("")}
-            </div>
+            ${renderTopologyHtml(res)}
           </div>
 
           <div class="rcg-split-grid">
@@ -601,7 +717,7 @@
               <p><strong>Layer 4 架构提示：</strong>永远把「算法本身的类型追踪精度」与「工程侧框架入口 / L3 符号映射 / 未知动态降级护栏」拆开度量，缺一不可。</p>
             </div>
             <div class="rcg-card">
-              <h4>Layer 2 / CycloneDX 1.7 实时输出负载</h4>
+              <h4>Layer 2 IR &rarr; CycloneDX 1.7 实时输出负载</h4>
               <pre class="rcg-code-preview">${escapeHtml(JSON.stringify(res.jsonPreview, null, 2))}</pre>
             </div>
           </div>
@@ -609,7 +725,9 @@
       } else {
         const m = computeCalculatorMetrics();
         const maxChartSec = Math.max(60, m.wholeSec * 1.08, m.stitchSec * 1.2);
-        const slaPct = Math.min(96, (30 / maxChartSec) * 100).toFixed(1);
+        const rawSlaPct = Math.min(96, (30 / maxChartSec) * 100);
+        const slaPct = rawSlaPct.toFixed(1);
+        const badgeClampedPct = Math.max(10, Math.min(88, rawSlaPct)).toFixed(1);
         const wholePct = Math.min(100, (m.wholeSec / maxChartSec) * 100).toFixed(1);
         const stitchPct = Math.min(100, (m.stitchSec / maxChartSec) * 100).toFixed(1);
 
@@ -676,19 +794,22 @@
             <div class="vlab-kpi is-ok">
               <div class="vlab-kpi-label">静态可达性降噪率</div>
               <div class="vlab-kpi-num">${m.suppressedPct}%</div>
-              <div class="vlab-kpi-sub">从 ${state.rawCves} 条压至 ${m.reachableCount} 必修 + ${m.potentialCount} 待核</div>
+              <div class="vlab-kpi-sub">从 ${state.rawCves} 条压至 ${m.reachableCount} 告警 + ${m.potentialCount} 待核</div>
             </div>
           </div>
 
           <div class="rcg-bar-card">
-            <div class="vlab-section-label">CI / PR 门禁构建期延迟对比（黑色竖线 = 30s PR SLA 门限）</div>
+            <div class="vlab-section-label">CI / PR 门禁构建期延迟对比（标尺竖线 = 30s PR SLA 门限）</div>
+            <div class="rcg-sla-ruler">
+              <span class="rcg-sla-badge" style="left:${badgeClampedPct}%;">30s PR SLA</span>
+            </div>
             <div class="rcg-bar-row">
               <div class="rcg-bar-head">
                 <span>朴素方案：每次 PR 对第一方 + 全部传递依赖全量重算调用图</span>
                 <span style="font-family:var(--font-mono);">${m.wholeSec} s · ${m.wholeRamGb} GB RAM</span>
               </div>
               <div class="rcg-bar-track">
-                <div class="rcg-sla-marker" style="left:${slaPct}%;"><span>30s SLA</span></div>
+                <div class="rcg-sla-marker" style="left:${slaPct}%;"></div>
                 <div class="rcg-bar-fill ${m.wholeSec > 30 ? "is-slow" : "is-fast"}" style="width:${wholePct}%;"></div>
               </div>
             </div>
@@ -708,9 +829,9 @@
             <h4>四态可达性置信度分流漏斗（原始 ${state.rawCves} 条 L3 告警）</h4>
             <div class="rcg-funnel-row">
               <div class="vlab-diff-card" style="border-left:4px solid var(--danger);background:#fff9f9;">
-                <div class="vlab-diff-label">REACHABLE（阻断 P0）</div>
+                <div class="vlab-diff-label">REACHABLE（标记阻断）</div>
                 <div class="vlab-diff-val">${m.reachableCount} 条</div>
-                <div class="vlab-diff-sub">具备 Entrypoint &rarr; Sink 完整证据栈</div>
+                <div class="vlab-diff-sub">具备完整调用路径（含 ${state.calcAlgo} 算法估算误报约 ${m.algoFpApprox} 条）</div>
               </div>
               <div class="vlab-diff-card" style="border-left:4px solid var(--warn);background:#fffcf5;">
                 <div class="vlab-diff-label">POTENTIALLY_REACHABLE</div>
