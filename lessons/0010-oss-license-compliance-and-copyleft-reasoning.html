@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0010：开源许可证合规引擎与传染性兼容性推理</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009 · 离线分发与索引</a>
+        <a href="./0010-oss-license-compliance-and-copyleft-reasoning.html" class="active">Lesson 0010 · 许可证合规与传染推理</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0010</span>
+        <span class="sep">/</span>
+        <span>PHASE 1 · CH 03 收官课（统一底座完结）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>开源许可证合规引擎与传染性兼容性推理</h1>
+      <p class="subtitle">漏洞引擎防“被攻破”，许可证合规引擎防“被告违约与商业源码被迫开源”。如果只是拿包清单里的字符串硬匹配 <code>GPL</code> 黑名单，商业 SCA 会在 <code>MIT OR GPL-2.0-only</code> 上制造海量误报，同时在 <code>Apache-2.0 AND GPL-2.0-only</code> 冲突或 Go 静态链接 <code>LGPL-3.0</code> 上彻底失明。本课为 Phase 1 统一底座收官：打通 <strong>SPDX 语法树（AST）求值、三维上下文传染性推理、商用合规引擎整合与自动化 Notice 交付闭环</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握 Declared / Observed / Concluded 三层真值、SPDX 运算符优先级 AST、3D 传染性矩阵、OSADL/FSF 双向兼容判定与 FOSSology 红线隔离</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0004-oss-extractors-architecture-and-orchestration.html">Lesson 0004</a> · <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">Phase 1 收官锚点（对齐你的 Mission）</div>
+      <p>在 <a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001</a> 到 <a href="./0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a>，我们已经拍板了 L1 多形态采集、L2 统一 IR 图谱与 L3 漏洞情报双模索引。但企业采购现代化商业 SCA 时，<strong>法务开源合规与研发漏洞治理天然共用同一份 L2 依赖图（Component + Scope + Evidence）</strong>。今天把许可证合规引擎收口到统一底座上，Phase 1 的 10 课地基就彻底封顶——下阶段即可从容生长 Phase 2 的可达性、恶意包与 AI-BOM 高价值壁垒。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>三层真值模型与 SPDX 表达式语法树（AST）</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 Declared vs Observed vs Concluded：为什么不能只信清单字符串？</h3>
+      <p>第一代扫描器常见一个致命天真假设：直接从 <code>package.json</code>、<code>pom.xml</code> 或 <code>Cargo.toml</code> 读出 <code>license</code> 字段就敢给出“合规/高危”结论。现实工程里，上游包元数据经常出现三类失真：<strong>① 写非标文本</strong>（如 <code>"See LICENSE"</code> 或 <code>"BSD"</code> 导致机器报 <code>NOASSERTION</code>）；<strong>② 夹带源码未报</strong>（清单宣称 <code>MIT</code>，但源码深处抄入一个 <code>GPL-2.0-only</code> C 文件）；<strong>③ 漏掉归属附件</strong>（只标 <code>Apache-2.0</code> 却未收集包内 <code>META-INF/NOTICE.txt</code>）。</p>
+      <p>因此，我们的 Layer 2 IR 与对外交换规范（<a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>acknowledgement</code> 字段与 <a href="https://spdx.github.io/spdx-spec/v3.0.1/" target="_blank" rel="noopener">SPDX 3.0.1</a> <code>SimpleLicensing</code> / <code>ExpandedLicensing</code>）必须严格切分三层许可证真值：</p>
+      <ul>
+        <li><strong>Declared（声明态）：</strong>组件作者在包管理器清单或根 <code>LICENSE</code> 中主动声明的许可。CycloneDX 1.7 中以 <code>acknowledgement: "declared"</code> 表达，只能作“快速初筛证据”，不可直接当作最终法律定性。</li>
+        <li><strong>Observed / Discovered（实测证据态）：</strong>由源码/制品文件扫描器（如 <code>google/licensecheck</code> 或 <code>ScanCode-Toolkit</code>）逐文件探测到的许可证头、版权行与 <code>NOTICE</code> 原文，写入 <code>evidence.licenses</code> 与 <code>citations</code>。</li>
+        <li><strong>Concluded（裁定真值态）：</strong>综合 <code>Declared</code>、<code>Observed</code>、社区校对库（如 ClearlyDefined）及法务手工修订（Curation）后收敛出的唯一有效 SPDX 表达式（<code>acknowledgement: "concluded"</code>），供下游策略引擎与 Notice 生成器消费。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">CycloneDX 1.7 Schema 写法防踩坑</span>
+        在 CycloneDX 1.7 JSON 中，<code>expression</code> 是 <code>licenses[]</code> 元素的直接字段，<strong>不能嵌套在 <code>license</code> 子对象里面</strong>！即单个 ID 写为 <code>{"license": {"id": "Apache-2.0", "acknowledgement": "declared"}}</code>，而复合表达式必须写为 <code>{"expression": "MIT OR Apache-2.0", "acknowledgement": "concluded"}</code>。
+      </aside>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.2 SPDX v3.0.1 Annex B 运算符优先级：为什么“子串匹配”必死？</h3>
+      <p>假设一个核心依赖声明了 <code>LGPL-2.1-only OR BSD-3-Clause AND MIT</code>。如果用朴素的“正则切词 / 包含 <code>LGPL</code> 即报警”方案，或者按从左到右结合去猜语义，结果全错！按照 <a href="https://spdx.github.io/spdx-spec/v3.0.1/annexes/spdx-license-expressions/" target="_blank" rel="noopener">SPDX 规范 v3.0.1 Annex B</a> 的正式 ABNF 文法，表达式必须严格遵循四级运算符绑定优先级（从最紧到最松）：</p>
+      <ol>
+        <li><strong><code>+</code>（or-later 后缀，最高优先级）：</strong>紧贴单个许可证 ID 右侧（如历史写法 <code>GPL-2.0+</code>，SPDX 3.0 推荐归一化为 <code>GPL-2.0-or-later</code>）。</li>
+        <li><strong><code>WITH</code>（例外修饰符，仅次于 <code>+</code>）：</strong>只能原子绑定单个许可证与一个合法 Exception ID（如 <code>GPL-2.0-only WITH Classpath-exception-2.0</code>），<strong>绝不允许跨括号修饰复合表达式</strong>。</li>
+        <li><strong><code>AND</code>（合取，高于 <code>OR</code>）：</strong>同时约束。上例右侧 <code>BSD-3-Clause AND MIT</code> 先结合为一体！</li>
+        <li><strong><code>OR</code>（析取，最低优先级）：</strong>多选一双/多许可。上例完整 AST 实际等价于 <code>LGPL-2.1-only OR (BSD-3-Clause AND MIT)</code>——商业闭源产品只需在策略节点自动选定右支 <code>BSD-3-Clause AND MIT</code>，即可完全合法放行！</li>
+      </ol>
+      <aside class="sidenote">
+        <span class="sidenote-title">SPDX 语法大小写与自定义引用</span>
+        SPDX Annex B 强制要求布尔运算符 <code>AND</code>、<code>OR</code>、<code>WITH</code> <strong>必须全大写</strong>（小写 <code>and</code> / <code>or</code> 属于语法不合规）；未收录进官方列表的专有或非标条款必须采用 <code>LicenseRef-&lt;id&gt;</code>（或带跨文档前缀 <code>DocumentRef-&lt;doc&gt;:LicenseRef-&lt;id&gt;</code>）声明，引擎遇到 <code>LicenseRef-*</code> 时默认路由至法务规则映射表或人工复核。
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心 AST 合规求值骨架：<code>OR</code> 择优剪枝 vs <code>AND</code> 义务合并与双向冲突校验</strong>
+        <span>纯 Go 嵌入式引擎（可复用 github/go-spdx 解析 AST），零子串误报</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> EvalContext <span class="tok-kw">struct</span> {
+    Distribution <span class="tok-type">string</span> <span class="tok-cmt">// "SAAS_ONLY" | "ON_PREM_BINARY" | "OSS_APACHE2" | "OSS_GPL2"</span>
+    Linking      <span class="tok-type">string</span> <span class="tok-cmt">// "STATIC" | "DYNAMIC" | "IPC_PROCESS" | "MODIFIED_SRC"</span>
+    Scope        <span class="tok-type">string</span> <span class="tok-cmt">// "RUNTIME" | "DEV_TEST" (源自 Lesson 0002 IR Edge Scope)</span>
+}
+
+<span class="tok-kw">func</span> EvalLicenseAST(node ExprNode, ctx EvalContext) PolicyVerdict {
+    <span class="tok-kw">switch</span> n := node.(<span class="tok-kw">type</span>) {
+    <span class="tok-kw">case</span> *OrNode:
+        <span class="tok-cmt">// OR 节点：分别求值左右子树，自动选举风险与传染代价更低的分支，剪枝另一支！</span>
+        left := EvalLicenseAST(n.Left, ctx)
+        right := EvalLicenseAST(n.Right, ctx)
+        <span class="tok-kw">return</span> pickLowerRiskBranch(left, right)
+
+    <span class="tok-kw">case</span> *AndNode:
+        <span class="tok-cmt">// AND 节点：合并两侧全部履约义务，并执行 OSADL/FSF 双向互斥冲突检查</span>
+        left := EvalLicenseAST(n.Left, ctx)
+        right := EvalLicenseAST(n.Right, ctx)
+        merged := mergeVerdicts(left, right)
+        <span class="tok-kw">if</span> conflict := checkPairwiseIncompatible(left.Leaves, right.Leaves, ctx); conflict != <span class="tok-str">""</span> {
+            merged.Decision = DecisionBlock
+            merged.Reasons = append(merged.Reasons, conflict)
+        }
+        <span class="tok-kw">return</span> merged
+
+    <span class="tok-kw">case</span> *WithNode:
+        <span class="tok-cmt">// WITH 例外（如 GPL-2.0-only WITH Classpath-exception-2.0）仅在未改动原库自身时免除链接传染</span>
+        <span class="tok-kw">return</span> evalLeafWithException(n.LicenseID, n.ExceptionID, ctx)
+
+    <span class="tok-kw">default</span>:
+        <span class="tok-kw">return</span> evalLeafWithException(n.(*LeafNode).LicenseID, <span class="tok-str">""</span>, ctx)
+    }
+}</code></pre>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>三维上下文传染性推理矩阵与协议双向兼容性（OSADL / FSF）</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 传染性不是“许可证的静态标签”，而是三维上下文函数</h3>
+      <p>同样一个 <code>GPL-3.0-only</code> 或 <code>LGPL-3.0-only</code> 组件，在不同架构部署与依赖位置下，法律后果天差地别。现代化合规引擎绝不能按许可证单表一刀切，必须基于<strong>「分发形态（Distribution）× 链接/修改方式（Linking）× 依赖作用域（Scope）」</strong>三维矩阵做上下文求值：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">Go / Rust / Webpack 隐形暗坑：静态链接 LGPL</span>
+        许多研发团队记住“LGPL 属于弱传染，商业闭源可用”就盲目放行了，却忽略了 <strong>LGPLv2.1 §6 与 LGPLv3 §4(d)</strong> 的核心前提——允许用户自主替换修改后的 LGPL 库！C/Java 动态加载 <code>.so</code> / <code>.jar</code> 没问题，但 <strong>Go 单文件二进制、Rust 静态编译或前端 Webpack 单包打平</strong> 时用户无法替换该库，此时若不改用动态链接或向客户交付闭源主程序的<strong>可重链接目标文件（Object Files）</strong>，同样构成严重违约！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:18%" />
+          <col style="width:18%" />
+          <col style="width:18%" />
+          <col style="width:14%" />
+          <col style="width:14%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>许可风险分级与典型 ID</th>
+            <th>纯云端 SaaS<br/><small>（不对外分发制品）</small></th>
+            <th>商业分发 · 动态链接<br/><small>（.so / .dll / .jar）</small></th>
+            <th>商业分发 · 静态打包<br/><small>（Go / Rust / Fat-JAR）</small></th>
+            <th>IPC 独立进程<br/><small>（CLI / HTTP 调用）</small></th>
+            <th><code>dev / test</code><br/><small>（仅构建测试期）</small></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Tier 1 · 宽松型</strong><br/><code>MIT</code> / <code>BSD-*</code> / <code>Apache-2.0</code> / <code>ISC</code></td>
+            <td><span class="badge badge-ok">PASS</span><br/>内部台账归档</td>
+            <td><span class="badge badge-ok">PASS</span><br/>保留版权与 <code>NOTICE</code></td>
+            <td><span class="badge badge-ok">PASS</span><br/>保留版权与 <code>NOTICE</code></td>
+            <td><span class="badge badge-ok">PASS</span><br/>保留基础声明</td>
+            <td><span class="badge badge-ok">PASS</span><br/>免随制品交付</td>
+          </tr>
+          <tr>
+            <td><strong>Tier 2 · 文件级弱传染</strong><br/><code>MPL-2.0</code> / <code>EPL-2.0</code> / <code>CDDL-1.0</code></td>
+            <td><span class="badge badge-ok">PASS</span><br/>未分发免源码交付</td>
+            <td><span class="badge badge-ok">PASS</span><br/>改原文件须单独开源</td>
+            <td><span class="badge badge-ok">PASS</span><br/>允许与闭源混合编译</td>
+            <td><span class="badge badge-ok">PASS</span><br/>按文件独立隔离</td>
+            <td><span class="badge badge-ok">PASS</span><br/>免随制品交付</td>
+          </tr>
+          <tr>
+            <td><strong>Tier 3 · 库级弱传染</strong><br/><code>LGPL-2.1</code> / <code>LGPL-3.0</code></td>
+            <td><span class="badge badge-ok">PASS</span><br/>纯服务端运行不触发</td>
+            <td><span class="badge badge-warn">WARN · 附义务</span><br/>保替换权 + 源码要约</td>
+            <td><span class="badge badge-danger">BLOCK（默认拦截）</span><br/>须供重链接 <code>.o</code> 目标文件</td>
+            <td><span class="badge badge-ok">PASS</span><br/>未链接该库二进制</td>
+            <td><span class="badge badge-ok">PASS</span><br/>不随成品交付</td>
+          </tr>
+          <tr>
+            <td><strong>Tier 4 · 强传染型</strong><br/><code>GPL-2.0-only</code> / <code>GPL-3.0-only</code></td>
+            <td><span class="badge badge-ok">PASS（注意警戒）</span><br/>切私有化即刻变红</td>
+            <td><span class="badge badge-danger">BLOCK</span><br/>（带 <code>WITH Classpath</code> 例外可过）</td>
+            <td><span class="badge badge-danger">BLOCK</span><br/>（带 <code>WITH</code> 且未改库才可过）</td>
+            <td><span class="badge badge-warn">WARN · 审边界</span><br/>确认 Aggregate 无专有耦合</td>
+            <td><span class="badge badge-ok">PASS</span><br/>构建机本地运行</td>
+          </tr>
+          <tr>
+            <td><strong>Tier 5 · 网络传染 &amp; 非 OSI</strong><br/><code>AGPL-3.0</code> / <code>SSPL-1.0</code> / <code>BSL-1.1</code> / <code>Elastic-2.0</code> / <code>CC-BY-NC-*</code></td>
+            <td><span class="badge badge-danger">BLOCK</span><br/>AGPL §13 / SSPL 对网络交互照样全开源；NC 禁商用</td>
+            <td><span class="badge badge-danger">BLOCK</span><br/>全系统源码传染或禁止竞品商业化</td>
+            <td><span class="badge badge-danger">BLOCK</span><br/>全系统源码传染或禁止竞品商业化</td>
+            <td><span class="badge badge-warn">WARN / BLOCK</span><br/>即使独立进程，SaaS 暴露侧仍受 §13 约束</td>
+            <td><span class="badge badge-warn">WARN · 审条款</span><br/>NC 类条款可能禁止内部商业研发使用</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.2 不可忽视的「协议间双向互斥（AND Compatibility）」检查</h3>
+      <p>许多工程团队甚至商业产品只检查“单个许可证会不会传染我的闭源主程序”，却漏掉了 <strong>同一款产品或开源组件内部依赖之间在 <code>AND</code> 组合时的互相冲突（License Incompatibility）</strong>——这是 <a href="https://www.gnu.org/licenses/license-list.html" target="_blank" rel="noopener">FSF 官方兼容性准则</a> 与 <a href="https://www.osadl.org/?id=2888" target="_blank" rel="noopener">OSADL 开源许可证兼容性矩阵</a> 重点解决的难题：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:26%" />
+          <col style="width:16%" />
+          <col style="width:32%" />
+          <col style="width:26%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>组合对 / 方向（Inbound + Outbound）</th>
+            <th>兼容性裁决</th>
+            <th>底层法律与条款根因（FSF / OSADL）</th>
+            <th>工程引擎解决与放行策略</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Apache-2.0</code> + <code>GPL-2.0-only</code></td>
+            <td><span class="badge badge-danger">双向互斥（BLOCK）</span></td>
+            <td>Apache-2.0 的专利终止与赔偿条款构成了 GPLv2 §6 所禁止的“额外限制（Further Restriction）”。</td>
+            <td>检查目标是否写为 <code>GPL-2.0-or-later</code>（可升级至 GPLv3）；否则必须剔除或替换其中一方。</td>
+          </tr>
+          <tr>
+            <td><code>Apache-2.0</code> &rarr; <code>GPL-3.0-only</code></td>
+            <td><span class="badge badge-ok">单向兼容</span><br/><small>整体变为 GPL-3.0</small></td>
+            <td>GPLv3 §7 显式允许加入与 Apache-2.0 一致的专利报复及归属补充条款；但反过来 <code>GPL-3.0</code> 不能合入 <code>Apache-2.0</code> 作品。</td>
+            <td>兼容性推理图必须是有向图（Directed Graph）：<code>compat(Inbound, Outbound)</code> 不可随意交换方向！</td>
+          </tr>
+          <tr>
+            <td><code>GPL-2.0-only</code> + <code>GPL-3.0-only</code></td>
+            <td><span class="badge badge-danger">双向互斥（BLOCK）</span></td>
+            <td>GPLv2 与 GPLv3 在反 Tivoization 与专利条款上无法互认，两份都写死 <code>-only</code> 时无法找到交集许可。</td>
+            <td>只有当其中一方为 <code>GPL-2.0-or-later</code> 时，才可向上对齐收敛为 <code>GPL-3.0</code>。</td>
+          </tr>
+          <tr>
+            <td><code>GPL-3.0-only</code> + <code>AGPL-3.0-only</code></td>
+            <td><span class="badge badge-warn">§13 桥接升格</span><br/><small>整体升为 AGPL-3.0</small></td>
+            <td>常规条款本不互通，但 <strong>GPLv3 / AGPLv3 第 13 条</strong>专设交叉互操作豁免，允许组合且要求整套联合作品遵循 AGPL 网络源码义务。</td>
+            <td>引擎须建模“传染升格传播（Escalation）”：即使你的项目原本只标 <code>GPL-3.0</code>，只要链接了 <code>AGPL-3.0</code>，对外 SaaS 立刻触发全套 §13 披露！</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>商用合规开源底座选型、Curation 纠偏与自动化 Notice 交付闭环</h2>
+
+    <div class="prose-col">
+      <h3>3.1 商用闭源产品在许可赛道上的「可借力底座 vs 致命红线」</h3>
+      <p>正如 <a href="../MISSION.md">MISSION.md</a> 规定的商业闭源交付红线，我们在挑选许可证扫描工具与知识库数据时，必须同时核对<strong>“程序代码许可”与“规则/数据集许可”</strong>两条线——尤其要警惕 Linux 基金会名声很大但本身是 <code>GPL-2.0-only</code> 的老牌工具：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:22%" />
+          <col style="width:16%" />
+          <col style="width:16%" />
+          <col style="width:24%" />
+          <col style="width:22%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源底座 / 知识库</th>
+            <th>程序代码许可</th>
+            <th>规则 / 数据集许可</th>
+            <th>核心能力定位</th>
+            <th>自研平台整合红线与边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/github/go-spdx" target="_blank" rel="noopener"><code>github/go-spdx</code></a></strong> &amp; <strong><a href="https://github.com/spdx/tools-golang" target="_blank" rel="noopener"><code>spdx/tools-golang</code></a></strong></td>
+            <td><span class="badge badge-ok">MIT</span> / <span class="badge badge-ok">Apache-2.0</span></td>
+            <td>SPDX List (<code>CC0-1.0</code>)</td>
+            <td>Go 原生 SPDX 表达式解析、官方列表校验与 SPDX  文档序列化。</td>
+            <td><strong>库级嵌入 Go Core</strong>（Tier 1 毫秒级求值内核）。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/google/licensecheck" target="_blank" rel="noopener"><code>google/licensecheck</code></a></strong></td>
+            <td><span class="badge badge-ok">BSD-3-Clause</span></td>
+            <td>内置 LRE 规则（<code>BSD-3-Clause</code>）</td>
+            <td>纯 Go 高性能许可证文本分类器，识别 <code>LICENSE</code> 文件覆盖率与置信度。</td>
+            <td><strong>库级嵌入 Go Core</strong>，填补本地 MCP/CLI 离线识读 <code>LICENSE</code> 原文的空白。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://clearlydefined.io/" target="_blank" rel="noopener">ClearlyDefined</a></strong> &amp; <strong><a href="https://www.osadl.org/?id=2888" target="_blank" rel="noopener">OSADL Matrix</a></strong></td>
+            <td><span class="badge badge-ok">MIT</span></td>
+            <td>ClearlyDefined: <code>CC0-1.0</code><br/>OSADL: <code>CC-BY-4.0</code></td>
+            <td>ClearlyDefined 提供全球社区人工校对后的跨生态 Declared/Discovered 坐标真值；OSADL 提供官方机器可读兼容性矩阵。</td>
+            <td><strong>L3 知识库同步入库：</strong>ClearlyDefined 零负担商用；OSADL 矩阵数据须在产品 <code>NOTICE</code> 保留署名。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/aboutcode-org/scancode-toolkit" target="_blank" rel="noopener">ScanCode-Toolkit</a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>LicenseDB: <code>CC-BY-4.0</code></td>
+            <td>业界最高精度的逐文件版权、作者与细粒度许可证片段识别（Python 工具链）。</td>
+            <td><strong>Tier 2 异步容器封装：</strong>仅用于深度合规任务或纠正 Declared/Observed 漂移；须对 LicenseDB 履行 <code>CC-BY-4.0</code> 署名。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener">OSS Review Toolkit (ORT)</a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>Apache-2.0</td>
+            <td>提供极成熟的 <code>Evaluator</code> 策略 DSL、<code>curations.yml</code> 人工覆写架构与 <code>PlainTextTemplate</code> Notice 生成模板。</td>
+            <td><strong>架构设计蓝本 + JVM 深度封装：</strong>直接借鉴其 Curation 数据模型与 Notice 摘要聚合规范。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://www.fossology.org/" target="_blank" rel="noopener">FOSSology</a></strong></td>
+            <td><span class="badge badge-danger">GPL-2.0-only</span></td>
+            <td>GPL-2.0-only</td>
+            <td>Linux 基金会老牌开源许可证工作台（Nomos / Monk / Ojo）。</td>
+            <td><span class="badge badge-danger">商业闭源绝对红线</span> 严禁将源码或引擎链接嵌入闭源商业主产品。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 3/4 开源许可证双层识别、三维 AST 推理与合规 Notice 自动化交付流水线</strong>
+        <span>将“秒级左移拦截”与“深度文件级逐行扫描”解耦，最终收口为可审计的 CycloneDX 1.7 <code>concluded</code> 与 <code>THIRD-PARTY-NOTICES</code></span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Tier 1 · Go Core 毫秒级快路径（左移门禁）</span>
+              <span class="badge badge-ok">MCP · Hook · PR Diff</span>
+            </div>
+            <ul>
+              <li>提取 Manifest <code>declared</code>，调 <code>github/go-spdx</code> 构筑 AST。</li>
+              <li>若遇 <code>NOASSERTION</code> 或模糊字符串，优先查本地同步的 <strong>ClearlyDefined (CC0)</strong> 校准库 + <code>google/licensecheck</code> 扫描根目录 <code>LICENSE</code> / <code>NOTICE</code>。</li>
+              <li>亚秒级拦下明确进入红线的 <code>AGPL / GPL / SSPL</code>。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Tier 2 · 深度文件审计与人工 Curation 纠偏</span>
+              <span class="badge badge-warn">CI Release / 商业发版前</span>
+            </div>
+            <ul>
+              <li>异步拉起隔离容器跑 <strong>ScanCode-Toolkit</strong>，扫描隐蔽源文件头（抓“声明 MIT 实则夹带 GPL”的漂移）与全部版权声明。</li>
+              <li>叠加企业级 <strong>Curation 表（借鉴 ORT <code>curations.yml</code>）</strong>：记录法务复核人与依据，优先级永远高于自动扫描结果，收敛成唯一 <code>concluded</code>。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 统一收敛至 Layer 2 IR（<code>concluded_spdx_expr</code> + <code>evidence.copyrights</code> + <code>upstream_notice_blobs</code>） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-fusion">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Stage 2 · 三维上下文策略推理引擎（AST + OSADL Matrix + IR Scope）</span>
+            <span class="orch-stage-kicker">Distribution &times; Linking &times; Scope</span>
+          </div>
+          <p class="orch-stage-desc">
+            先按 IR <code>Scope</code> 剪枝 <code>dev/test</code> 非分发依赖；再在 <code>OR</code> 节点选定合规成本最低的分支（记录 <code>elected_branch</code>）；最后在 <code>AND</code> 子树与项目出站协议之间执行 FSF/OSADL 双向兼容性检查，输出精准 <code>PASS / WARN / BLOCK</code> 门禁结果。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 发版交付自动化闭环（取代法务手工拼装 Word / TXT） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Stage 3 · 合规交付物自动生成（THIRD-PARTY-NOTICES + Written Offer + CycloneDX 1.7）</span>
+            <span class="orch-stage-kicker">精确裁剪 · 原样透传 · 文本去重</span>
+          </div>
+          <p class="orch-stage-desc">
+            参照 ORT <code>PlainTextTemplate</code> 思路自动输出可嵌入安装包的 <code>THIRD-PARTY-NOTICES.txt</code>：<strong>① 剔除 <code>dev/test</code> 依赖</strong>；<strong>② 按 <code>elected_branch</code> 裁剪 <code>OR</code> 未选用分支</strong>；<strong>③ 原样透传所有 <code>Apache-2.0</code> 上游 <code>NOTICE</code> 内容</strong>；<strong>④ 按许可证模板汇总去重</strong>（如 200 个 MIT 包只附一份 MIT 正文 + 合并版权列表），同时为 <code>LGPL/MPL</code> 组件自动生成源码获取链接与 Written Offer 模板。
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中输入或点选真实 SPDX 表达式并调节「分发形态 × 链接方式 × Scope」，实时观察语法树如何按 <code>+ &gt; WITH &gt; AND &gt; OR</code> 绑定并裁剪 <code>OR</code> 分支、检测 <code>Apache-2.0 AND GPL-2.0-only</code> 双向互斥；再到<strong>模式二</strong>体验 Declared vs Observed 漂移纠偏与五大开源组件商用准入评审。</p>
+    </div>
+
+    <!-- INTERACTIVE LICENSE COMPLIANCE LAB -->
+    <section class="widget-panel full-width" data-widget="license-compliance-lab">
+      <script type="application/json" class="license-compliance-lab-data">
+        {
+          "title": "交互实验台：SPDX 表达式 AST 求值器与三维传染性推理沙盘",
+          "intro": "实时解析 SPDX v3.0.1 Annex B 运算符优先级，动态推导 SaaS / 静态打包 / IPC / dev 下的传染性、双向兼容性与 Notice 交付清单。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 3/4 开源许可证合规引擎架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你的商业闭源 SCA 平台既要服务内部纯云端 SaaS 业务线，也要支持企业私有化静态编译 Go/Rust 客户端与容器交付，同时对外输出自动化 THIRD-PARTY-NOTICES。",
+          "summary": {
+            "optimal": "全部 {optimal} 项许可证合规架构决策稳健精准！至此 Phase 1（0001–0010）全 10 课统一底座已完整合拢：L1 多形态采集 + L2 统一 IR + L3 漏洞与合规双引擎均已具备商业化投产蓝图！",
+            "warning": "总体路线可用，但在 {warning} 项上存在误报噪音、静态链接漏检或合规署名瑕疵（标黄项），建议按三维 AST 与双层扫描架构收口。",
+            "critical": "当前架构踩中 {critical} 处会引发商业产品被迫开源、法务违约或双向协议死锁的致命红线（标红项）！请立刻修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "SPDX 表达式解析与双许可 / 例外条款求值引擎设计",
+              "layer": "SPDX AST · 消除误报",
+              "context": "大量 Java/Rust/JS 包声明类似 'LGPL-2.1-only OR BSD-3-Clause AND MIT' 或 'GPL-2.0-only WITH Classpath-exception-2.0'。",
+              "options": [
+                {
+                  "label": "按字符串 Split(',') 拆词后只要包含 GPL/LGPL 子串就一律红牌阻断，省去语法树开发",
+                  "status": "critical",
+                  "verdictTitle": "彻底毁掉工具可信度：在所有双许可与 Classpath 例外库上爆发 P0 误报",
+                  "feedback": "OpenJDK/Jakarta EE/Rust crate 会全线报错；研发直接把 SCA 报告当垃圾噪音全部屏蔽，导致真风险也被淹没。"
+                },
+                {
+                  "label": "引入 MIT/Apache Go 解析器严格按 '+ > WITH > AND > OR' 构筑 AST，OR 取低风险最小分支，AND 叠加 OSADL 双向互斥检查",
+                  "status": "optimal",
+                  "verdictTitle": "彻底消灭表达式误报并精准拦截隐藏协议死锁",
+                  "feedback": "既能正确认出 AND 高于 OR、选定安全支并裁剪 Notice，又能抓出 Apache-2.0 AND GPL-2.0-only 等隐形冲突。"
+                },
+                {
+                  "label": "手写正则按从左到右顺序依次求解，遇到括号或 WITH 时丢弃整条表达并标记 UNKNOWN",
+                  "status": "warning",
+                  "verdictTitle": "优先级错位且把大量带 WITH 例外的合法 JDK 组件丢入人工工单池",
+                  "feedback": "手写扁平正则极易把 A OR B AND C 错误结合成 (A OR B) AND C，带来不必要的人工审计成本。"
+                }
+              ]
+            },
+            {
+              "name": "跨交付形态（SaaS vs 私有化 Go/Rust 静态编译）传染性策略推理",
+              "layer": "3D Context · 精准判定",
+              "context": "同一批产品既部署云端 SaaS，又要把核心 Go 探针单文件二进制交付给政企内网客户。",
+              "options": [
+                {
+                  "label": "全公司统一按“只要不是 AGPL 且不是 GPL，LGPL 在任何地方都能闭源免责”一刀切放行",
+                  "status": "critical",
+                  "verdictTitle": "Go/Rust 静态链接 LGPL 私有化交付触犯重链接违约红线",
+                  "feedback": "LGPLv2.1 §6 / LGPLv3 §4(d) 要求可重链接；单文件静态编译进 Go/Rust 二进制如果不交出 .o 目标文件即构成违约。"
+                },
+                {
+                  "label": "为每个项目绑定 Distribution × Linking × IR Scope 三维上下文：dev 剪枝、SaaS 严拦 AGPL/SSPL、静态链接严拦 LGPL",
+                  "status": "optimal",
+                  "verdictTitle": "与真实开源法务风险精准同频，零冗余噪音且守住全形态红线",
+                  "feedback": "同一组件在云端 SaaS 与私有化二进制下自动呈现差异化结论，彻底释放研发生产力同时守住法务底线。"
+                },
+                {
+                  "label": "不论是不是 SaaS、也不管 devDependencies 是否打包上线，全部按最严私有化静态链接一视同仁阻断",
+                  "status": "warning",
+                  "verdictTitle": "过度保守制造大量构建期工具误报，阻塞正常 CI 流水线",
+                  "feedback": "测试框架（pytest/jest）使用 GPL 工具并不随产品分发，硬性阻断会让研发团队彻底绕开合规门禁。"
+                }
+              ]
+            },
+            {
+              "name": "源码深度文件识别引擎与合规知识库商用选型",
+              "layer": "商用合规红线 · 底座",
+              "context": "需要补充文件级源码版权扫描能力与协议兼容性真值库，且主产品为商业闭源交付。",
+              "options": [
+                {
+                  "label": "为了复用成熟工作台，直接把 FOSSology（GPL-2.0-only）代码库静态合入商业闭源平台后端主进程一起分发",
+                  "status": "critical",
+                  "verdictTitle": "致命违约：引入强传染 GPL-2.0-only 代码迫使全平台闭源源码公开",
+                  "feedback": "违背 MISSION.md 第一条红线，商业产品连售卖资格都会丧失，且与其余 Apache-2.0 底座冲突。"
+                },
+                {
+                  "label": "Go Core 内嵌 go-spdx(MIT) + licensecheck(BSD-3) + ClearlyDefined(CC0)；Tier 2 异步容器封装 ScanCode(Apache-2.0) 并履行 LicenseDB/OSADL CC-BY-4.0 署名",
+                  "status": "optimal",
+                  "verdictTitle": "速度、识别精度与 100% 商业闭源合规三者兼得",
+                  "feedback": "既保留了亚秒级左移拦截速度，又用异步 ScanCode 兜住文件级夹带漂移，且清晰履行所有 CC-BY-4.0 数据署名。"
+                },
+                {
+                  "label": "嵌入 ScanCode 与 OSADL Compatibility Matrix 数据集，但商业发布时彻底抹掉两者的 CC-BY-4.0 署名声明",
+                  "status": "warning",
+                  "verdictTitle": "违反 CC-BY-4.0 署名义务，存在商用版权合规瑕疵",
+                  "feedback": "代码层面 Apache-2.0 虽安全，但数据和规则库属于 CC-BY-4.0 授权，商业集成必须在 NOTICE / 关于页面规范署名。"
+                }
+              ]
+            },
+            {
+              "name": "Declared 谎报 / NOASSERTION 与法务人工豁免（Curation）治理",
+              "layer": "三层真值 · 审计链",
+              "context": "某个 npm 包在 package.json 声明 MIT，但 ScanCode 发现其 vendor/ 目录下 C 源码实为 GPL-2.0-only；另有组件报 NOASSERTION。",
+              "options": [
+                {
+                  "label": "以 package.json 的 declared 为唯一绝对标准，不保存或忽略文件级扫描发现的冲突证据",
+                  "status": "critical",
+                  "verdictTitle": "上游包谎报或抄错代码时直接放行 GPL 源码进商业安装包",
+                  "feedback": "声明态只能作为初筛线索，真正在法庭上有约束力的是代码文件实际包含的许可证声明。"
+                },
+                {
+                  "label": "将每次扫描出的结果直接覆盖写入不可追溯的单一字符串，禁止法务团队留痕修改",
+                  "status": "warning",
+                  "verdictTitle": "缺乏审计追溯与持久 Curation 覆写，次日重新扫描问题又死灰复燃",
+                  "feedback": "客户法务对同一误报组件每次都要重复解释，无法形成企业级合规知识资产沉淀。"
+                },
+                {
+                  "label": "在 IR 中分字段留存 Declared + Observed 证据，并引入借鉴 ORT 的 Curation 覆写层收敛出唯一可审计的 Concluded 结论",
+                  "status": "optimal",
+                  "verdictTitle": "既有防谎报深度防御，又具备企业级可审计 Curation 闭环",
+                  "feedback": "完美投影 CycloneDX 1.7 acknowledgement='declared'/'concluded' 与 citations 溯源标准。"
+                }
+              ]
+            },
+            {
+              "name": "发版阶段 THIRD-PARTY-NOTICES.txt 自动化生成策略",
+              "layer": "交付自动化 · 减负",
+              "context": "商业软件向大型企业客户发版时需附带完整的第三方开源声明文件，内含 1,200 个开源包（含大量 MIT/Apache-2.0 及少量 dev 依赖）。",
+              "options": [
+                {
+                  "label": "按 Layer 2 IR Scope 剔除 dev/test，按 OR 选定分支裁剪，原样抓取并透传 Apache-2.0 上游 NOTICE，对同协议正文去重汇总版权列表",
+                  "status": "optimal",
+                  "verdictTitle": "完全满足 Apache-2.0 §4(d) 等严苛交付要求且文件简洁专业",
+                  "feedback": "直接替代法务手写拼凑文档，同时防止把测试框架或未选用分支的虚假高危声明带进对外法律文件。"
+                },
+                {
+                  "label": "只根据包名查个模板吐出一份通用 Apache-2.0 文本，把包内原生的 NOTICE.txt 全部丢弃",
+                  "status": "warning",
+                  "verdictTitle": "遗漏上游原声明，违反 Apache-2.0 §4(d) 归属透传要求",
+                  "feedback": "Apache-2.0 明确规定下游必须随派生作品继续传递上游原有的 NOTICE 文件副本。"
+                },
+                {
+                  "label": "为了省事把 devDependencies 和 OR 未选中的 GPL 分支全部混印进商业客户端对外声明文件",
+                  "status": "warning",
+                  "verdictTitle": "引发大客户法务误判“产品携带强传染未选分支”而卡死采购验收",
+                  "feedback": "对外声明文档越精准，大客户尽调（Due Diligence）过关越快；未裁决与未交付依赖必须严格裁剪。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核场景题涵盖 <strong>SPDX AST 优先级、三维传染与双向互斥、商用开源许可底座以及 Notice/Curation 交付闭环</strong>。<strong>先凭记忆作答，再看解析。</strong>（每题 4 个选项长度严格均衡，答案位置分布均匀。）</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0010 · 开源许可证合规引擎与传染性推理回忆测验",
+          "intro": "重点检验 SPDX 语法树结合律、Go 静态链接 LGPL 暗坑、FSF 双向冲突以及商业闭源许可证底座边界。",
+          "questions": [
+            {
+              "prompt": "某核心组件在 CycloneDX 1.7 清单中声明的许可证表达式为 'LGPL-2.1-only OR BSD-3-Clause AND MIT'，且已知产品将以静态链接的闭源 Go 二进制形式向政企客户私有化交付。依据 SPDX v3.0.1 Annex B 与 AST 最小风险求值原则，引擎应如何解析与裁决？",
+              "options": [
+                "因 OR 优先于 AND，表达式等价为 (LGPL-2.1-only OR BSD-3-Clause) AND MIT，静态链接必判传染阻断。",
+                "因 AND 优先于 OR，表达式等价为 LGPL-2.1-only OR (BSD-3-Clause AND MIT)，最终可选右支合规放行。",
+                "因同时存在 LGPL-2.1-only 与 BSD-3-Clause AND MIT，合规引擎应取全部子句的最严交集并在商业交付时按红线阻断。",
+                "因 LGPL-2.1-only OR BSD-3-Clause AND MIT 缺省括号，违反 SPDX Annex B 规范应报错退回待审。"
+              ],
+              "answerIndex": 1,
+              "explanation": "依据 SPDX v3.0.1 Annex B 规范，运算符绑定优先级为 + > WITH > AND > OR。因此 AND 先于 OR 结合，原表达式等价于 LGPL-2.1-only OR (BSD-3-Clause AND MIT)。由于根节点是 OR，只要右支（BSD-3-Clause AND MIT）全部为宽松许可且彼此兼容，商业闭源 Go 静态链接即可合法选举右支放行，而不必受左支 LGPL 静态重链接约束影响（B 正确）。"
+            },
+            {
+              "prompt": "关于 Go/Rust 单文件静态链接与混合依赖间的双向兼容性规则，以下哪项合规推理完全符合 OSADL 与 FSF 官方规范？",
+              "options": [
+                "纯云端 SaaS 调用 AGPL-3.0-only 永不触发网络披露义务；而 Apache-2.0 可直接静态合入 GPL-2.0-only 作品中。",
+                "Go 单文件静态链接 LGPL-3.0-only 只要不修改源码即可免源码交付；而 GPL-2.0-only 可直接升级为 GPL-3.0-only。",
+                "devDependencies 仅用于构建测试的 LGPL-2.1-only 工具，在商业分发制品时仍会传染主程序并要求交出全部核心业务源码及构建脚本。",
+                "Go 静态链接 LGPL-3.0-only 须供可重链接目标文件；Apache-2.0 兼容 GPL-3.0-only 却冲突 GPL-2.0-only。"
+              ],
+              "answerIndex": 3,
+              "explanation": "LGPLv3 §4(d) 要求可重链接性，Go/Rust 单文件静态链接无法让终端用户替换库文件，因此不提供 .o 目标文件即违约；同时 FSF 认定 Apache-2.0 与 GPL-3.0-only 单向兼容，但与 GPL-2.0-only 因专利条款双向互斥。而 AGPL §13 在纯 SaaS 下照样触发披露，devDependencies 不随制品交付不触发分发传染，GPL-2.0-only 不可随意升级到 GPL-3.0（D 正确）。"
+            },
+            {
+              "prompt": "团队计划为自研闭源商业 SCA 产品构建“源码深度识别 + 人工修正 + 合规策略 + Notice 生成”闭环，以下开源底座与数据许可设计哪项完全合规且可行？",
+              "options": [
+                "代码嵌入 go-spdx/licensecheck，容器跑 ScanCode/ORT，并履行 LicenseDB 与 OSADL 的 CC-BY-4.0 署名。",
+                "直接库级嵌入 FOSSology(GPL-2.0-only) 源码扫描内核，并与闭源商业策略引擎静态编译在同一进程中对外商业闭源打包交付给私有化及最终客户使用。",
+                "仅凭 package.json 声明字段直接生成第三方声明，跳过 Observed 扫描且不透传 Apache-2.0 各组件原始 NOTICE 文件全文内容。",
+                "采用 ClearlyDefined(CC0) 覆盖全部 Declared 冲突记录，且默认 ScanCode 与 OSADL 均无需履行任何署名义务即可商业抹除。"
+              ],
+              "answerIndex": 0,
+              "explanation": "go-spdx(MIT)、licensecheck(BSD-3-Clause)、ScanCode-Toolkit(Apache-2.0) 与 ORT(Apache-2.0) 均满足商业闭源集成要求，只需把 ScanCode LicenseDB 与 OSADL 兼容性矩阵各自的 CC-BY-4.0 署名写入产品 NOTICE。严禁嵌入 GPL-2.0-only 的 FOSSology，也不可忽略 Observed 文件探测与 Apache-2.0 原生 NOTICE 透传（A 正确）。"
+            },
+            {
+              "prompt": "在执行开源许可证自动生成 THIRD-PARTY-NOTICES 交付物与治理 Manifest 声明漂移时，以下哪项工程实践最为严谨？",
+              "options": [
+                "对声明为 MIT OR Apache-2.0 的组件将两个分支全文与 NOTICE 全部无条件输出，同时把 devDependencies 也纳入对外交付清单。",
+                "完全信任 npm/Maven manifest 中的 declared 字段作为最终法律结论，遇到 NOASSERTION 时自动静默放行以避免阻塞日常研发流水线。",
+                "用 Observed 校准 Declared 出具 concluded，依 Scope 与 OR 选支裁剪，并原样透传 Apache-2.0 的 NOTICE 文本。",
+                "将开源许可证合规扫描彻底替代函数级漏洞可达性分析，只要组件是 MIT 或 BSD 宽松许可就可以忽略其自带全部历史高危 CVE 风险并免于安全审批直接放行上线。"
+              ],
+              "answerIndex": 2,
+              "explanation": "严谨的合规闭环必须先以 Observed 文件扫描与 Curation 校准 Declared，生成唯一的 concluded 结论并写入 CycloneDX 1.7；生成 THIRD-PARTY-NOTICES 时应依 IR Scope 剔除 dev/test、依 OR 策略选定分支裁剪未选用条款，并原样抓取透传所有 Apache-2.0 包内的 NOTICE 文本（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地自研 SPDX AST 合规推理引擎、双向兼容图与 Curation 交付管线时，建议精读以下规范与底座源码：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://spdx.github.io/spdx-spec/v3.0.1/annexes/spdx-license-expressions/" target="_blank" rel="noopener"><strong>SPDX v3.0.1 Annex B</strong></a> &amp; <a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener"><strong>CycloneDX 1.7 Licensing Spec</strong></a>：运算符优先级正式语法、<code>acknowledgement</code>（<code>declared</code>/<code>concluded</code>）与 <code>LicenseRef-</code> 规范。</li>
+          <li><a href="https://www.gnu.org/licenses/license-list.html" target="_blank" rel="noopener"><strong>FSF License List &amp; Compatibility</strong></a> &amp; <a href="https://www.osadl.org/?id=2888" target="_blank" rel="noopener"><strong>OSADL Compatibility Matrix (<code>CC-BY-4.0</code>)</strong></a>：双向协议兼容性真值表与机器可读 JSON/CSV 原生导出接口。</li>
+          <li><a href="https://github.com/github/go-spdx" target="_blank" rel="noopener"><strong><code>github/go-spdx</code></strong></a>（MIT）、<a href="https://github.com/google/licensecheck" target="_blank" rel="noopener"><strong><code>google/licensecheck</code></strong></a>（BSD-3-Clause）&amp; <a href="https://clearlydefined.io/" target="_blank" rel="noopener"><strong>ClearlyDefined</strong></a>（<code>CC0-1.0</code> 数据）：Go Core 内核组件与零负担社区校准真值源。</li>
+          <li><a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener"><strong>OSS Review Toolkit (ORT)</strong></a>（Apache-2.0）&amp; <a href="https://github.com/aboutcode-org/scancode-toolkit" target="_blank" rel="noopener"><strong>ScanCode-Toolkit</strong></a>（Apache-2.0 / LicenseDB <code>CC-BY-4.0</code>）：<code>curations.yml</code>、文件级扫描及 <code>PlainTextTemplate</code> Notice 生成标杆。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>Phase 1 完结里程碑 · 向你的架构导师追问</h3>
+        <p>恭喜！至此 <strong>Phase 1（统一底座架构 · Lessons 0001–0010）全部收官</strong>。L1 采集、L2 IR、L3 漏洞与合规引擎已经构成完整可落地的第一阶段商业平台底座！带着思考进入下一阶段：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“如果我们对外只卖云端 SaaS，但需要帮企业客户扫描他们将要静态打包交付给最终用户的 Go/Rust/C++ 客户端，Strategy Engine 如何按「项目画像」切换推理模式？”</li>
+          <li>“Curation 人工智能覆写层（如按 PURL + SHA-256 锁定）与上游组件版本升级之间，应该如何设计继承与失效机制？”</li>
+          <li>“Phase 1 底座已彻底封顶！我准备迈入 <strong>Phase 2（第三代高价值差异化壁垒）：Lesson 0011（静态函数级可达性 Call Graph 底层原理与跨语言工程挑战）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0009-offline-vuln-db-distribution-and-matching-index.html">← 上一课：Lesson 0009 · 离线分发与匹配索引</a>
+      <a href="../reference/layer3-intel-and-version-matrix.html">配套速查卡：Ref 04 · L3 情报与许可矩阵（已完整收口）</a>
+      <a href="../index.html">返回课程总览 · 开启 Phase 2（Lesson 0011 静态可达性） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/license-compliance-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

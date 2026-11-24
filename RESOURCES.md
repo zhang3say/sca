@@ -80,7 +80,13 @@
 - [Repo: OpenSSF Malicious Packages (`ossf/malicious-packages`, Apache-2.0)](https://github.com/ossf/malicious-packages)
   采用 OSV 格式发布的开源恶意包情报聚合库。用于：在 Layer 3 快速冷启动恶意包基础拦截能力。
 - [Repo: AboutCode ScanCode-Toolkit (`aboutcode-org/scancode-toolkit`, Apache-2.0 / LicenseDB CC-BY-4.0)](https://github.com/aboutcode-org/scancode-toolkit)
-  源码级许可证与版权扫描标杆。用于：理解代码与知识库双许可（Apache-2.0 vs CC-BY-4.0 署名要求）的商用合规边界。
+  源码级许可证与版权扫描标杆。用于：Tier 2 异步容器深度探测（抓包内文件头夹带漂移）及履行代码（Apache-2.0）与 LicenseDB 知识库（CC-BY-4.0 署名）双许可合规边界。
+- [Specs & Go Libraries: SPDX v3.0.1 Annex B (`License Expressions`)](https://spdx.github.io/spdx-spec/v3.0.1/annexes/spdx-license-expressions/)、[`github/go-spdx` (MIT)](https://github.com/github/go-spdx)、[`spdx/tools-golang` (Apache-2.0)](https://github.com/spdx/tools-golang) &amp; [`google/licensecheck` (BSD-3-Clause)](https://github.com/google/licensecheck)
+  规范定义 SPDX 表达式运算符优先级（`+ > WITH > AND > OR`）、大写运算符与 `LicenseRef-` 规则；三款纯 Go 商用合规基础库支撑 Single Go Core 本地/云端 AST 求值与毫秒级 `LICENSE` 文件文本识别。
+- [Compatibility & Curation Data: FSF License List & Compatibility](https://www.gnu.org/licenses/license-list.html)、[OSADL Compatibility Matrix (`CC-BY-4.0`)](https://www.osadl.org/?id=2888) &amp; [ClearlyDefined (`MIT` / `CC0-1.0` Data)](https://clearlydefined.io/)
+  FSF 官方协议兼容性规则（`Apache-2.0` vs `GPL-2.0-only`/`GPL-3.0-only`、GPLv3/AGPLv3 §13 桥接）与 OSADL 机器可读 JSON/CSV 兼容性矩阵（CC-BY-4.0 需保留署名）；ClearlyDefined 提供 CC0 公有领域社区校对 `Declared`/`Discovered` 坐标，用于救回 `NOASSERTION` 组件。
+- [Curation & Notice Reference: ORT Evaluator / `curations.yml` / `PlainTextTemplate` (Apache-2.0)](https://oss-review-toolkit.org/ort/docs/tools/evaluator) &amp; [`aboutcode-org/license-expression` (Apache-2.0)](https://github.com/aboutcode-org/license-expression)
+  ORT 提供策略规则 DSL、人工覆写（Curation）真值收敛及自动生成 `THIRD-PARTY-NOTICES` 的模板范式；`license-expression` 为 Python 侧布尔表达式化简参照。
 
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
@@ -101,3 +107,4 @@
 - **静态函数级可达性（Call Graph）跨语言评测基准**：尚缺经过学术界或第三方独立验证的跨语言（Java/JS/Python/Go）调用图精度/召回率对比论文与基准测试集（将在进入 Layer 4 专项前补齐）。
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
+- **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。

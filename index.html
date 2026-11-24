@@ -12,7 +12,7 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="./index.html" class="active">课程首页 · 全局路线图</a>
-        <a href="./lessons/0009-offline-vuln-db-distribution-and-matching-index.html">当前课程 · Lesson 0009</a>
+        <a href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">当前课程 · Lesson 0010</a>
         <a href="./reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
         <a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
         <a href="./reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 字典</a>
@@ -34,13 +34,13 @@
       <div class="hero-stats">
         <div class="stat-card">
           <div class="stat-label">课程进度</div>
-          <div class="stat-value">9 / 22 课</div>
-          <div class="stat-sub">已发布 9 课 · 下一课 0010</div>
+          <div class="stat-value">10 / 22 课</div>
+          <div class="stat-sub">Phase 1 全 10 课完结 · 下一课 0011</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">当前主攻阶段</div>
-          <div class="stat-value">Phase 1</div>
-          <div class="stat-sub">1–3 个月 · 统一底座架构</div>
+          <div class="stat-value">Phase 2</div>
+          <div class="stat-sub">Phase 1 已收官 · 开启 L4 高价值壁垒</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">商用协议红线</div>
@@ -50,13 +50,13 @@
         <div class="stat-card">
           <div class="stat-label">速查卡片库</div>
           <div class="stat-value">4 / 4 份</div>
-          <div class="stat-sub">Phase 1 四大基石速查卡已就位</div>
+          <div class="stat-sub">Phase 1 四大基石速查卡已全部收口</div>
         </div>
       </div>
 
       <div class="hero-actions">
-        <a class="btn-link-primary" href="./lessons/0009-offline-vuln-db-distribution-and-matching-index.html">进入当前课程：Lesson 0009 →</a>
-        <a class="btn-link-secondary" href="./reference/layer3-intel-and-version-matrix.html">打开最新速查卡：Ref 04 L3 情报、版本与许可矩阵</a>
+        <a class="btn-link-primary" href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">进入当前课程：Lesson 0010 →</a>
+        <a class="btn-link-secondary" href="./reference/layer3-intel-and-version-matrix.html">打开完整速查卡：Ref 04 L3 情报、版本与许可矩阵</a>
       </div>
     </header>
 
@@ -310,19 +310,21 @@
           </div>
         </li>
 
-        <li class="lesson-row is-next" data-phase="p1" data-layer="L3,L4" data-status="next">
+        <li class="lesson-row is-available" data-phase="p1" data-layer="L3,L4" data-status="ready">
           <div class="lesson-num">0010</div>
           <div>
-            <div class="lesson-main-title">开源许可证合规引擎与传染性兼容性推理</div>
-            <p class="lesson-desc">实现 SPDX 表达式语法树求值（<code>AND / OR / WITH</code> 异常处理）、基于分发形态与链接方式的传染性策略矩阵、ScanCode 双许可合规集成与合规 Notice 自动生成。</p>
+            <div class="lesson-main-title">
+              <a href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">开源许可证合规引擎与传染性兼容性推理</a>
+            </div>
+            <p class="lesson-desc">打通 Declared/Observed/Concluded 三层真值与 SPDX v3.0.1 语法树（<code>+ &gt; WITH &gt; AND &gt; OR</code>）、<code>Distribution &times; Linking &times; Scope</code> 三维传染推理（防 Go/Rust 静态链接 LGPL 暗坑）、OSADL/FSF 双向互斥判定及 <code>THIRD-PARTY-NOTICES</code> 自动化交付。</p>
             <div class="lesson-tags">
               <span class="tag-chip">L3/L4 合规</span>
-              <span class="tag-chip">SPDX Expression · ORT · ScanCode</span>
-              <span class="tag-chip">传染性推理</span>
+              <span class="tag-chip">SPDX AST · go-spdx · ORT · ScanCode</span>
+              <span class="tag-chip">Phase 1 收官</span>
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="badge badge-ok">已发布 · 可学习</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>
@@ -347,7 +349,7 @@
         <span class="badge badge-build">4 课 · L4 核心壁垒</span>
       </div>
       <ul class="lesson-list">
-        <li class="lesson-row" data-phase="p2" data-layer="L4" data-status="planned">
+        <li class="lesson-row is-next" data-phase="p2" data-layer="L4" data-status="next">
           <div class="lesson-num">0011</div>
           <div>
             <div class="lesson-main-title">静态函数级可达性（Call Graph）底层原理与跨语言工程挑战</div>
@@ -359,7 +361,7 @@
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-blue">规划中</span>
+            <span class="badge badge-build">下一课 · ZPD</span>
             <span class="lesson-duration">~20 min</span>
           </div>
         </li>
@@ -613,9 +615,9 @@
 
         <div class="ref-card">
           <div>
-            <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 随 Ch 03 持续扩展</span></div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
             <h4><a href="./reference/layer3-intel-and-version-matrix.html">Ref 04 · Layer 3 漏洞情报、版本语义与合规速查矩阵</a></h4>
-            <p style="margin-top:0.35rem;">已包含 Lesson 0007–0008（OSV v1.7.0、数据许可闸门、6 大生态排序语义、VERS 规范化与 Backport 隔离）；后续合入离线索引与许可推理。</p>
+            <p style="margin-top:0.35rem;">覆盖 CH 03 全 4 课精华（Lesson 0007–0010）：OSV v1.7.0 与许可闸门、6 大生态排序与 Backport 隔离、OCI/SQLite 逻辑增量与内存倒排索引、SPDX AST 与三维传染矩阵。</p>
           </div>
           <div style="font-size:0.8rem;"><a href="./reference/layer3-intel-and-version-matrix.html">打开速查卡 →</a></div>
         </div>
@@ -624,7 +626,7 @@
 
     <footer class="lesson-end-nav">
       <span>工作区指南：可在对话中随时输入 <code>/teach</code> 继续下一课、点播任意章节，或调整学习目标</span>
-      <a href="./lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">开始 / 继续 Lesson 0008 →</a>
+      <a href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">开始 / 继续 Lesson 0010 →</a>
     </footer>
   </main>
 

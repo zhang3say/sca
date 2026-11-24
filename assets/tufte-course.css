@@ -2956,3 +2956,123 @@ pre code,
   border-color: var(--danger-border);
   color: #7a191c;
 }
+
+/* ==========================================================================
+   Lesson 0010+ Components: SPDX AST & License Compliance Reasoner Lab
+   ========================================================================== */
+
+.lic-expr-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: stretch;
+  margin-bottom: 0.85rem;
+}
+
+.lic-input {
+  flex: 1 1 360px;
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  padding: 0.62rem 0.85rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+.lic-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  background: var(--surface);
+}
+
+.lic-ctx-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  align-items: end;
+}
+
+@media (max-width: 860px) {
+  .lic-ctx-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lic-ast-tree {
+  background: #faf8f2;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0.8rem 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+
+.lic-ast-branch {
+  margin-left: 1.05rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--rule);
+  margin-top: 0.42rem;
+}
+
+.lic-ast-branch.is-elected {
+  border-left-color: var(--ok);
+}
+
+.lic-ast-branch.is-pruned {
+  border-left-color: var(--rule);
+  opacity: 0.62;
+}
+
+.lic-ast-branch.is-conflict {
+  border-left-color: var(--danger);
+}
+
+.lic-ast-node {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.24rem 0;
+}
+
+.lic-ast-op {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  font-weight: 700;
+  padding: 0.08rem 0.44rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.lic-ast-op.op-or { background: var(--accent-blue-soft); border-color: #bfd7e5; color: var(--accent-blue); }
+.lic-ast-op.op-and { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn); }
+.lic-ast-op.op-with { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
+.lic-ast-op.op-id { background: var(--surface); border-color: var(--rule); color: var(--ink); }
+
+.lic-notice-box {
+  margin: 0.6rem 0 0;
+  padding: 0.75rem 0.9rem;
+  background: #faf8f2;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.54;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media print {
+  .lic-ast-tree,
+  .lic-notice-box {
+    break-inside: avoid;
+  }
+}

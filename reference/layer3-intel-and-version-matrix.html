@@ -15,6 +15,7 @@
         <a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007 · 多源漏洞汇聚</a>
         <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008 · 版本区间引擎</a>
         <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009 · 离线分发与索引</a>
+        <a href="../lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">Lesson 0010 · 许可证合规与推理</a>
         <a href="./layer3-intel-and-version-matrix.html" class="active">Ref 04 · L3 情报与许可矩阵</a>
         <a href="./layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
       </div>
@@ -29,10 +30,10 @@
         <span>PRINT-READY LAYER 3 CHEAT SHEET</span>
       </div>
       <h1>Layer 3 漏洞情报汇聚、版本语义与合规速查矩阵</h1>
-      <p class="subtitle">供 Layer 3 漏洞情报管线、License Policy Gate、跨生态版本区间求值器与双模离线分发/内存索引开发评审时随时翻阅（随 Chapter 03 推进持续扩充：当前覆盖 Lesson 0007–0009）。</p>
+      <p class="subtitle">供 Layer 3 漏洞情报管线、License Policy Gate、跨生态版本区间求值器、双模离线分发/内存索引与开源许可证合规引擎评审时随时翻阅（已完整覆盖 Chapter 03 全 4 课：Lesson 0007–0010）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准：</strong>OpenSSF OSV Schema v1.7.0 · CVE JSON 5 · VERS Spec · OCI Artifact / ORAS · Cosign TUF · Grype v6 Handle+Blob</span>
-        <span><strong>关联课程：</strong><a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> · <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a> · <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a>（待扩展：0010）</span>
+        <span><strong>依据标准：</strong>OpenSSF OSV Schema v1.7.0 · CVE JSON 5 · VERS Spec · OCI Artifact / ORAS · Cosign TUF · Grype v6 Handle+Blob · SPDX v3.0.1 Annex B · CycloneDX 1.7 Licensing · OSADL Matrix</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> · <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008</a> · <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a> · <a href="../lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">Lesson 0010</a></span>
       </div>
     </header>
 
@@ -294,15 +295,109 @@
       </div>
     </section>
 
+    <!-- SECTION 5: SPDX AST, 3D CONTAGION MATRIX & NOTICE DELIVERY -->
+    <section class="full-width">
+      <h2><span class="sec-num">05</span>SPDX 语法树、三维传染性推理与商用许可证合规引擎速查（Lesson 0010）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>维度 / 规则域</th>
+              <th>规范标准与优先级</th>
+              <th>核心推理规则</th>
+              <th>头号红线与工程防坑</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>SPDX 三层真值</strong><br/>（CycloneDX 1.7 / SPDX 3.0）</td>
+              <td><code>Declared</code> / <code>Observed</code> / <code>Concluded</code></td>
+              <td><code>acknowledgement: "declared"</code>（清单）&rarr; 文件头扫描 + ClearlyDefined + ORT <code>curations.yml</code> &rarr; <code>concluded</code>。</td>
+              <td>JSON 中 <code>expression</code> 须与 <code>license</code> 同级，不可嵌套进 <code>license</code>；不可仅靠 <code>declared</code> 放行夹带 GPL 包。</td>
+            </tr>
+            <tr>
+              <td><strong>SPDX 运算符优先级</strong><br/>（Annex B）</td>
+              <td><code>+</code> &gt; <code>WITH</code> &gt; <code>AND</code> &gt; <code>OR</code><br/><small>运算符强制全大写</small></td>
+              <td><code>OR</code> 选低风险最优分支并剪枝；<code>AND</code> 合并两侧义务并校验 OSADL/FSF 双向互斥；<code>WITH</code> 原子绑例外。</td>
+              <td><code>LGPL-2.1-only OR BSD-3-Clause AND MIT</code> 等价于 <code>OR(LGPL, AND(BSD, MIT))</code>，禁扁平子串拦截。</td>
+            </tr>
+            <tr>
+              <td><strong>三维上下文传染矩阵</strong><br/>（<code>Dist &times; Link &times; Scope</code>）</td>
+              <td><code>dev/test</code> 剪枝；<code>SaaS</code> vs <code>Binary</code>；<code>Static / Dynamic / IPC</code></td>
+              <td><code>dev</code> 非分发先剪枝；<code>MPL/EPL</code> 仅文件级弱传染；<code>GPL + WITH Classpath</code> 免链接传染；<code>AGPL §13</code> 连 SaaS 也传染。</td>
+              <td><strong>Go/Rust/Webpack 暗坑：</strong>单文件静态链接 <code>LGPL-2.1/3.0</code> 无法替换库，必须提供 <code>.o</code> 重链接文件或拦截！</td>
+            </tr>
+            <tr>
+              <td><strong>FSF / OSADL 双向互斥对</strong></td>
+              <td>有向兼容图<br/><code>compat(In, Out)</code></td>
+              <td><code>Apache-2.0</code> &harr; <code>GPL-2.0-only</code> 冲突；<code>Apache-2.0</code> &rarr; <code>GPL-3.0-only</code> 单向兼容；<code>GPL-3.0</code> + <code>AGPL-3.0</code> 经 §13 升格为 AGPL。</td>
+              <td><code>GPL-2.0-only</code> 与 <code>GPL-3.0-only</code> 亦互斥（须 <code>-or-later</code> 才可升级）。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:22%" />
+            <col style="width:18%" />
+            <col style="width:30%" />
+            <col style="width:30%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>底座 / 交付环节</th>
+              <th>代码 / 数据许可</th>
+              <th>平台工程集成定位</th>
+              <th>商业闭源边界与交付规范</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Go Core 内核组件</strong><br/><code>go-spdx</code> · <code>tools-golang</code> · <code>licensecheck</code></td>
+              <td>代码：<code>MIT</code> / <code>Apache-2.0</code> / <code>BSD-3-Clause</code></td>
+              <td>毫秒级解析 SPDX AST、校验官方 ID 并快速分类根目录 <code>LICENSE</code> 原文（服务 MCP/Hook/Cloud）。</td>
+              <td>100% 商业闭源安全嵌入，零 CGO、零外置运行时依赖。</td>
+            </tr>
+            <tr>
+              <td><strong>校准与兼容知识库</strong><br/>ClearlyDefined · OSADL Matrix</td>
+              <td>ClearlyDefined: <code>CC0-1.0</code><br/>OSADL Matrix: <code>CC-BY-4.0</code></td>
+              <td><code>NOASSERTION</code> 坐标自动救回 + 机器可读双向兼容性真值表。</td>
+              <td>ClearlyDefined 零负担；OSADL Matrix 须在产品 <code>NOTICE</code> 保留归属署名。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 2 深度扫描与模板</strong><br/>ScanCode-Toolkit · ORT</td>
+              <td>代码：<code>Apache-2.0</code><br/>LicenseDB：<code>CC-BY-4.0</code></td>
+              <td>异步容器逐文件抓取版权/夹带条款（ScanCode），借鉴 ORT <code>curations.yml</code> 与 <code>PlainTextTemplate</code>。</td>
+              <td>严禁引入 <strong><code>FOSSology</code>（<code>GPL-2.0-only</code>）</strong>；ScanCode LicenseDB 须履行 <code>CC-BY-4.0</code> 署名。</td>
+            </tr>
+            <tr>
+              <td><strong><code>THIRD-PARTY-NOTICES</code> 自动化交付</strong></td>
+              <td>合规输出规范</td>
+              <td>① 按 <code>Scope</code> 剔除 <code>dev/test</code>；② 按 <code>OR</code> 选定分支裁剪；③ 许可证全文去重汇总版权。</td>
+              <td><strong>Apache-2.0 §4(d) 硬要求：</strong>必须采集并原样透传包内 <code>META-INF/NOTICE*</code> 文件，为 LGPL/MPL 附 Written Offer。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">待解锁速查模块（随 Ch 03 收官课合入）</div>
-      <p><strong>Section 05（Lesson 0010）：</strong>SPDX 表达式语法树求值（<code>AND / OR / WITH</code>）、基于链接/分发形态的开源许可证传染性兼容性矩阵与 Notice 自动生成规范。</p>
+      <div class="callout-label">Phase 1 · Chapter 03 收官完成</div>
+      <p>至此 Ref 04 已完整覆盖 Layer 3 全四课核心规格：<strong>多源情报与许可闸门（0007）→ 生态版本比较与 Backport 隔离（0008）→ 离线 OCI/SQLite 与内存倒排索引（0009）→ SPDX AST、三维传染推理与 Notice 自动化（0010）</strong>，与 Ref 01–03 共同构成 Phase 1 架构评审全套速查库。</p>
     </div>
 
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">← 返回 Lesson 0009 · 离线分发与匹配索引</a>
-      <a href="../lessons/0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008 · 版本区间引擎</a>
-      <a href="../index.html">返回课程首页 · 全局路线图</a>
+      <a href="../lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">← 返回 Lesson 0010 · 许可证合规与传染推理</a>
+      <a href="../lessons/0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009 · 离线分发与索引</a>
+      <a href="../index.html">返回课程首页 · 开启 Phase 2（Lesson 0011）</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>
   </main>
