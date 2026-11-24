@@ -160,10 +160,10 @@
           fusedStatus = "STATIC_UNREACHABLE";
           bannerCls = "is-ok";
           vexAllowed = true;
-          vexJustification = "code_not_reachable";
+          vexJustification = "vulnerable_code_not_in_execute_path";
           actionLabel = "沿用静态结论：签发 VEX 降噪";
           summary = "无运行时探针介入，但静态调用图已完成封闭剪枝，保持 Lesson 0011 静态 VEX 降噪逻辑。";
-          gateNote = "VEX 理由码：code_not_reachable（纯静态证明）。";
+          gateNote = "OpenVEX 理由码：vulnerable_code_not_in_execute_path（对应 CycloneDX code_not_reachable）。";
         } else {
           fusedStatus = "STATIC_FALLBACK_" + s;
           bannerCls = s === "REACHABLE" ? "is-bad" : "is-warn";
@@ -249,11 +249,11 @@
           fusedStatus = "VERIFIED_UNREACHABLE";
           bannerCls = "is-ok";
           vexAllowed = true;
-          vexJustification = "code_not_reachable";
+          vexJustification = "vulnerable_code_not_in_execute_path";
           actionLabel = "双证合璧消噪 · 自动签发 OpenVEX 豁免";
           summary =
             "黄金组合！静态调用图证明无任何可达路径，且运行时观测同样零装载/零执行。可将误报安全置信度推至最高并自动签发可审计 VEX。";
-          gateNote = "VEX 自动放行：code_not_reachable（静动态双证闭环）。";
+          gateNote = "OpenVEX 自动放行：vulnerable_code_not_in_execute_path（对应 CycloneDX code_not_reachable）。";
         } else {
           // OS_PKG_L0 + NOT_OBSERVED
           if (mature) {
@@ -466,6 +466,73 @@
       };
     }
 
+    function renderRoiOutput(roi) {
+      const maxOverheadScale = 16; // % CPU
+      const slaMarkPct = ((3.0 / maxOverheadScale) * 100).toFixed(1);
+      const cpuBarPct = Math.min(100, (roi.tel.cpuOverhead / maxOverheadScale) * 100).toFixed(1);
+      const noiseKeepPct = Math.max(2, 100 - roi.cutPct).toFixed(1);
+
+      return `
+        <div class="rrl-verdict-banner ${roi.verdictCls}">
+          <div><strong>${escapeHtml(roi.verdictTitle)}</strong></div>
+          <span class="badge ${roi.slaPass ? "badge-ok" : "badge-danger"}">
+            ${roi.slaPass ? "符合 < 3% 生产 CPU SLA" : "违反 3% 生产 CPU SLA"}
+          </span>
+        </div>
+
+        <div class="rrl-kpi-strip">
+          <div class="vlab-kpi is-ok">
+            <div class="vlab-kpi-label">需优先处理有效 CVE（降噪后）</div>
+            <div class="vlab-kpi-num">${roi.totalRemaining} / ${roi.totalRaw} 条</div>
+            <div class="vlab-kpi-sub">总体消噪率 <strong>${roi.cutPct}%</strong>（OS 留 ${roi.remainingOs} + 应用留 ${roi.remainingApp}）</div>
+          </div>
+          <div class="vlab-kpi ${roi.slaPass ? "is-blue" : "is-warn"}">
+            <div class="vlab-kpi-label">生产探针 CPU 性能税</div>
+            <div class="vlab-kpi-num">${roi.tel.cpuOverhead.toFixed(1)}%</div>
+            <div class="vlab-kpi-sub">SLA 门限 &le; 3.0%（${roi.slaPass ? "生产可常驻开启" : "仅限压测或沙箱环境"}）</div>
+          </div>
+          <div class="vlab-kpi ${roi.riskCls}">
+            <div class="vlab-kpi-label">冷路径误删 / 排障风险指数</div>
+            <div class="vlab-kpi-num">${roi.crashOrFnRisk} / 100</div>
+            <div class="vlab-kpi-sub">${escapeHtml(roi.riskLabel)} · 排障：${escapeHtml(roi.img.debugScore)}</div>
+          </div>
+        </div>
+
+        <div class="rrl-bar-card">
+          <div class="vlab-section-label">生产性能开销 vs 告警保留比例量化对比</div>
+          <div class="rrl-bar-row">
+            <div class="rrl-bar-head">
+              <span>运行时探针 CPU 额外开销（标尺竖线 = 3.0% 生产准入上限）</span>
+              <span style="font-family:var(--font-mono);">${roi.tel.cpuOverhead.toFixed(1)}% / 16.0%</span>
+            </div>
+            <div class="rrl-sla-ruler">
+              <span class="rrl-sla-badge" style="left:${slaMarkPct}%;">3.0% 生产 SLA</span>
+            </div>
+            <div class="rrl-bar-track">
+              <div class="rrl-sla-marker" style="left:${slaMarkPct}%;"></div>
+              <div class="rrl-bar-fill ${roi.slaPass ? "is-fast" : "is-slow"}" style="width:${cpuBarPct}%;"></div>
+            </div>
+          </div>
+          <div class="rrl-bar-row">
+            <div class="rrl-bar-head">
+              <span>裁剪 + 运行时过滤后仍需人工/修复关注的告警占比</span>
+              <span style="font-family:var(--font-mono);">${roi.totalRemaining} 条 (${noiseKeepPct}%)</span>
+            </div>
+            <div class="rrl-bar-track">
+              <div class="rrl-bar-fill ${Number(noiseKeepPct) <= 35 ? "is-fast" : "is-warn"}" style="width:${noiseKeepPct}%;"></div>
+            </div>
+          </div>
+          <p class="rrl-bar-note">${escapeHtml(roi.verdictDesc)}</p>
+        </div>
+      `;
+    }
+
+    function updateRoiOutput() {
+      const outEl = container.querySelector(".rrl-roi-output");
+      if (!outEl) return;
+      outEl.innerHTML = renderRoiOutput(evaluateRoi());
+    }
+
     function render() {
       let bodyHtml = "";
 
@@ -609,11 +676,6 @@
           { id: "full-bytecode", label: "全量插桩（反例）" },
         ];
 
-        const maxOverheadScale = 16; // % CPU
-        const slaMarkPct = ((3.0 / maxOverheadScale) * 100).toFixed(1);
-        const cpuBarPct = Math.min(100, (roi.tel.cpuOverhead / maxOverheadScale) * 100).toFixed(1);
-        const noiseKeepPct = Math.max(2, 100 - roi.cutPct).toFixed(1);
-
         bodyHtml = `
           <div class="rrl-controls-grid">
             <div class="rrl-ctrl-group">
@@ -648,7 +710,7 @@
             <div class="vlab-slider-field">
               <div class="vlab-slider-top">
                 <label for="rrl-os-cves">原始镜像 OS CVE 数</label>
-                <span>${state.rawOsCves} 条</span>
+                <span data-readout="rawOsCves">${state.rawOsCves} 条</span>
               </div>
               <input id="rrl-os-cves" class="vlab-range" type="range" min="40" max="320" step="10" value="${state.rawOsCves}" data-action="slide" data-key="rawOsCves" />
               <div class="vlab-slider-hint">典型 Debian/Ubuntu 基础层约 120–240 条</div>
@@ -656,7 +718,7 @@
             <div class="vlab-slider-field">
               <div class="vlab-slider-top">
                 <label for="rrl-app-cves">原始应用层 CVE 数</label>
-                <span>${state.rawAppCves} 条</span>
+                <span data-readout="rawAppCves">${state.rawAppCves} 条</span>
               </div>
               <input id="rrl-app-cves" class="vlab-range" type="range" min="20" max="120" step="5" value="${state.rawAppCves}" data-action="slide" data-key="rawAppCves" />
               <div class="vlab-slider-hint">Java / Python / Node.js 传递依赖告警</div>
@@ -664,64 +726,14 @@
             <div class="vlab-slider-field">
               <div class="vlab-slider-top">
                 <label for="rrl-cov">测试 / 流量分支覆盖率</label>
-                <span>${state.coveragePct}%</span>
+                <span data-readout="coveragePct">${state.coveragePct}%</span>
               </div>
               <input id="rrl-cov" class="vlab-range" type="range" min="20" max="95" step="5" value="${state.coveragePct}" data-action="slide" data-key="coveragePct" />
               <div class="vlab-slider-hint">决定动态删文件（Mint）误删冷路径概率</div>
             </div>
           </div>
 
-          <div class="rrl-verdict-banner ${roi.verdictCls}">
-            <div><strong>${escapeHtml(roi.verdictTitle)}</strong></div>
-            <span class="badge ${roi.slaPass ? "badge-ok" : "badge-danger"}">
-              ${roi.slaPass ? "符合 < 3% 生产 CPU SLA" : "违反 3% 生产 CPU SLA"}
-            </span>
-          </div>
-
-          <div class="rrl-kpi-strip">
-            <div class="vlab-kpi is-ok">
-              <div class="vlab-kpi-label">需优先处理有效 CVE（降噪后）</div>
-              <div class="vlab-kpi-num">${roi.totalRemaining} / ${roi.totalRaw} 条</div>
-              <div class="vlab-kpi-sub">总体消噪率 <strong>${roi.cutPct}%</strong>（OS 留 ${roi.remainingOs} + 应用留 ${roi.remainingApp}）</div>
-            </div>
-            <div class="vlab-kpi ${roi.slaPass ? "is-blue" : "is-warn"}">
-              <div class="vlab-kpi-label">生产探针 CPU 性能税</div>
-              <div class="vlab-kpi-num">${roi.tel.cpuOverhead.toFixed(1)}%</div>
-              <div class="vlab-kpi-sub">SLA 门限 &le; 3.0%（${roi.slaPass ? "生产可常驻开启" : "仅限压测或沙箱环境"}）</div>
-            </div>
-            <div class="vlab-kpi ${roi.riskCls}">
-              <div class="vlab-kpi-label">冷路径误删 / 排障风险指数</div>
-              <div class="vlab-kpi-num">${roi.crashOrFnRisk} / 100</div>
-              <div class="vlab-kpi-sub">${escapeHtml(roi.riskLabel)} · 排障：${escapeHtml(roi.img.debugScore)}</div>
-            </div>
-          </div>
-
-          <div class="rrl-bar-card">
-            <div class="vlab-section-label">生产性能开销 vs 告警保留比例量化对比</div>
-            <div class="rrl-bar-row">
-              <div class="rrl-bar-head">
-                <span>运行时探针 CPU 额外开销（标尺竖线 = 3.0% 生产准入上限）</span>
-                <span style="font-family:var(--font-mono);">${roi.tel.cpuOverhead.toFixed(1)}% / 16.0%</span>
-              </div>
-              <div class="rrl-sla-ruler">
-                <span class="rrl-sla-badge" style="left:${slaMarkPct}%;">3.0% 生产 SLA</span>
-              </div>
-              <div class="rrl-bar-track">
-                <div class="rrl-sla-marker" style="left:${slaMarkPct}%;"></div>
-                <div class="rrl-bar-fill ${roi.slaPass ? "is-fast" : "is-slow"}" style="width:${cpuBarPct}%;"></div>
-              </div>
-            </div>
-            <div class="rrl-bar-row">
-              <div class="rrl-bar-head">
-                <span>裁剪 + 运行时过滤后仍需人工/修复关注的告警占比</span>
-                <span style="font-family:var(--font-mono);">${roi.totalRemaining} 条 (${noiseKeepPct}%)</span>
-              </div>
-              <div class="rrl-bar-track">
-                <div class="rrl-bar-fill ${Number(noiseKeepPct) <= 35 ? "is-fast" : "is-warn"}" style="width:${noiseKeepPct}%;"></div>
-              </div>
-            </div>
-            <p class="rrl-bar-note">${escapeHtml(roi.verdictDesc)}</p>
-          </div>
+          <div class="rrl-roi-output">${renderRoiOutput(roi)}</div>
         `;
       }
 
@@ -823,8 +835,13 @@
 
       container.querySelectorAll('[data-action="slide"]').forEach((input) => {
         input.addEventListener("input", (e) => {
-          state[e.target.dataset.key] = Number(e.target.value);
-          render();
+          const key = e.target.dataset.key;
+          state[key] = Number(e.target.value);
+          const readout = container.querySelector(`[data-readout="${key}"]`);
+          if (readout) {
+            readout.textContent = key === "coveragePct" ? `${state[key]}%` : `${state[key]} 条`;
+          }
+          updateRoiOutput();
         });
       });
     }

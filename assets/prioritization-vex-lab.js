@@ -309,6 +309,25 @@
         };
       }
 
+      // 4. Valid Tier 1/2 VEX for non-hard-reachable states (matches EvaluatePriorityAndVEX)
+      if (
+        state.reachability === "POTENTIALLY_REACHABLE" &&
+        state.kevStatus === "none" &&
+        (state.vexSource === "vendor_signed" || state.vexSource === "internal_verified")
+      ) {
+        return {
+          tone: "is-ok",
+          ssvc: "Track（可审计降噪）",
+          sla: "常规周期 / 已豁免",
+          vexDecision: "VALID_EXTERNAL_VEX（Tier 1/2 VEX 生效）",
+          reason:
+            "静态存疑且未命中 KEV，经已验签上游厂商或本平台内审 VEX 确认不受影响（非 Tier 0 硬可达冲突），安全压降至 Track 并保留审计账本。",
+          canAutoIssueVex: false,
+          vexStatus: "not_affected",
+          vexJustification: "vulnerable_code_not_in_execute_path",
+        };
+      }
+
       // 4. Low EPSS but Reachable/Latent -> Attend (never auto-VEX!)
       if (
         state.reachability === "LATENT_REACHABLE" ||
@@ -344,7 +363,7 @@
     }
 
     function buildVexPreview(ssvcResult) {
-      const cveId = state.kevStatus !== "none" ? "CVE-2023-22515" : "CVE-2024-3094";
+      const cveId = state.kevStatus !== "none" ? "CVE-2026-41082" : "CVE-2026-39210";
       const productPurl = "pkg:oci/checkout-api@sha256:9f86d081884c7d659a2feaa0c55ad015";
       const subPurl = "pkg:golang/github.com/example/codec@v1.4.2";
       const isNotAffected = ssvcResult.vexStatus === "not_affected";
@@ -403,6 +422,23 @@
           specVersion: "1.7",
           serialNumber: "urn:uuid:7c9e6679-7425-40de-944b-e07fc1f90ae7",
           version: 1,
+          metadata: {
+            component: {
+              "bom-ref": productPurl,
+              type: "container",
+              name: "checkout-api",
+              purl: productPurl,
+            },
+          },
+          components: [
+            {
+              "bom-ref": subPurl,
+              type: "library",
+              name: "github.com/example/codec",
+              version: "v1.4.2",
+              purl: subPurl,
+            },
+          ],
           vulnerabilities: [
             {
               id: cveId,
@@ -427,10 +463,17 @@
           category: "csaf_vex",
           csaf_version: "2.0",
           title: `VEX Advisory for ${cveId}`,
+          publisher: {
+            category: "vendor",
+            name: "Platform Security Governance",
+            namespace: "https://sca.internal/security",
+          },
           tracking: {
             id: "SCA-VEX-2026-0192",
             status: "final",
             version: "1",
+            initial_release_date: "2026-11-24T08:30:00Z",
+            current_release_date: "2026-11-24T08:30:00Z",
           },
         },
         product_tree: {
@@ -483,6 +526,16 @@
         remainingActionable -= reachEliminated;
       }
 
+      if (state.useVexLedger) {
+        // VEX ledger formally seals unreachable + upstream verified not_affected with audit trail
+        if (state.useReachability) {
+          vexAudited = reachEliminated;
+        } else {
+          vexAudited = Math.round(N * 0.14);
+          remainingActionable = Math.max(totalKev, remainingActionable - vexAudited);
+        }
+      }
+
       if (state.useThreatSsvc) {
         // Among remaining reachable/potentially-reachable items, EPSS threshold separates immediate Act vs Attend/Track*
         const passRatio =
@@ -490,11 +543,6 @@
         const p0Act = Math.max(totalKev, Math.round(remainingActionable * passRatio));
         threatDeferred = remainingActionable - p0Act;
         remainingActionable = p0Act;
-      }
-
-      if (state.useVexLedger) {
-        // VEX ledger formally seals unreachable + upstream verified not_affected with audit trail
-        vexAudited = state.useReachability ? reachEliminated : Math.round(N * 0.14);
       }
 
       const noiseDropPct = (((N - remainingActionable) / N) * 100).toFixed(1);
@@ -512,12 +560,68 @@
       };
     }
 
-    function renderTriageTab() {
+    function renderTriageOutput() {
       const trad = evaluateTraditionalCvss();
       const lin = evaluateLinearWeighted();
       const ssvc = evaluateSsvcAndVex();
-      const percentile = estimateEpssPercentile(state.epssPct);
       const jsonText = buildVexPreview(ssvc);
+
+      return `
+        <div class="pvl-verdict-compare">
+          <div class="pvl-verdict-card ${trad.tone}">
+            <div class="pvl-verdict-kicker">反例 A · 传统 CVSS 门禁</div>
+            <div class="pvl-verdict-title">${escapeHtml(trad.verdict)}</div>
+            <div class="pvl-verdict-meta">${escapeHtml(trad.meta)}</div>
+            <p class="pvl-verdict-desc">${escapeHtml(trad.desc)}</p>
+          </div>
+
+          <div class="pvl-verdict-card ${lin.tone}">
+            <div class="pvl-verdict-kicker">反例 B · 线性加权平均</div>
+            <div class="pvl-verdict-title">${escapeHtml(lin.verdict)}</div>
+            <div class="pvl-verdict-meta">${escapeHtml(lin.meta)}</div>
+            <p class="pvl-verdict-desc">${escapeHtml(lin.desc)}</p>
+          </div>
+
+          <div class="pvl-verdict-card ${ssvc.tone}">
+            <div class="pvl-verdict-kicker">推荐 · SSVC 非补偿 + VEX</div>
+            <div class="pvl-verdict-title">${escapeHtml(ssvc.ssvc)}</div>
+            <div class="pvl-verdict-meta">SLA: ${escapeHtml(ssvc.sla)}</div>
+            <p class="pvl-verdict-desc"><strong>${escapeHtml(ssvc.vexDecision)}</strong>：${escapeHtml(ssvc.reason)}</p>
+          </div>
+        </div>
+
+        <div class="pvl-code-box">
+          <div class="pvl-code-head">
+            <span class="pvl-code-head-title">Layer 2 账本实时三协议投影（注意 PURL subcomponents 与枚举差异）</span>
+            <div class="pvl-format-tabs">
+              <button type="button" class="pvl-format-tab ${state.vexFormat === "openvex" ? "active" : ""}" data-format="openvex">OpenVEX v0.2</button>
+              <button type="button" class="pvl-format-tab ${state.vexFormat === "cyclonedx" ? "active" : ""}" data-format="cyclonedx">CycloneDX 1.7</button>
+              <button type="button" class="pvl-format-tab ${state.vexFormat === "csaf" ? "active" : ""}" data-format="csaf">CSAF 2.0 VEX</button>
+            </div>
+          </div>
+          <pre class="pvl-code-pre">${escapeHtml(jsonText)}</pre>
+        </div>
+      `;
+    }
+
+    function bindFormatTabs() {
+      container.querySelectorAll("[data-format]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.vexFormat = btn.dataset.format;
+          updateTriageOutput();
+        });
+      });
+    }
+
+    function updateTriageOutput() {
+      const outEl = container.querySelector(".pvl-triage-output");
+      if (!outEl) return;
+      outEl.innerHTML = renderTriageOutput();
+      bindFormatTabs();
+    }
+
+    function renderTriageTab() {
+      const percentile = estimateEpssPercentile(state.epssPct);
 
       return `
         <div class="pvl-presets">
@@ -536,7 +640,7 @@
               <div class="pvl-slider-row">
                 <div class="pvl-slider-head">
                   <span class="pvl-control-label">1. CVSS-B 基础严重性分（0.0–10.0）</span>
-                  <strong>${state.cvss.toFixed(1)}</strong>
+                  <strong data-readout="cvss">${state.cvss.toFixed(1)}</strong>
                 </div>
                 <input type="range" class="pvl-slider" data-slider="cvss" min="3.0" max="10.0" step="0.1" value="${state.cvss}" />
                 <span class="pvl-slider-sub">CVSS-B 默认假设最坏威胁态（E:A），仅反映潜在破坏力而非利用概率。</span>
@@ -547,7 +651,7 @@
               <div class="pvl-slider-row">
                 <div class="pvl-slider-head">
                   <span class="pvl-control-label">2. FIRST EPSS v4（30 天在野利用概率）</span>
-                  <strong>${state.epssPct.toFixed(1)}% <span style="color:var(--ink-muted);font-weight:500;">(≈ 第 ${percentile.toFixed(1)} 百分位)</span></strong>
+                  <strong data-readout="epss">${state.epssPct.toFixed(1)}% <span style="color:var(--ink-muted);font-weight:500;">(≈ 第 ${percentile.toFixed(1)} 百分位)</span></strong>
                 </div>
                 <input type="range" class="pvl-slider" data-slider="epss" min="0.1" max="95.0" step="0.1" value="${state.epssPct}" />
                 <span class="pvl-slider-sub">警戒：Percentile（分位数）≠ Probability（绝对概率）！0.4% 概率仍排全库前 ~42%。</span>
@@ -607,42 +711,7 @@
             </div>
           </div>
 
-          <div>
-            <div class="pvl-verdict-compare">
-              <div class="pvl-verdict-card ${trad.tone}">
-                <div class="pvl-verdict-kicker">反例 A · 传统 CVSS 门禁</div>
-                <div class="pvl-verdict-title">${escapeHtml(trad.verdict)}</div>
-                <div class="pvl-verdict-meta">${escapeHtml(trad.meta)}</div>
-                <p class="pvl-verdict-desc">${escapeHtml(trad.desc)}</p>
-              </div>
-
-              <div class="pvl-verdict-card ${lin.tone}">
-                <div class="pvl-verdict-kicker">反例 B · 线性加权平均</div>
-                <div class="pvl-verdict-title">${escapeHtml(lin.verdict)}</div>
-                <div class="pvl-verdict-meta">${escapeHtml(lin.meta)}</div>
-                <p class="pvl-verdict-desc">${escapeHtml(lin.desc)}</p>
-              </div>
-
-              <div class="pvl-verdict-card ${ssvc.tone}">
-                <div class="pvl-verdict-kicker">推荐 · SSVC 非补偿 + VEX</div>
-                <div class="pvl-verdict-title">${escapeHtml(ssvc.ssvc)}</div>
-                <div class="pvl-verdict-meta">SLA: ${escapeHtml(ssvc.sla)}</div>
-                <p class="pvl-verdict-desc"><strong>${escapeHtml(ssvc.vexDecision)}</strong>：${escapeHtml(ssvc.reason)}</p>
-              </div>
-            </div>
-
-            <div class="pvl-code-box">
-              <div class="pvl-code-head">
-                <span class="pvl-code-head-title">Layer 2 账本实时三协议投影（注意 PURL subcomponents 与枚举差异）</span>
-                <div class="pvl-format-tabs">
-                  <button type="button" class="pvl-format-tab ${state.vexFormat === "openvex" ? "active" : ""}" data-format="openvex">OpenVEX v0.2</button>
-                  <button type="button" class="pvl-format-tab ${state.vexFormat === "cyclonedx" ? "active" : ""}" data-format="cyclonedx">CycloneDX 1.7</button>
-                  <button type="button" class="pvl-format-tab ${state.vexFormat === "csaf" ? "active" : ""}" data-format="csaf">CSAF 2.0 VEX</button>
-                </div>
-              </div>
-              <pre class="pvl-code-pre">${escapeHtml(jsonText)}</pre>
-            </div>
-          </div>
+          <div class="pvl-triage-output">${renderTriageOutput()}</div>
         </div>
       `;
     }
@@ -738,14 +807,22 @@
 
           <div class="pvl-funnel-row">
             <div class="pvl-funnel-head">
-              <span>阶段 2 · SSVC (KEV + EPSS + 暴露面) 精筛 P0 Act 立即修复（其余 ${stats.threatDeferred} 条分流至 Attend/Track*）</span>
+              <span>${
+                state.useThreatSsvc
+                  ? `阶段 2 · SSVC (KEV + EPSS &ge; ${state.epssThreshold}% + 暴露面) 精筛 P0 Act 立即修复（其余 ${stats.threatDeferred} 条分流至 Attend/Track*）`
+                  : "阶段 2 · 未启用 EPSS / KEV / SSVC 分流（保持上一步全量进入处理队列）"
+              }</span>
               <span>${stats.remainingActionable} 条 (${pct(stats.remainingActionable)}%)</span>
             </div>
             <div class="pvl-funnel-track">
               <div class="pvl-funnel-fill is-ok" style="width:${Math.max(2, Number(pct(stats.remainingActionable)))}%;"></div>
             </div>
             <p class="pvl-funnel-note">
-              <strong>可审计 VEX 账本闭环：</strong>已自动归档签发 <strong>${stats.vexAudited} 条</strong>带证据链的 VEX <code>not_affected</code> 声明，且全数 ${stats.totalKev} 条 CISA KEV（含低 CVSS 勒索条目）100% 强制留在处理队列中。
+              ${
+                state.useVexLedger
+                  ? `<strong>可审计 VEX 账本闭环：</strong>已自动归档签发 <strong>${stats.vexAudited} 条</strong>带证据链的 VEX <code>not_affected</code> 声明，且全数 ${stats.totalKev} 条 CISA KEV（含低 CVSS 勒索条目）100% 强制留在处理队列中。`
+                  : `<strong>提示：</strong>当前未启用 VEX 账本自动签发，全数 ${stats.totalKev} 条 CISA KEV 均强制留在处理队列中。`
+              }
             </p>
           </div>
         </div>
@@ -825,7 +902,10 @@
         cvssSlider.addEventListener("input", (e) => {
           state.presetId = "";
           state.cvss = parseFloat(e.target.value);
-          render();
+          container.querySelectorAll(".pvl-preset-btn.active").forEach((b) => b.classList.remove("active"));
+          const readout = container.querySelector('[data-readout="cvss"]');
+          if (readout) readout.textContent = state.cvss.toFixed(1);
+          updateTriageOutput();
         });
       }
 
@@ -834,7 +914,13 @@
         epssSlider.addEventListener("input", (e) => {
           state.presetId = "";
           state.epssPct = parseFloat(e.target.value);
-          render();
+          container.querySelectorAll(".pvl-preset-btn.active").forEach((b) => b.classList.remove("active"));
+          const readout = container.querySelector('[data-readout="epss"]');
+          if (readout) {
+            const pctl = estimateEpssPercentile(state.epssPct);
+            readout.innerHTML = `${state.epssPct.toFixed(1)}% <span style="color:var(--ink-muted);font-weight:500;">(≈ 第 ${pctl.toFixed(1)} 百分位)</span>`;
+          }
+          updateTriageOutput();
         });
       }
 
@@ -870,12 +956,7 @@
         });
       });
 
-      container.querySelectorAll("[data-format]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          state.vexFormat = btn.dataset.format;
-          render();
-        });
-      });
+      bindFormatTabs();
 
       container.querySelectorAll("[data-funnel-toggle]").forEach((cb) => {
         cb.addEventListener("change", () => {

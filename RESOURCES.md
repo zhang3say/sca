@@ -101,7 +101,7 @@
   [`tree-sitter/tree-sitter`](https://github.com/tree-sitter/tree-sitter)（`MIT`）仅提供单文件增量 CST/AST 语法解析，适合做 L3 修复 Commit Patch-Diff 符号提取，**不可充当跨文件调用图引擎**；[`google/osv-scanner`](https://github.com/google/osv-scanner) 的 `--call-analysis` 目前默认支持 Go（`govulncheck`）、实验性支持 Rust（需执行 `build.rs`）、尚无原生 Java CLI 调用分析；[`AppThreat/atom`](https://github.com/AppThreat/atom) 与 [`joernio/joern`](https://github.com/joernio/joern)（`Apache-2.0`）提供重型代码属性图（CPG）离线深度参考。
 
 ### 动态运行时可达性、执行遥测与容器裁剪（Layer 4 Runtime & Debloating）
-- [Runtime Container Relevancy: Kubescape & `kubescape/node-agent` (`Apache-2.0`, CNCF)](https://github.com/kubescape/node-agent) ([Kubescape Docs](https://kubescape.io/docs/components/node-agent/))
+- [Runtime Container Relevancy: Kubescape & `kubescape/node-agent` (`Apache-2.0`, CNCF)](https://github.com/kubescape/node-agent) ([Kubescape Docs](https://kubescape.io/docs/operator/runtime-threat-detection/))
   CNCF 孵化项目；以轻量 eBPF Node Agent 观察生产容器文件与进程访问，生成 `ApplicationProfile` CRD 并与 `SBOMSyft` 交叉过滤输出 `SBOMSyftFiltered`（消除 60%–80% 未使用 OS 冗余包 CVE）。用于：作为 BYO-Telemetry 标准接入参照及容器 OS 层运行态过滤标杆。
 - [eBPF Runtime Sensors & Dual-License Boundary: Cilium Tetragon (`cilium/tetragon`) · Aqua Tracee (`aquasecurity/tracee`) · Falco Libs (`falcosecurity/libs`) · Inspektor Gadget (`inspektor-gadget/inspektor-gadget`)](https://github.com/cilium/tetragon)
   四者用户态组件均采用 `Apache-2.0`，但内核侧调用 GPL-only helper 的 eBPF C 程序须声明 `GPL-2.0` / `Dual BSD-GPL`（`SEC("license") = "GPL"`）。商用闭源架构边界：严禁把 GPL eBPF 内核源码静态混编进核心闭源二进制，须独立进程/DaemonSet 运行并通过 gRPC/JSON 输出标准化 `RuntimeEvidence`。

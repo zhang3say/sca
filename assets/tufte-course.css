@@ -5408,27 +5408,13 @@ pre code,
 }
 
 @media (max-width: 920px) {
-  .pvl-card {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  padding: 0.9rem 1rem;
-}
-
-.pvl-trigger-grid {
+  .pvl-trigger-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 520px) {
-  .pvl-card {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  padding: 0.9rem 1rem;
-}
-
-.pvl-trigger-grid {
+  .pvl-trigger-grid {
     grid-template-columns: 1fr;
   }
 }

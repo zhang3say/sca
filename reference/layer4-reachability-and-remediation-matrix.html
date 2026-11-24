@@ -31,7 +31,7 @@
       <h1>Layer 4 可达性分析、智能降噪与安全修复速查矩阵</h1>
       <p class="subtitle">供 Layer 4 静态调用图、运行时可达性融合网关、容器减面路线、EPSS/KEV/SSVC 威胁分级与 VEX 账本评审时随时翻阅（当前已覆盖 Lesson 0011–0013，并将随 Chapter 04 收官扩展至 Lesson 0014）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> &amp; VEX · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV</a> · <a href="https://kubescape.io/docs/components/node-agent/" target="_blank" rel="noopener">Kubescape</a> · OpenJDK JFR · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS v4</a> · <a href="https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc" target="_blank" rel="noopener">CISA KEV / SSVC</a> · <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> · <a href="https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html" target="_blank" rel="noopener">OASIS CSAF 2.0</a></span>
+        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> &amp; VEX · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV</a> · <a href="https://kubescape.io/docs/operator/runtime-threat-detection/" target="_blank" rel="noopener">Kubescape</a> · OpenJDK JFR · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS v4</a> · <a href="https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc" target="_blank" rel="noopener">CISA KEV / SSVC</a> · <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> · <a href="https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html" target="_blank" rel="noopener">OASIS CSAF 2.0</a></span>
         <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012</a> · <a href="../lessons/0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013</a>（后续将接入 0014）</span>
       </div>
     </header>
@@ -96,7 +96,7 @@
               <td><strong><code>UNREACHABLE</code> &amp; <code>UNKNOWN</code></strong><br/><span class="badge badge-ok">四态之三/四</span></td>
               <td><code>UNREACHABLE</code>：封闭静态分支已证不可达；<code>UNKNOWN</code>：构建/前端失败兜底。</td>
               <td>区分“可证死代码消噪”与“解析异常”，防止工具报错被当成安全。</td>
-              <td><code>UNREACHABLE</code> 自动签发 VEX <code>code_not_reachable</code> 消警（Lesson 0013）。</td>
+              <td><code>UNREACHABLE</code> 自动签发 CycloneDX VEX <code>code_not_reachable</code>（对应 OpenVEX <code>vulnerable_code_not_in_execute_path</code>）消警（Lesson 0013）。</td>
             </tr>
           </tbody>
         </table>
@@ -180,7 +180,7 @@
           <tbody>
             <tr>
               <td><strong>四层运行时采集</strong><br/>（&lt; 1%–2.5% CPU）</td>
-              <td><a href="https://kubescape.io/docs/components/node-agent/" target="_blank" rel="noopener">Kubescape</a> (<code>Apache-2.0</code>) · JFR <code>jdk.ClassLoad</code> · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://nodejs.org/api/cli.html#node_v8_coveragedir" target="_blank" rel="noopener"><code>NODE_V8_COVERAGE</code></a></td>
+              <td><a href="https://kubescape.io/docs/operator/runtime-threat-detection/" target="_blank" rel="noopener">Kubescape</a> (<code>Apache-2.0</code>) · JFR <code>jdk.ClassLoad</code> · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://nodejs.org/api/cli.html#node_v8_coveragedir" target="_blank" rel="noopener"><code>NODE_V8_COVERAGE</code></a></td>
               <td>按 <code>image_digest</code> 归一消费 <code>RuntimeEvidence</code>；JVM 用 JFR（<code>stackTrace=false</code>）；Python 用 PEP 669。</td>
               <td>严禁轮询 <code>getAllLoadedClasses()</code> 或线上挂载 <code>sys.settrace</code>/全量插桩；eBPF 内核 C 须进程隔离。</td>
             </tr>

@@ -308,7 +308,7 @@
         emitVexConflictAlert(in)
         <span class="tok-kw">return</span> ActionAct, <span class="tok-str">"REJECTED_VEX_CONFLICT"</span>
     }
-    <span class="tok-cmt">// 2. 静动态双证不可达 -> 压降为 Track 并可安全签发带子组件作用域的 VEX</span>
+    <span class="tok-cmt">// 2. 静动态双证不可达 -&gt; 压降为 Track 并可安全签发带子组件作用域的 VEX</span>
     <span class="tok-kw">if</span> in.ReachState == <span class="tok-str">"VERIFIED_UNREACHABLE"</span> {
         <span class="tok-kw">return</span> ActionTrack, <span class="tok-str">"ISSUE_INTERNAL_VEX_NOT_AFFECTED"</span>
     }
@@ -572,7 +572,7 @@
               "options": [
                 "前者用 not_affected 配 code_not_reachable，后者用 false_positive 标误报。",
                 "前者用 false_positive 标不可达，后者用 not_affected 配 code_not_present。",
-                "前者用 resolved_with_pedigree 标不可达，后者用 in_triage 等人工复核确认。",
+                "前者用 resolved_with_pedigree 标不可达，后者用 in_triage 交由安全团队复核并确认。",
                 "前者用 exploitable 配 requires_environment，后者用 resolved 标已经消除风险。"
               ],
               "answerIndex": 0,
@@ -593,7 +593,7 @@
               "prompt": "为商业闭源 SaaS 平台建设 EPSS 情报接入与 VEX 生命周期引擎，以下哪种工程与合规组合能同时满足高并发 SLA、防永久静默黑洞与商用协议红线？",
               "options": [
                 "在线同步请求官方接口算分，用低传染开源库，并永久静默人工豁免。",
-                "每日同步全量压缩表，用纯 Apache 库，并靠事件与到期触发撤销。",
+                "每日同步全量压缩，用 Apache 底座，并靠事件和到期触发撤销。",
                 "高频轮询接口并转售原始数据集，靠手动删除台账，且跳过署名声明。",
                 "把人工缓解声明设为永不过期，改写历史扫描记录，且不绑定代码版本。"
               ],

@@ -159,7 +159,7 @@
             <td><code>REACHABLE</code></td>
             <td><code>NOT_OBSERVED</code>（哪怕 &ge; 14d）</td>
             <td><span class="badge badge-danger">LATENT_REACHABLE</span></td>
-            <td><strong>严守冷路径底线（保留 P1 高危）</strong>：防 Exploit-Only Gadget 与月末批处理漏报；<strong>绝对禁止</strong>自动签发 VEX <code>code_not_reachable</code>！</td>
+            <td><strong>严守冷路径底线（保留 P1 高危）</strong>：防 Exploit-Only Gadget 与月末批处理漏报；<strong>绝对禁止</strong>自动签发 CycloneDX VEX <code>code_not_reachable</code>（或 OpenVEX <code>vulnerable_code_not_in_execute_path</code>）！</td>
           </tr>
           <tr>
             <td><code>POTENTIALLY_REACHABLE</code></td>
@@ -171,7 +171,7 @@
             <td><code>POTENTIALLY_REACHABLE</code></td>
             <td><code>NOT_OBSERVED</code>（窗口成熟 &ge; 14d）</td>
             <td><span class="badge badge-warn">DORMANT_POTENTIAL</span></td>
-            <td>允许从 P1 降权至 P2 观察队列以释放研发精力，但因静态未证死，仍不自动签发 VEX（交由 Lesson 0013 EPSS/KEV 再评）。</td>
+            <td>允许从 P1 降权至 P2 观察队列以释放研发精力，但因静态未证死，仍不自动签发 VEX（交由 <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013</a> EPSS/KEV 再评）。</td>
           </tr>
           <tr>
             <td><code>UNREACHABLE</code></td>
@@ -183,7 +183,7 @@
             <td><code>UNREACHABLE</code></td>
             <td><code>NOT_OBSERVED</code></td>
             <td><span class="badge badge-ok">VERIFIED_UNREACHABLE</span></td>
-            <td><strong>双证合璧消噪</strong>：静态图封闭剪枝 + 运行时零加载，置信度拉满，自动签发带审计证据链的 VEX <code>code_not_reachable</code>。</td>
+            <td><strong>双证合璧消噪</strong>：静态图封闭剪枝 + 运行时零加载，置信度拉满，自动签发带审计证据链的 CycloneDX VEX <code>code_not_reachable</code>（OpenVEX <code>vulnerable_code_not_in_execute_path</code>）。</td>
           </tr>
           <tr>
             <td><code>OS_PKG_L0</code>（容器 OS 包）</td>
@@ -267,7 +267,7 @@
     <span class="tok-kw">if</span> rt.Signal == SigNoTelemetry {
         <span class="tok-kw">return</span> fallbackToStatic(staticState) <span class="tok-cmt">// 无运行态数据一律回退静态基线</span>
     }
-    <span class="tok-cmt">// 1. 反向自愈校验：静态判不可达，但生产实测加载/执行 -> 静态图存在漏边 Bug!</span>
+    <span class="tok-cmt">// 1. 反向自愈校验：静态判不可达，但生产实测加载/执行 -&gt; 静态图存在漏边 Bug!</span>
     <span class="tok-kw">if</span> staticState == StaticUnreachable &amp;&amp; (rt.Signal == SigExecutedFunc || rt.Signal == SigLoadedClassOrLib) {
         emitStaticSoundnessTicket(rt.PURL, rt.ImageDigest)
         <span class="tok-kw">return</span> FusionVerdict{Status: <span class="tok-str">"STATIC_SOUNDNESS_ALERT"</span>, Priority: <span class="tok-str">"P0"</span>, AllowVEX: <span class="tok-kw">false</span>}
@@ -597,7 +597,7 @@
         <h3>一手必读原典（Primary Source）</h3>
         <p>落地 Layer 4 运行时可达性融合网关与容器减面引擎时，推荐精读以下一手规范、论文与 Apache-2.0 代码库：</p>
         <ul style="margin-bottom:0.5rem;">
-          <li><a href="https://kubescape.io/docs/components/node-agent/" target="_blank" rel="noopener"><strong>Kubescape <code>node-agent</code> &amp; Relevancy Filtering</strong></a>（<code>Apache-2.0</code>）：<code>ApplicationProfile</code> + <code>SBOMSyftFiltered</code> 生产级容器 OS 降噪范本。</li>
+          <li><a href="https://kubescape.io/docs/operator/runtime-threat-detection/" target="_blank" rel="noopener"><strong>Kubescape <code>node-agent</code> &amp; Relevancy Filtering</strong></a>（<code>Apache-2.0</code>）：<code>ApplicationProfile</code> + <code>SBOMSyftFiltered</code> 生产级容器 OS 降噪范本。</li>
           <li><a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener"><strong>Python PEP 669 (<code>sys.monitoring</code>)</strong></a> · <a href="https://nodejs.org/api/cli.html#node_v8_coveragedir" target="_blank" rel="noopener"><strong>Node.js <code>NODE_V8_COVERAGE</code></strong></a> · <strong>OpenJDK JFR <code>jdk.ClassLoad</code></strong>：三大主流运行时的低开销生产观测原生接口。</li>
           <li><a href="https://arxiv.org/abs/2407.11259" target="_blank" rel="noopener"><strong><em>SoK: Software Debloating</em> (<code>arXiv:2407.11259</code>)</strong></a> · <a href="https://doi.org/10.1145/3106237.3106271" target="_blank" rel="noopener"><strong><em>Cimplifier</em> (ESEC/FSE 2017)</strong></a> · <a href="https://doi.org/10.1145/3368089.3409738" target="_blank" rel="noopener"><strong><em>JShrink</em> (ESEC/FSE 2020)</strong></a> · <a href="https://arxiv.org/abs/2008.05561" target="_blank" rel="noopener"><strong><em>Confine</em> (RAID 2020)</strong></a>：容器与字节码裁剪的精度、冷路径与系统调用边界学术定论。</li>
           <li><a href="https://github.com/chainguard-dev/apko" target="_blank" rel="noopener"><strong>Chainguard <code>apko</code> / <code>melange</code></strong></a> &amp; <a href="https://github.com/mintoolkit/mint" target="_blank" rel="noopener"><strong>MinToolkit (<code>mint</code>)</strong></a>（均 <code>Apache-2.0</code>）：构建期最小闭包 vs 运行期瘦身（与 <code>AGPL-3.0</code> 的 <a href="https://github.com/canonical/chisel" target="_blank" rel="noopener"><code>canonical/chisel</code></a> 划清边界）。</li>
@@ -618,7 +618,7 @@
     <footer class="lesson-end-nav">
       <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">← 上一课：Lesson 0011 · 静态函数级可达性</a>
       <a href="../reference/layer4-reachability-and-remediation-matrix.html">配套速查卡：Ref 05 · L4 可达与修复矩阵</a>
-      <a href="../index.html">返回课程总览 · 准备进入 Lesson 0013（EPSS / KEV / VEX） →</a>
+      <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">下一课：Lesson 0013 · EPSS / KEV / VEX 协同降噪 →</a>
     </footer>
   </main>
 
