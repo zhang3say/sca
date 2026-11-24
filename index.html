@@ -12,7 +12,8 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="./index.html" class="active">课程首页 · 全局路线图</a>
-        <a href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">当前课程 · Lesson 0010</a>
+        <a href="./lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">当前课程 · Lesson 0011</a>
+        <a href="./reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
         <a href="./reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
         <a href="./reference/layer1-resolution-and-extractor-matrix.html">Ref 03 · 提取器与解析矩阵</a>
         <a href="./reference/purl-and-layer2-ir-dictionary.html">Ref 02 · PURL 与 IR 字典</a>
@@ -34,13 +35,13 @@
       <div class="hero-stats">
         <div class="stat-card">
           <div class="stat-label">课程进度</div>
-          <div class="stat-value">10 / 22 课</div>
-          <div class="stat-sub">Phase 1 全 10 课完结 · 下一课 0011</div>
+          <div class="stat-value">11 / 22 课</div>
+          <div class="stat-sub">Phase 2 已启航 · 下一课 0012</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">当前主攻阶段</div>
           <div class="stat-value">Phase 2</div>
-          <div class="stat-sub">Phase 1 已收官 · 开启 L4 高价值壁垒</div>
+          <div class="stat-sub">Ch 04 L4 可达性壁垒推进中</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">商用协议红线</div>
@@ -49,14 +50,14 @@
         </div>
         <div class="stat-card">
           <div class="stat-label">速查卡片库</div>
-          <div class="stat-value">4 / 4 份</div>
-          <div class="stat-sub">Phase 1 四大基石速查卡已全部收口</div>
+          <div class="stat-value">5 / 5 份</div>
+          <div class="stat-sub">新增 Ref 05 · L4 可达与修复矩阵</div>
         </div>
       </div>
 
       <div class="hero-actions">
-        <a class="btn-link-primary" href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">进入当前课程：Lesson 0010 →</a>
-        <a class="btn-link-secondary" href="./reference/layer3-intel-and-version-matrix.html">打开完整速查卡：Ref 04 L3 情报、版本与许可矩阵</a>
+        <a class="btn-link-primary" href="./lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">进入当前课程：Lesson 0011 →</a>
+        <a class="btn-link-secondary" href="./reference/layer4-reachability-and-remediation-matrix.html">打开完整速查卡：Ref 05 L4 可达与修复矩阵</a>
       </div>
     </header>
 
@@ -349,24 +350,26 @@
         <span class="badge badge-build">4 课 · L4 核心壁垒</span>
       </div>
       <ul class="lesson-list">
-        <li class="lesson-row is-next" data-phase="p2" data-layer="L4" data-status="next">
+        <li class="lesson-row is-available" data-phase="p2" data-layer="L4" data-status="ready">
           <div class="lesson-num">0011</div>
           <div>
-            <div class="lesson-main-title">静态函数级可达性（Call Graph）底层原理与跨语言工程挑战</div>
-            <p class="lesson-desc">拆解 CHA / RTA / 指针分析精度与性能权衡；逐语言解析 Java 字节码、Go SSA、JS/Python 动态派发难点，以及 L3 漏洞函数级符号指纹如何驱动调用路径剪枝。</p>
+            <div class="lesson-main-title">
+              <a href="./lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">静态函数级可达性（Call Graph）底层原理与跨语言工程挑战</a>
+            </div>
+            <p class="lesson-desc">拆解 CHA / RTA / VTA / 0-CFA 算法光谱与四态置信度护栏；深剖 Go SSA+VTA、Java 字节码/Spring DI/Trigger API、JS/TS <code>Jelly</code> Indirection-Bounded 与 Python <code>PyCG/JARVIS</code> 断链基准，拍板 L3 符号映射、预计算摘要拼接与避开 <code>SootUp</code>(LGPL)/<code>CodeQL</code> 红线。</p>
             <div class="lesson-tags">
               <span class="tag-chip">L4 核心壁垒</span>
-              <span class="tag-chip">Call Graph · AST/SSA/Bytecode</span>
-              <span class="tag-chip">标杆：Endor Labs</span>
+              <span class="tag-chip">CHA/RTA/VTA · Go/Java/JS/Python</span>
+              <span class="tag-chip">Endor · Coana/Jelly · PyCG/JARVIS</span>
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="badge badge-ok">已发布 · 可学习</span>
             <span class="lesson-duration">~20 min</span>
           </div>
         </li>
 
-        <li class="lesson-row" data-phase="p2" data-layer="L4,L1" data-status="planned">
+        <li class="lesson-row is-next" data-phase="p2" data-layer="L4,L1" data-status="next">
           <div class="lesson-num">0012</div>
           <div>
             <div class="lesson-main-title">动态运行时可达性与容器裁剪：用真实执行上下文击穿误报</div>
@@ -378,7 +381,7 @@
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-blue">规划中</span>
+            <span class="badge badge-build">下一课 · ZPD</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>
@@ -621,12 +624,21 @@
           </div>
           <div style="font-size:0.8rem;"><a href="./reference/layer3-intel-and-version-matrix.html">打开速查卡 →</a></div>
         </div>
+
+        <div class="ref-card">
+          <div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
+            <h4><a href="./reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · Layer 4 可达性分析、智能降噪与安全修复速查矩阵</a></h4>
+            <p style="margin-top:0.35rem;">已接入 Lesson 0011 精华（随 CH 04 持续扩展）：CHA/RTA/VTA/0-CFA 算法光谱与四态置信度护栏、Go/Java/JS/Python 前端与商业红线（避开 SootUp LGPL/CodeQL）及 L3 符号映射与拼接骨架。</p>
+          </div>
+          <div style="font-size:0.8rem;"><a href="./reference/layer4-reachability-and-remediation-matrix.html">打开速查卡 →</a></div>
+        </div>
       </div>
     </section>
 
     <footer class="lesson-end-nav">
       <span>工作区指南：可在对话中随时输入 <code>/teach</code> 继续下一课、点播任意章节，或调整学习目标</span>
-      <a href="./lessons/0010-oss-license-compliance-and-copyleft-reasoning.html">开始 / 继续 Lesson 0010 →</a>
+      <a href="./lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">开始 / 继续 Lesson 0011 →</a>
     </footer>
   </main>
 

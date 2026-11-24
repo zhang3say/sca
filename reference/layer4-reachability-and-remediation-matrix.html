@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查参考 05：Layer 4 可达性分析、智能降噪与安全修复速查矩阵</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011 · 静态函数级可达性</a>
+        <a href="./layer4-reachability-and-remediation-matrix.html" class="active">Ref 05 · L4 可达与修复矩阵</a>
+        <a href="./layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>REFERENCE CARD 05</span>
+        <span class="sep">/</span>
+        <span>PRINT-READY LAYER 4 CHEAT SHEET</span>
+      </div>
+      <h1>Layer 4 可达性分析、智能降噪与安全修复速查矩阵</h1>
+      <p class="subtitle">供 Layer 4 静态调用图前端、L3 漏洞符号映射管线、生态预计算拼接（Stitching）、四态置信度护栏与后续运行时/VEX/自动修复评审时随时翻阅（当前已覆盖 Lesson 0011，并将随 Chapter 04 推进扩展至 0012–0014）。</p>
+      <div class="meta-strip">
+        <span><strong>依据标准与基准：</strong>CycloneDX 1.7 <code>evidence.callstack</code> · OSV <code>ecosystem_specific.imports[].symbols</code> · Go VTA · Reif et al. ISSTA 2019 <em>Judge</em> (<code>opalj/JCG</code>) · <code>cs-au-dk/jelly</code> · PyCG / JARVIS</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a>（后续将接入 0012–0014）</span>
+      </div>
+    </header>
+
+    <!-- SECTION 1: CALL GRAPH ALGORITHMS & 4-STATE CONFIDENCE -->
+    <section class="full-width">
+      <h2 style="margin-top:0;"><span class="sec-num">01</span>静态调用图算法光谱（CHA / RTA / VTA / 0-CFA）与四态置信度规范（Lesson 0011）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:26%" />
+            <col style="width:28%" />
+            <col style="width:26%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>算法 / 状态级别</th>
+              <th>核心机制 / 定义条件</th>
+              <th>工程表现与精度边界</th>
+              <th>商业 SCA 门禁与 VEX 动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>CHA</strong><br/>（ECOOP 1995）</td>
+              <td>仅依声明类型 + 类继承层次树连边，不校验是否实例化。</td>
+              <td>近线性 <code>O(V + E)</code>；多实现接口下产生大量不可执行假边。</td>
+              <td>仅作 VTA 种子初图或冷启动兜底，不可作为商业降噪卖点。</td>
+            </tr>
+            <tr>
+              <td><strong>RTA</strong><br/>（OOPSLA 1996）</td>
+              <td>维护全程序单一“已实例化类集合”剪除未分配类。</td>
+              <td>快但抗污染差：无关测试包或邻模块 <code>new T()</code> 即污染全局。</td>
+              <td>仅适单模块快扫；企业大仓库必须升级至变量级传播。</td>
+            </tr>
+            <tr>
+              <td><strong>VTA</strong><br/>（OOPSLA 2000 · Go <code>govulncheck</code>）</td>
+              <td>SSA 上建变量级类型传播图，按赋值/参数边精确追踪类型流。</td>
+              <td><strong>商业甜点区</strong>：免疫测试包实例污染，近线性扩展，精度高。</td>
+              <td>主力算法（Go 原生 <code>x/tools/go/callgraph/vta</code>）。</td>
+            </tr>
+            <tr>
+              <td><strong>0-CFA / k-CFA</strong></td>
+              <td>字段敏感 / 调用上下文敏感指针分配点不动点分析。</td>
+              <td>理论精度最高；大工程易 <code>O(n<sup>3</sup>)</code> 超时与峰值内存爆炸。</td>
+              <td>仅配合云端库摘要按需/限深使用，禁无上限全量进 30s PR SLA。</td>
+            </tr>
+            <tr>
+              <td><strong><code>REACHABLE</code></strong><br/><span class="badge badge-danger">四态之一 · P0</span></td>
+              <td>存在 Entrypoint &rarr; Sink（或 Trigger API / Level 1 顶层副作用）完整路径。</td>
+              <td>高置信度真阳，输出 CycloneDX 1.7 <code>evidence.callstack.frames[]</code>。</td>
+              <td>PR 门禁阻断 + 自动生成修复 PR（Lesson 0014）。</td>
+            </tr>
+            <tr>
+              <td><strong><code>POTENTIALLY_REACHABLE</code></strong><br/><span class="badge badge-warn">四态之二 · 护栏</span></td>
+              <td>模块已导入（Level 1），但遇 <code>getattr</code> / 反射 / 动态代理 / 缺 L3 符号而断链。</td>
+              <td><strong>严禁谎报不可达！</strong>记录 <code>UNKNOWN_DYNAMIC</code> / <code>MISSING_SYMBOL_DB</code> 原因码。</td>
+              <td>移交 <strong>Lesson 0012 运行时探针</strong>实证确认或人工安全审阅。</td>
+            </tr>
+            <tr>
+              <td><strong><code>UNREACHABLE</code> &amp; <code>UNKNOWN</code></strong><br/><span class="badge badge-ok">四态之三/四</span></td>
+              <td><code>UNREACHABLE</code>：封闭静态分支已证不可达；<code>UNKNOWN</code>：构建/前端失败兜底。</td>
+              <td>区分“可证死代码消噪”与“解析异常”，防止工具报错被当成安全。</td>
+              <td><code>UNREACHABLE</code> 自动签发 VEX <code>code_not_reachable</code> 消警（Lesson 0013）。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 2: CROSS-LANGUAGE MATRIX, MOATS & LICENSE REDLINE -->
+    <section class="full-width">
+      <h2><span class="sec-num">02</span>跨语言前端、L3 符号映射、生态预计算与商用引擎选型矩阵（Lesson 0011）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:18%" />
+            <col style="width:22%" />
+            <col style="width:30%" />
+            <col style="width:30%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>域 / 语言族</th>
+              <th>推荐商用底座与许可</th>
+              <th>核心工程破局点（避坑要点）</th>
+              <th>闭源红线与架构隔离要求</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Go 生态</strong></td>
+              <td><code>golang.org/x/tools</code> + <code>x/vuln</code>（<code>BSD-3-Clause</code>）；<code>vuln.go.dev</code>（<code>CC-BY-4.0</code>）</td>
+              <td><code>go/packages</code> &rarr; <code>ssa</code> &rarr; VTA；强制将 <code>init()</code> 与异步协程 <code>go fn()</code> 设为入口根节点。</td>
+              <td>直接嵌入 Go Core；复用 <code>vuln.go.dev</code> 符号数据须保留 <code>CC-BY-4.0</code> 署名。</td>
+            </tr>
+            <tr>
+              <td><strong>Java / JVM</strong></td>
+              <td><code>OW2 ASM</code>（<code>BSD-3-Clause</code>） / <code>OPAL</code>（<code>BSD-2-Clause</code>） / <code>WALA</code>（<code>EPL-2.0</code>）</td>
+              <td>基于编译 <code>.class</code>/<code>.jar</code> 分析；合成 Spring DI（<code>@PostMapping</code>）入口；L3 标注反序列化 Trigger API。</td>
+              <td><span class="badge badge-danger">严禁</span> 将 <strong><code>SootUp</code>（<code>LGPL-2.1</code>）</strong> 静态打进闭源 Fat-JAR，亦严禁内嵌 <strong>CodeQL</strong> 商用！</td>
+            </tr>
+            <tr>
+              <td><strong>JavaScript / TypeScript</strong></td>
+              <td><code>TypeScript API</code>（<code>Apache-2.0</code>）+ <code>cs-au-dk/jelly</code>（<code>BSD-3-Clause</code>）</td>
+              <td>采用 Indirection-Bounded（ECOOP 2024）穿透高阶回调；<strong>必开 Level 1 顶层导入副作用</strong>捕获恶意初始化。</td>
+              <td>独立 Node Worker 封装；Tree-sitter（MIT）不可用于跨文件 JS 调用解析。</td>
+            </tr>
+            <tr>
+              <td><strong>Python</strong></td>
+              <td><code>PyCG</code>（<code>Apache-2.0</code>）+ JARVIS（ICSE 2023）按需流敏感类型图</td>
+              <td>采用应用为中心按需构图防止全依赖树卡死；遇 <code>getattr()</code>/<code>eval</code>/C 扩展触发 <code>UNKNOWN_DYNAMIC</code> 降级。</td>
+              <td>切勿因 PyCG ~69.9% 召回上限而把未连通路径直接标为安全豁免。</td>
+            </tr>
+            <tr>
+              <td><strong>L3→L4 符号库 &amp; 预计算拼接</strong></td>
+              <td><code>Tree-sitter</code>（<code>MIT</code>）做 Patch-Diff + 自研 Summary 缓存</td>
+              <td>Fix Commit AST 提符 + LLM 初筛 + 专家精校 Trigger API；云端按 <code>(purl, version)</code> 预计算库摘要，PR 在线仅拼接第一方。</td>
+              <td>避免在 PR 门禁重算全量 180+ 传递依赖；<code>osv-scanner --call-analysis=rust</code> 会执行 <code>build.rs</code> 须进 Tier 3 沙箱。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="callout tip full-width" style="max-width:100%;">
+      <div class="callout-label">Chapter 04 后续扩展规划（Lessons 0012–0014）</div>
+      <p>本速查卡将随着 Chapter 04 进程持续追加：<strong>动态运行时可达性与容器裁剪（Lesson 0012）</strong>、<strong>EPSS / KEV / OpenVEX 协同降噪（Lesson 0013）</strong> 以及 <strong>无破坏性升级路径求解器 Guided Remediation（Lesson 0014）</strong>。</p>
+    </div>
+
+    <footer class="lesson-end-nav no-print">
+      <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">← 返回 Lesson 0011 · 静态函数级可达性</a>
+      <a href="./layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      <a href="../index.html">返回课程总览 · 继续 Lesson 0012</a>
+      <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
+    </footer>
+  </main>
+</body>
+</html>

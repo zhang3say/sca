@@ -88,6 +88,18 @@
 - [Curation & Notice Reference: ORT Evaluator / `curations.yml` / `PlainTextTemplate` (Apache-2.0)](https://oss-review-toolkit.org/ort/docs/tools/evaluator) &amp; [`aboutcode-org/license-expression` (Apache-2.0)](https://github.com/aboutcode-org/license-expression)
   ORT 提供策略规则 DSL、人工覆写（Curation）真值收敛及自动生成 `THIRD-PARTY-NOTICES` 的模板范式；`license-expression` 为 Python 侧布尔表达式化简参照。
 
+### 静态函数级可达性（Call Graph）与跨语言程序分析（Layer 4）
+- [Algorithms & Go Production Reference: Bacon & Sweeney (OOPSLA 1996, RTA) · Sundaresan et al. (OOPSLA 2000, VTA) · `golang.org/x/tools/go/callgraph/vta` (`BSD-3-Clause`) & `govulncheck` (`golang.org/x/vuln`, `BSD-3-Clause`)](https://pkg.go.dev/golang.org/x/tools/go/callgraph/vta)
+  奠定「类层次分析 CHA → 快速类型分析 RTA → 变量类型分析 VTA」的调用图精度/性能阶梯（[`go.dev/doc/security/vuln`](https://go.dev/doc/security/vuln/)）。Go 官方 `govulncheck` 基于 Go SSA + VTA 逐变量追踪接口/函数值具体类型流，并直接消费 `vuln.go.dev`（条目数据 `CC-BY-4.0`）中的 OSV `ecosystem_specific.imports[].symbols` 实现默认函数级可达性判定。
+- [Java Soundness & Code-Centric SCA: Reif et al. (ISSTA 2019, *Judge*, DOI `10.1145/3293882.3330555`) · `opalj/JCG` & `opalj/opal` (`BSD-2-Clause`) · Ponta et al. (ICSME 2018, `arXiv:1806.05893`) & `eclipse-steady/steady` (`Apache-2.0`)](https://doi.org/10.1145/3293882.3330555)
+  *Judge* 与 [`opalj/JCG`](https://github.com/opalj/JCG) 系统揭示主流 Java 调用图框架因反射、动态代理、序列化与框架入口（Spring DI）导致的不完备性（Unsoundness / 漏报来源）；[`arXiv:1806.05893`](https://arxiv.org/abs/1806.05893) 与 [`eclipse-steady/steady`](https://github.com/eclipse-steady/steady) 开创代码级/用法级漏洞可达性先河。字节码底层与选型边界：[`OW2 ASM`](https://asm.ow2.io/)（`BSD-3-Clause`）、[`opalj/opal`](https://github.com/opalj/opal)（`BSD-2-Clause`）、[`wala/WALA`](https://github.com/wala/WALA)（`EPL-2.0` 文件级弱传染）；严防 [`soot-oss/SootUp`](https://github.com/soot-oss/SootUp)（`LGPL-2.1`，商业闭源 Fat-JAR / 静态合包打包风险）。
+- [JS/TS Modular Call Graph: Nielsen et al. (ISSTA 2021) · Chakraborty, Gnanakumar, Sridharan & Møller (ECOOP 2024, *Indirection-Bounded Call Graph Analysis*) · `cs-au-dk/jelly` (`BSD-3-Clause`) & `microsoft/TypeScript` (`Apache-2.0`)](https://github.com/cs-au-dk/jelly)
+  面向 Node.js / TypeScript 高阶回调、事件驱动、原型链与多模块边界的模块化静态调用图分析范式（ISSTA 2021 提出跨包模块化安全扫描，ECOOP 2024 引入 Indirection-Bounded 间接引用界定缓解组合爆炸）。源自 Aarhus 大学该研究谱系的 Coana 已被 Socket 于 2025 年 4 月收购整合。
+- [Python Call Graph Benchmarks: Salis et al. (ICSE 2021, *PyCG*, `arXiv:2103.00587`, `Apache-2.0`) & Huang et al. (ICSE 2023, *JARVIS*, `arXiv:2305.05949`)](https://arxiv.org/abs/2103.00587)
+  [*PyCG*](https://github.com/vitsalis/PyCG) 以跨过程赋值流分析在基准测试集取得 ~99.2% 精确率（Precision）与 ~69.9% 召回率（Recall）；[*JARVIS*](https://arxiv.org/abs/2305.05949) 进一步采用「应用为中心（Application-Centered）、按需（Demand-Driven）的流敏感过程内类型图 + 强更新」解决 PyCG 在真实大仓库全程序不动点计算上的扩展性瓶颈与误报问题。
+- [Multi-Language Syntax, CPG & OSV Call Analysis: `tree-sitter` (`MIT`) · `google/osv-scanner` (`Apache-2.0`) · `AppThreat/atom` (`Apache-2.0`) & `joernio/joern` (`Apache-2.0`)](https://github.com/google/osv-scanner)
+  [`tree-sitter/tree-sitter`](https://github.com/tree-sitter/tree-sitter)（`MIT`）仅提供单文件增量 CST/AST 语法解析，适合做 L3 修复 Commit Patch-Diff 符号提取，**不可充当跨文件调用图引擎**；[`google/osv-scanner`](https://github.com/google/osv-scanner) 的 `--call-analysis` 目前默认支持 Go（`govulncheck`）、实验性支持 Rust（需执行 `build.rs`）、尚无原生 Java CLI 调用分析；[`AppThreat/atom`](https://github.com/AppThreat/atom) 与 [`joernio/joern`](https://github.com/joernio/joern)（`Apache-2.0`）提供重型代码属性图（CPG）离线深度参考。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -104,7 +116,8 @@
   PURL 与 VERS 版本规范的核心维护社区。用于：解决跨生态冷门包管理器命名规范与版本区间边界争议。
 
 ## Gaps
-- **静态函数级可达性（Call Graph）跨语言评测基准**：尚缺经过学术界或第三方独立验证的跨语言（Java/JS/Python/Go）调用图精度/召回率对比论文与基准测试集（将在进入 Layer 4 专项前补齐）。
+- **动态运行时可达性（JVMTI / eBPF / 容器运行态裁剪）基准与开销实测**：尚缺 JVM 类加载/类初始化、eBPF/文件系统访问跟踪在生产容器下的性能损耗与与静态调用图融合置信度模型基准（将在 Lesson 0012 调研补齐）。
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
+- **静态函数级可达性（Call Graph）跨语言评测基准（Ch 04 · Lesson 0011 已收口）**：已于第 11 课及 Ref 05 补齐 RTA（OOPSLA 1996）、VTA（OOPSLA 2000 / Go `govulncheck`）、Java Unsoundness（*Judge* ISSTA 2019 / `opalj/JCG` & *Eclipse Steady* ICSME 2018）、JS/TS（ISSTA 2021 / ECOOP 2024 `cs-au-dk/jelly`）与 Python（*PyCG* ICSE 2021 `arXiv:2103.00587` & *JARVIS* ICSE 2023 `arXiv:2305.05949`）跨语言对比、商用许可红线与 L3 符号映射/生态预计算拼接架构。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。
