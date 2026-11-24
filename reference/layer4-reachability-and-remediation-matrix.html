@@ -13,6 +13,7 @@
       <div class="course-links">
         <a href="../index.html">课程首页 · 全局路线图</a>
         <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011 · 静态函数级可达性</a>
+        <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012 · 运行时可达与容器裁剪</a>
         <a href="./layer4-reachability-and-remediation-matrix.html" class="active">Ref 05 · L4 可达与修复矩阵</a>
         <a href="./layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
       </div>
@@ -27,10 +28,10 @@
         <span>PRINT-READY LAYER 4 CHEAT SHEET</span>
       </div>
       <h1>Layer 4 可达性分析、智能降噪与安全修复速查矩阵</h1>
-      <p class="subtitle">供 Layer 4 静态调用图前端、L3 漏洞符号映射管线、生态预计算拼接（Stitching）、四态置信度护栏与后续运行时/VEX/自动修复评审时随时翻阅（当前已覆盖 Lesson 0011，并将随 Chapter 04 推进扩展至 0012–0014）。</p>
+      <p class="subtitle">供 Layer 4 静态调用图、运行时可达性融合网关、容器减面路线与商用许可红线评审时随时翻阅（当前已覆盖 Lesson 0011–0012，并将随 Chapter 04 推进扩展至 0013–0014）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV <code>ecosystem_specific</code></a> · <a href="https://pkg.go.dev/golang.org/x/tools/go/callgraph/vta" target="_blank" rel="noopener">Go VTA</a> · <a href="https://doi.org/10.1145/3293882.3330555" target="_blank" rel="noopener">Reif et al. ISSTA 2019 <em>Judge</em></a> (<a href="https://github.com/opalj/JCG" target="_blank" rel="noopener"><code>opalj/JCG</code></a>) · <a href="https://github.com/cs-au-dk/jelly" target="_blank" rel="noopener"><code>cs-au-dk/jelly</code></a> · <a href="https://arxiv.org/abs/2103.00587" target="_blank" rel="noopener">PyCG</a> / <a href="https://arxiv.org/abs/2305.05949" target="_blank" rel="noopener">JARVIS</a></span>
-        <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a>（后续将接入 0012–0014）</span>
+        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV <code>ecosystem_specific</code></a> · <a href="https://pkg.go.dev/golang.org/x/tools/go/callgraph/vta" target="_blank" rel="noopener">Go VTA</a> · <a href="https://kubescape.io/docs/components/node-agent/" target="_blank" rel="noopener">Kubescape</a> · OpenJDK JFR · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://arxiv.org/abs/2407.11259" target="_blank" rel="noopener"><em>SoK: Software Debloating</em></a> · <a href="https://github.com/chainguard-dev/apko" target="_blank" rel="noopener"><code>apko</code></a></span>
+        <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012</a>（后续将接入 0013–0014）</span>
       </div>
     </header>
 
@@ -156,15 +157,59 @@
       </div>
     </section>
 
+    <!-- SECTION 3: RUNTIME REACHABILITY & CONTAINER DEBLOATING -->
+    <section class="full-width">
+      <h2><span class="sec-num">03</span>运行时可达性采集光谱、静动态融合规则与容器裁剪商用红线（Lesson 0012）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>维度 / 层级</th>
+              <th>选定基准与开源代表</th>
+              <th>核心裁决规则 / 工程底线</th>
+              <th>商用闭源红线与架构禁忌</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>四层运行时采集</strong><br/>（&lt; 1%–2.5% CPU）</td>
+              <td><a href="https://kubescape.io/docs/components/node-agent/" target="_blank" rel="noopener">Kubescape</a> (<code>Apache-2.0</code>) · JFR <code>jdk.ClassLoad</code> · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://nodejs.org/api/cli.html#node_v8_coveragedir" target="_blank" rel="noopener"><code>NODE_V8_COVERAGE</code></a></td>
+              <td>按 <code>image_digest</code> 归一消费 <code>RuntimeEvidence</code>；JVM 用 JFR（<code>stackTrace=false</code>）；Python 用 PEP 669。</td>
+              <td>严禁轮询 <code>getAllLoadedClasses()</code> 或线上挂载 <code>sys.settrace</code>/全量插桩；eBPF 内核 C 须进程隔离。</td>
+            </tr>
+            <tr>
+              <td><strong>静动态融合公理</strong><br/>（冷路径防漏报）</td>
+              <td><code>Static &times; Runtime &times; Window</code> 三维裁决矩阵</td>
+              <td><code>REACHABLE + NOT_OBSERVED &rarr; LATENT_REACHABLE</code>（禁 VEX）；仅 <code>&ge; 14d &amp; 批处理</code> 允许压降 OS 包。</td>
+              <td><code>UNREACHABLE + LOADED/EXECUTED</code> 立即触发 <code>STATIC_SOUNDNESS_ALERT</code> P0 并撤回旧 VEX！</td>
+            </tr>
+            <tr>
+              <td><strong>容器减面裁剪</strong><br/>（<code>arXiv:2407.11259</code>）</td>
+              <td><a href="https://github.com/GoogleContainerTools/distroless" target="_blank" rel="noopener">Distroless</a> / <a href="https://github.com/chainguard-dev/apko" target="_blank" rel="noopener"><code>apko</code></a> (<code>Apache-2.0</code>) · <em>Confine</em> <code>seccomp</code> · <a href="https://github.com/mintoolkit/mint" target="_blank" rel="noopener">MinToolkit</a></td>
+              <td>构建期最小闭包（Distroless/<code>apko</code>）消除 85%+ OS 漏洞且保完整 SBOM；<code>kubectl debug</code> 兜底排障。</td>
+              <td>低覆盖率禁全自动 Mint 动态删文件防误删冷路径；<span class="badge badge-danger">严禁</span> 把 <a href="https://github.com/canonical/chisel" target="_blank" rel="noopener"><code>canonical/chisel</code></a>（<code>AGPL-3.0</code>）嵌入闭源 SaaS 后端！</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">Chapter 04 后续扩展规划（Lessons 0012–0014）</div>
-      <p>本速查卡将随着 Chapter 04 进程持续追加：<strong>动态运行时可达性与容器裁剪（Lesson 0012）</strong>、<strong>EPSS / KEV / OpenVEX 协同降噪（Lesson 0013）</strong> 以及 <strong>无破坏性升级路径求解器 Guided Remediation（Lesson 0014）</strong>。</p>
+      <div class="callout-label">Chapter 04 后续扩展规划（Lessons 0013–0014）</div>
+      <p>本速查卡已收录 <strong>Lesson 0011–0012</strong> 核心矩阵，后续将随 Chapter 04 进程继续扩展：<strong>EPSS / KEV / OpenVEX 协同降噪（Lesson 0013）</strong> 以及 <strong>无破坏性升级路径求解器 Guided Remediation（Lesson 0014）</strong>。</p>
     </div>
 
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">← 返回 Lesson 0011 · 静态函数级可达性</a>
+      <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">← 返回 Lesson 0012 · 运行时可达与容器裁剪</a>
+      <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011 · 静态函数级可达性</a>
       <a href="./layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
-      <a href="../index.html">返回课程总览 · 继续 Lesson 0012</a>
+      <a href="../index.html">返回课程总览 · 继续 Lesson 0013</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>
   </main>

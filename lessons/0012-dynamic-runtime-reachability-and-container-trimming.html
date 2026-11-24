@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0012：动态运行时可达性与容器裁剪</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011 · 静态函数级可达性</a>
+        <a href="./0012-dynamic-runtime-reachability-and-container-trimming.html" class="active">Lesson 0012 · 运行时可达与容器裁剪</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0012</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 04 第二课（静动态融合与减面）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>动态运行时可达性与容器裁剪：用真实执行上下文击穿误报</h1>
+      <p class="subtitle">在 <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> 末尾，我们留下了两块静态分析始终啃不动的硬骨头：一类是因反射/DI 断链而被标记为 <code>POTENTIALLY_REACHABLE</code> 的动态不确定告警；另一类是<strong>根本没有函数调用图可画的容器基础镜像冗余 OS 包（60%–80% 镜像 CVE 噪音来源）</strong>。本课从 SCA 总架构师视角出发，在不陷入底层内核探针开发泥潭的前提下，拍板<strong>标准化 <code>RuntimeEvidence</code> 接入契约、静动态三维融合裁决规则、容器裁剪双路线与商业闭源许可红线</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握四层运行时采集光谱（OS/类加载/轻量执行/暴露面）、静动态+窗口三维融合决策矩阵（严守冷路径防漏报与静态漏报反哺）、构建期 Distroless/<code>apko</code> vs 运行期 Mint 裁剪权衡，以及 <code>chisel</code> AGPL-3.0 与 eBPF GPL 隔离红线</span>
+        <span><strong>先修底座：</strong><a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a> · <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师边界声明（对齐你的 MISSION.md）</div>
+      <p>遵循 <a href="../MISSION.md">Mission</a> 的范围约定，本课<strong>不深入 Linux 内核 eBPF C/CO-RE 校验器编程与全套 CNAPP 入侵检测探针开发</strong>。作为 0&rarr;1 商业 SCA 平台总架构师，核心工程职责不是重复造一个 Falco 或 Tetragon，而是：<strong>① 划清「消费已有运行时/APM 证据 vs 轻量语言探针」的接入契约；② 设计零漏报的静动态融合裁决引擎；③ 在镜像瘦身与合规红线间帮客户做出可落地的减面决策。</strong></p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>静态分析的最后两堵墙与四层运行时采集光谱</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 为什么只有静态调用图还不够？</h3>
+      <p>在 <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> 中，我们用 VTA、OPAL/ASM、Jelly 与 PyCG/JARVIS 把业务代码的可达路径拉通了，但生产现场依然有两大顽固噪音源：</p>
+      <ul>
+        <li><strong>顽疾 A · 静态动态派发待核池（<code>UNKNOWN_DYNAMIC</code>）：</strong>Spring 注解代理、Jackson 多态反序列化、Python <code>getattr()</code> 与插件化热加载让静态图在边界处保守停在 <code>POTENTIALLY_REACHABLE</code>。安全团队面对几百条“可能可达”，依然无法判断该组件在真实容器里究竟有没有被装载进内存。</li>
+        <li><strong>顽疾 B · 容器镜像 OS 层的“无调用图”冗余膨胀：</strong>一个基于常规 Ubuntu/Debian 构建的微服务镜像往往带着 <code>curl</code>、<code>perl</code>、<code>gnupg</code>、休眠字体库等上百个操作系统包（占镜像 CVE 的 <strong>60%–80%</strong>）。OS 包之间没有跨应用的单一函数调用图，静态层（<a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a>）只能证明它们“存在于终态文件系统（<code>Squashed</code>）”，却无法回答“业务进程运行期到底有没有碰过这些二进制或共享库”。</li>
+      </ul>
+      <p>引入运行时（Runtime）信号的核心目的，就是给静态层补上一束<strong>真实执行聚光灯</strong>——在<strong>生产额外 CPU 开销严控在 1%–3% 以内</strong>的前提下，按成本与粒度的四个层级采集确定性证据：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">JVM 生产监控铁律：选 JFR，别轮询 getAllLoadedClasses()</span>
+        在 Java 生产容器中查验某个漏洞类到底有没有被加载，很多新手工程师会自己写 Java Agent 定时调用 <code>java.lang.instrument.Instrumentation.getAllLoadedClasses()</code>。<strong>这是严重反模式！</strong>该方法会强制 JVM 遍历内部全部已装载类结构并分配海量 <code>Class&lt;?&gt;[]</code> 对象数组，在万级类微服务的稳态高频轮询下极易诱发内存抖动甚至 Safepoint 停顿。正确姿势是直接消费 OpenJDK 原生内置的 <strong>JDK Flight Recorder（JFR）<code>jdk.ClassLoad</code> 事件流</strong>（稳态把 <code>stackTrace</code> 设为 <code>false</code>），直接复用 JVM 线程本地环形缓冲区，典型持续生产开销 <strong>&lt; 1%</strong>。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:22%" />
+          <col style="width:20%" />
+          <col style="width:20%" />
+          <col style="width:20%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>采集层级与信号粒度</th>
+            <th>代表开源底座 / 运行时原语</th>
+            <th>典型生产性能税</th>
+            <th>最擅长击穿的 SCA 盲区</th>
+            <th>固有盲区（不能单独定罪/脱罪）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Tier R1 · OS 文件与进程活跃度</strong><br/><code>In-Use Package</code></td>
+            <td><a href="https://kubescape.io/" target="_blank" rel="noopener">Kubescape</a> <code>node-agent</code>（eBPF 生成 <code>ApplicationProfile</code> + <code>SBOMSyftFiltered</code>） / <code>/proc/&lt;pid&gt;/maps</code></td>
+            <td><strong>极低（&lt; 1% CPU）</strong><br/>内核态只记录打开的共享库、二进制 <code>execve</code> 与文件访问</td>
+            <td><strong>消除 60%–80% 容器 OS 冗余包 CVE</strong>（对标 Wiz/Sysdig 容器运行时上下文过滤）。</td>
+            <td>颗粒度停在“文件/包级”；只要 JVM 启动加载了整个 <code>log4j-core.jar</code>，无法区分里面哪个函数被调。</td>
+          </tr>
+          <tr>
+            <td><strong>Tier R2 · 语言类/模块装载流</strong><br/><code>Loaded Class / Module</code></td>
+            <td>OpenJDK <strong>JFR <code>jdk.ClassLoad</code></strong> / <code>Node Module._load</code> / Python <code>sys.modules</code> 周期快照</td>
+            <td><strong>低（&lt; 1% CPU）</strong><br/>稳态类加载极稀疏，JFR 仅在类首次装载时落盘一次事件</td>
+            <td><strong>击穿反射/Spring DI 静态盲区</strong>：证实 <code>POTENTIALLY_REACHABLE</code> 的类确实被 JVM/解释器装载进内存。</td>
+            <td><strong>Loaded &ne; Executed！</strong>框架启动扫描注解或校验签名可能顺带装载类，不代表漏洞函数真有流量进入。</td>
+          </tr>
+          <tr>
+            <td><strong>Tier R3 · 原生低开销执行钩子</strong><br/><code>Executed Function</code></td>
+            <td>JFR <code>ExecutionSample</code> / <a href="https://github.com/async-profiler/async-profiler" target="_blank" rel="noopener"><code>async-profiler</code></a> / <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">Python 3.12 PEP 669 <code>sys.monitoring</code></a> / <a href="https://nodejs.org/api/cli.html#node_v8_coveragedir" target="_blank" rel="noopener"><code>NODE_V8_COVERAGE</code></a></td>
+            <td><strong>可控（~1%–2.5% CPU）</strong><br/>PEP 669 按代码对象启停，淘汰慢十倍的 <code>sys.settrace</code>；V8 用内置计数器</td>
+            <td>直接提供生产真实调用帧实锤，且能反向抓出静态图遗漏的真实调用边（<strong>Soundness 校验</strong>）。</td>
+            <td>采样法可能错过毫秒级低频请求；<strong>严禁</strong>因某高危冷门分支尚未采样命中就将其标为安全！</td>
+          </tr>
+          <tr>
+            <td><strong>Tier R4 · 部署与暴露上下文</strong><br/><code>Workload Context</code></td>
+            <td>K8s Ingress / Service / Pod SecurityContext / OTel 服务拓扑（<a href="https://github.com/open-telemetry/opentelemetry-java-instrumentation" target="_blank" rel="noopener">OTel</a>）</td>
+            <td><strong>近零开销</strong><br/>控制面与元数据采集</td>
+            <td>判断容器是否暴露公网、是否以 <code>root</code> 运行、是否挂载敏感 IAM 凭据，决定爆炸半径权重。</td>
+            <td>无法代替代码与包级可达性判断，仅用于和漏洞暴露度乘算优先级（衔接 Lesson 0013）。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>静动态三维融合置信度引擎：用观测窗口守住冷路径底线</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 行业最危险误区：<code>NOT_OBSERVED === SAFE</code> 导致的冷路径漏报</h3>
+      <p>许多刚集成 eBPF 或 APM 的团队容易陷入一个看似诱人的捷径：<em>“既然线上跑了一周都没有观测到这个组件被加载或执行，那我就直接给它打上绿色 <code>UNREACHABLE</code> 标签并自动豁免 CVE 吧！”</em></p>
+      <p>在工程实践与商业攻防对抗中（正如 Endor Labs 对纯运行时工具的批判以及 Datadog/Sysdig/Wiz 反复强调的边界），<strong>把「运行时未观测（<code>NOT_OBSERVED</code>）」直接等价于「不可达（<code>UNREACHABLE</code>）」是一级生产事故隐患</strong>，根因有二：</p>
+      <ol>
+        <li><strong>冷路径业务分支（Cold Path Blindness）：</strong>季度财务结算批处理、异常熔断降级分支、灾难恢复脚本或管理员后台导出接口，在 7 天常规观测期内可能一次都没有触发，但代码路径真实畅通，一旦月底跑批就会触雷。</li>
+        <li><strong>纯攻击触发型机关（Exploit-Only Gadgets）：</strong>诸如 Log4Shell（<code>JndiLookup.lookup</code>）或 Jackson 多态反序列化恶意 Gadget 类，在<strong>合法正常流量下永远不会被执行</strong>——它们唯一一次被 JVM 装载与执行的时刻，正是攻击者发送恶意的 <code>${jndi:ldap://...}</code> Payload 那一秒！</li>
+      </ol>
+      <aside class="sidenote">
+        <span class="sidenote-title">黄金融合公理（Static &times; Runtime &times; Window）</span>
+        第三代 SCA 的核心设计原则只有两句：<strong>① 运行时肯定（<code>LOADED</code> / <code>EXECUTED</code>）拥有最高实证权——不仅确认风险，还能反向揪出静态图的漏报缺陷（<code>STATIC_SOUNDNESS_ALERT</code>）；② 运行时否定（<code>NOT_OBSERVED</code>）绝不能推翻静态已证可达（<code>REACHABLE</code>），且对 <code>POTENTIALLY_REACHABLE</code> / <code>OS_PKG_L0</code> 降权前必须跨过“观测窗口成熟度门槛”（如 &ge; 14 天且覆盖完整批处理周期）。</strong>
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.2 静动态三维融合裁决真值表（Layer 4 Fusion Matrix）</h3>
+      <p>为避免各语言前端与外部 CNAPP 探针耦合死，我们在 Layer 2 IR 中抽象出统一的输入契约 <code>RuntimeEvidence</code>，并与 Lesson 0011 产出的静态四态结果及观测窗口成熟度做三维正交裁决：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:22%" />
+          <col style="width:22%" />
+          <col style="width:36%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>静态基线（Lesson 0011）</th>
+            <th>运行时信号 &times; 窗口成熟度</th>
+            <th>融合最终裁决态</th>
+            <th>门禁动作、VEX 权限与工程闭环说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>REACHABLE</code></td>
+            <td><code>EXECUTED_FUNC</code> 或 <code>LOADED</code></td>
+            <td><span class="badge badge-danger">CONFIRMED_EXPLOITABLE</span></td>
+            <td><strong>最高优 P0 阻断</strong>：静动态双证合一，漏洞位于真实热路径；严禁签发 VEX，优先触发自动修复 PR（Lesson 0014）。</td>
+          </tr>
+          <tr>
+            <td><code>REACHABLE</code></td>
+            <td><code>NOT_OBSERVED</code>（哪怕 &ge; 14d）</td>
+            <td><span class="badge badge-danger">LATENT_REACHABLE</span></td>
+            <td><strong>严守冷路径底线（保留 P1 高危）</strong>：防 Exploit-Only Gadget 与月末批处理漏报；<strong>绝对禁止</strong>自动签发 VEX <code>code_not_reachable</code>！</td>
+          </tr>
+          <tr>
+            <td><code>POTENTIALLY_REACHABLE</code></td>
+            <td><code>LOADED_CLASS_OR_LIB</code> / <code>EXECUTED</code></td>
+            <td><span class="badge badge-danger">RUNTIME_CONFIRMED</span></td>
+            <td><strong>成功击穿静态断链</strong>：JFR / eBPF 证实了静态被反射或 Spring DI 阻断的依赖在生产真被装载运行，升级为 P0/P1。</td>
+          </tr>
+          <tr>
+            <td><code>POTENTIALLY_REACHABLE</code></td>
+            <td><code>NOT_OBSERVED</code>（窗口成熟 &ge; 14d）</td>
+            <td><span class="badge badge-warn">DORMANT_POTENTIAL</span></td>
+            <td>允许从 P1 降权至 P2 观察队列以释放研发精力，但因静态未证死，仍不自动签发 VEX（交由 Lesson 0013 EPSS/KEV 再评）。</td>
+          </tr>
+          <tr>
+            <td><code>UNREACHABLE</code></td>
+            <td><code>EXECUTED_FUNC</code> / <code>LOADED</code></td>
+            <td><span class="badge badge-danger">STATIC_SOUNDNESS_ALERT</span></td>
+            <td><strong>反向自愈核弹校验！</strong>说明静态调用图漏掉了反射/JNI/未知框架入口。立刻升级 P0、撤销旧 VEX 并向 L4 引擎提报缺失边缺陷单。</td>
+          </tr>
+          <tr>
+            <td><code>UNREACHABLE</code></td>
+            <td><code>NOT_OBSERVED</code></td>
+            <td><span class="badge badge-ok">VERIFIED_UNREACHABLE</span></td>
+            <td><strong>双证合璧消噪</strong>：静态图封闭剪枝 + 运行时零加载，置信度拉满，自动签发带审计证据链的 VEX <code>code_not_reachable</code>。</td>
+          </tr>
+          <tr>
+            <td><code>OS_PKG_L0</code>（容器 OS 包）</td>
+            <td><code>NOT_OBSERVED</code>（成熟 vs 未成熟）</td>
+            <td><span class="badge badge-ok">OS_INACTIVE_CANDIDATE</span> / <span class="badge badge-warn">WAIT</span></td>
+            <td>仅当窗口 &ge; 14 天且覆盖批处理才标记为冗余 OS 候选（消噪 60%–80%）；未成熟强制等待；终极治本仍是迁移最小基础镜像。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 第三代 SCA 静动态解耦采集与三维融合架构（Vendor-Agnostic Runtime Ingestion）</strong>
+        <span>把底层内核/语言探针隔离为可插拔外部数据源，平台核心聚焦标准化 <code>RuntimeEvidence</code> 契约与防漏报融合裁决引擎</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Track A · 静态基线与容器终态清单（L1 + L4 Static）</span>
+              <span class="badge badge-blue">CI / Registry 侧产出</span>
+            </div>
+            <ul>
+              <li><strong>应用代码图谱：</strong>Lesson 0011 多语言调用图输出四态结论（<code>REACHABLE</code> / <code>POTENTIALLY_REACHABLE</code> / <code>UNREACHABLE</code>）。</li>
+              <li><strong>容器终态清单：</strong>Lesson 0005 OCI <code>Squashed</code> VFS 提取 <code>OS_PKG_L0</code> 及文件路径、ELF/JAR 摘要映射表。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Track B · 解耦运行态接入网关（BYO-Telemetry / 轻量探针）</span>
+              <span class="badge badge-ok">&lt; 1%–2% 生产 CPU 税</span>
+            </div>
+            <ul>
+              <li><strong>容器 OS 层：</strong>标准适配器消费 <strong>Kubescape <code>ApplicationProfile</code></strong>（<code>Apache-2.0</code>）、Tetragon/Tracee gRPC 事件或客户现有 CNAPP 清单。</li>
+              <li><strong>语言应用层：</strong>按语言接入 <strong>JFR <code>jdk.ClassLoad</code></strong>、<strong>Python PEP 669</strong>、<strong><code>NODE_V8_COVERAGE</code></strong>，统一归一化为 <code>(image_digest, purl, signal_level, window)</code>。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 按 <code>image_digest</code> + <code>purl</code> 锚点汇聚至 Layer 4 三维融合引擎 &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">3D Fusion Decision Gate · 防冷路径漏报 + 反向 Soundness 自愈闭环</span>
+            <span class="orch-stage-kicker">Loaded &ne; Executed &ne; Safe</span>
+          </div>
+          <p class="orch-stage-desc">
+            <strong>① 窗口守门器：</strong>核验 <code>window_days &ge; 14 &amp;&amp; batch_cycle_covered</code>；
+            <strong>② 冷路径护盾：</strong>静态 <code>REACHABLE</code> 永不因 <code>NOT_OBSERVED</code> 自动豁免；
+            <strong>③ 反向检错环：</strong>发现 <code>UNREACHABLE + LOADED/EXECUTED</code> 立即告警并修正静态前端缺失规则。
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：厂商无关的 <code>RuntimeEvidence</code> 接入契约与防漏报三维融合裁决器</strong>
+        <span>自研平台核心裁决逻辑（完全独立于底层 eBPF 探针供应商）</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> RuntimeSignal <span class="tok-kw">string</span>
+<span class="tok-kw">const</span> (
+    SigExecutedFunc     RuntimeSignal = <span class="tok-str">"EXECUTED_FUNC"</span>       <span class="tok-cmt">// Tier R3: JFR ExecutionSample / PEP 669 / V8</span>
+    SigLoadedClassOrLib RuntimeSignal = <span class="tok-str">"LOADED_CLASS_OR_LIB"</span> <span class="tok-cmt">// Tier R2/R1: JFR jdk.ClassLoad / eBPF open/mmap</span>
+    SigNotObserved      RuntimeSignal = <span class="tok-str">"NOT_OBSERVED"</span>        <span class="tok-cmt">// 探针正常心跳，但窗口内零记录</span>
+    SigNoTelemetry      RuntimeSignal = <span class="tok-str">"NO_TELEMETRY"</span>        <span class="tok-cmt">// 无探针、CI 阶段或探针离线</span>
+)
+
+<span class="tok-kw">type</span> RuntimeEvidence <span class="tok-kw">struct</span> {
+    ImageDigest       <span class="tok-kw">string</span>        <span class="tok-cmt">// 强绑定 OCI Manifest Digest，防 :latest 漂移错配</span>
+    PURL              <span class="tok-kw">string</span>
+    Signal            RuntimeSignal
+    WindowHours       <span class="tok-kw">int</span>
+    BatchCycleCovered <span class="tok-kw">bool</span>          <span class="tok-cmt">// 是否覆盖定时批处理/月结周期</span>
+    InternetExposed   <span class="tok-kw">bool</span>
+}
+
+<span class="tok-kw">func</span> FuseReachability(staticState StaticReachability, rt RuntimeEvidence) FusionVerdict {
+    <span class="tok-kw">if</span> rt.Signal == SigNoTelemetry {
+        <span class="tok-kw">return</span> fallbackToStatic(staticState) <span class="tok-cmt">// 无运行态数据一律回退静态基线</span>
+    }
+    <span class="tok-cmt">// 1. 反向自愈校验：静态判不可达，但生产实测加载/执行 -> 静态图存在漏边 Bug!</span>
+    <span class="tok-kw">if</span> staticState == StaticUnreachable &amp;&amp; (rt.Signal == SigExecutedFunc || rt.Signal == SigLoadedClassOrLib) {
+        emitStaticSoundnessTicket(rt.PURL, rt.ImageDigest)
+        <span class="tok-kw">return</span> FusionVerdict{Status: <span class="tok-str">"STATIC_SOUNDNESS_ALERT"</span>, Priority: <span class="tok-str">"P0"</span>, AllowVEX: <span class="tok-kw">false</span>}
+    }
+    <span class="tok-cmt">// 2. 冷路径护盾：静态已证可达时，NOT_OBSERVED 绝对不能降级为安全豁免</span>
+    <span class="tok-kw">if</span> staticState == StaticReachable &amp;&amp; rt.Signal == SigNotObserved {
+        <span class="tok-kw">return</span> FusionVerdict{Status: <span class="tok-str">"LATENT_REACHABLE"</span>, Priority: <span class="tok-str">"P1"</span>, AllowVEX: <span class="tok-kw">false</span>}
+    }
+    <span class="tok-cmt">// 3. 窗口成熟度守门：仅对 OS 冗余包或静态存疑态在满足长窗后允许降噪</span>
+    mature := rt.WindowHours &gt;= <span class="tok-num">14</span>*<span class="tok-num">24</span> &amp;&amp; rt.BatchCycleCovered
+    <span class="tok-kw">if</span> staticState == StaticOSPkgL0 &amp;&amp; rt.Signal == SigNotObserved {
+        <span class="tok-kw">if</span> !mature {
+            <span class="tok-kw">return</span> FusionVerdict{Status: <span class="tok-str">"INSUFFICIENT_WINDOW"</span>, Priority: <span class="tok-str">"KEEP_EVAL"</span>, AllowVEX: <span class="tok-kw">false</span>}
+        }
+        <span class="tok-kw">return</span> FusionVerdict{Status: <span class="tok-str">"OS_INACTIVE_CANDIDATE"</span>, Priority: <span class="tok-str">"P3_TRIM"</span>, AllowVEX: <span class="tok-kw">true</span>}
+    }
+    <span class="tok-kw">return</span> resolveRemainingCases(staticState, rt, mature)
+}</code></pre>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>容器裁剪双路线（构建期最小化 vs 运行期瘦身）与商用闭源协议红线</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 从“事后过滤告警”走向“物理删包减面”的三条技术流派</h3>
+      <p>运行时观测不仅能消除误报，还天然引出了另一个高价值动作：<strong>既然容器里 70% 的 OS 二进制和包从未被运行过，能不能干脆把它们从容器镜像里裁剪（Debloating / Trimming）掉？</strong></p>
+      <p>结合容器与软件去臃肿领域经典的系统综述与顶会实证研究（Alhanahnah 等 <a href="https://arxiv.org/abs/2407.11259" target="_blank" rel="noopener"><em>SoK: Software Debloating</em>, arXiv:2407.11259</a>、Rastogi 等 <a href="https://doi.org/10.1145/3106237.3106271" target="_blank" rel="noopener"><em>Cimplifier</em>, ESEC/FSE 2017</a>、Bruce 等 <a href="https://doi.org/10.1145/3368089.3409738" target="_blank" rel="noopener"><em>JShrink</em>, ESEC/FSE 2020</a> 及 Ghavamnia 等 <a href="https://arxiv.org/abs/2008.05561" target="_blank" rel="noopener"><em>Confine</em>, RAID 2020</a>），企业级容器裁剪主要有三条演进路线：</p>
+      <ul>
+        <li><strong>路线 A · 构建期声明式最小闭包（首选治本路线）：</strong>使用 <strong>Google Distroless</strong>（<code>Apache-2.0</code>）或 <strong>Chainguard <code>apko</code> + <code>melange</code></strong>（<code>Apache-2.0</code>，基于 Wolfi APK 声明式拼装零冗余镜像）。它在构建源头只装入运行时必选的最小二进制、<code>glibc/ca-certificates/tzdata</code>，彻底移除 <code>bash</code>、<code>curl</code>、<code>apt</code> 等后渗透武器库，并<strong>原生输出确定性 SBOM</strong>，没有任何冷路径误删隐患。</li>
+        <li><strong>路线 B · 运行期观测驱动镜像瘦身（高危慎用）：</strong>以 CNCF 项目 <strong>MinToolkit / Mint</strong>（<code>mintoolkit/mint</code>，原 DockerSlim / SlimToolkit，<code>Apache-2.0</code>）及学术原型 <em>Cimplifier</em> 为代表——先起容器跑一遍集成测试，用 eBPF/ptrace/fanotify 监听访问过的文件列表，随后把没碰到的文件统统删掉重建单层瘦身镜像。</li>
+        <li><strong>路线 C · 不删文件，只锁死系统调用面（正交纵深防线）：</strong>如 <em>Confine</em>（RAID 2020）和 <em>Speaker</em>：静态/分阶段提取应用及其依赖链所需的 Syscall 白名单，直接生成容器级 <strong><code>seccomp</code> / AppArmor</strong> 策略，即便磁盘里留有潜在工具也无法发起越权系统调用，是“零破坏性崩溃风险”的高安全补充手段。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">SoK (arXiv:2407.11259) 揭示的运行期删文件三大死穴</span>
+        <strong>① 冷路径崩溃（Cold-Path Breakage）：</strong>若测试期覆盖率只有 50%，Mint 极易把仅在 DNS 故障切换才动态 <code>dlopen</code> 的 <code>libnss_dns.so</code>、罕见编码库或异常处理器直接删掉，导致生产突发 Crash。<br/>
+        <strong>② 排障黑盒化：</strong>删光 <code>sh</code>/<code>ps</code>/<code>curl</code> 后运维无法 <code>kubectl exec</code>，必须配合 Kubernetes 临时调试容器（<code>kubectl debug</code> Ephemeral Containers）与全集中化 OTel 可观测。<br/>
+        <strong>③ 虚假安全感与 SBOM 破坏：</strong><em>JShrink</em>（ESEC/FSE 2020）证明只有“静态类型依赖 + 动态画像融合”才敢删字节码，而粗暴删除镜像包管理记录（<code>/var/lib/dpkg</code>）只会让扫描器“眼不见为净”，掩盖真实静态链接漏洞！
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 运行时探针与容器裁剪工具链的商用闭源许可红线（必避大坑）</h3>
+      <p>在选型运行时采集与镜像瘦身开源组件时，除了关注功能与开销，还有两处极隐蔽的<strong>协议陷阱</strong>会直接击穿商业闭源交付底线：一是 <strong>eBPF 用户态与内核态 C 程序的双层协议边界</strong>，二是 Ubuntu 切片工具 <strong>Canonical <code>chisel</code> 的 <code>AGPL-3.0</code> 传染红线</strong>。</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:22%" />
+          <col style="width:18%" />
+          <col style="width:32%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源底座 / 工具链</th>
+            <th>代码与组件许可</th>
+            <th>核心定位与工程机制</th>
+            <th>商业闭源整合边界与选型建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/kubescape/node-agent" target="_blank" rel="noopener">Kubescape &amp; <code>node-agent</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>CNCF 孵化项目；eBPF 采集并生成 <code>ApplicationProfile</code> CRD，结合 Syft/Grype 输出过滤版 <code>SBOMSyftFiltered</code>。</td>
+            <td><strong>首选参考架构</strong>：直接以独立 K8s DaemonSet 部署并消费其标准 CRD / JSON 事件，商业整合零传染风险。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/cilium/tetragon" target="_blank" rel="noopener">Tetragon</a> / <a href="https://github.com/aquasecurity/tracee" target="_blank" rel="noopener">Tracee</a> / <a href="https://github.com/falcosecurity/libs" target="_blank" rel="noopener">Falco Libs</a> / <a href="https://github.com/inspektor-gadget/inspektor-gadget" target="_blank" rel="noopener">Inspektor Gadget</a></strong></td>
+            <td>用户态：<span class="badge badge-ok">Apache-2.0</span><br/>内核 BPF C：<span class="badge badge-warn">GPL-2.0 / Dual BSD-GPL</span></td>
+            <td>Linux 内核挂接 GPL-only 辅助函数必须在 BPF C 源码声明 <code>SEC("license") = "GPL"</code> 才能过内核 Verifier。</td>
+            <td><strong>进程隔离底线：</strong>严禁把 GPL eBPF C 代码或 <code>libbpf</code> 静态混编进闭源商用核心二进制；必须以独立守护进程运行，通过 gRPC/Unix Socket 导出遥测。</td>
+          </tr>
+          <tr>
+            <td><strong>OpenJDK JFR / <a href="https://github.com/async-profiler/async-profiler" target="_blank" rel="noopener"><code>async-profiler</code></a> / <a href="https://github.com/open-telemetry/opentelemetry-java-instrumentation" target="_blank" rel="noopener">OTel Java</a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span>（JFR 随 JDK 自带）</td>
+            <td>原生 <code>jdk.ClassLoad</code> 事件 + 低税率采样栈分析 + 标准 OTel Span 属性挂载运行组件指纹。</td>
+            <td><strong>语言级甜点组合</strong>：完全商用安全，推荐与客户既有 APM/OTel 通道复用，避免在业务容器内重复挂载多个 Java Agent。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/GoogleContainerTools/distroless" target="_blank" rel="noopener">Distroless</a> / <a href="https://github.com/chainguard-dev/apko" target="_blank" rel="noopener"><code>apko</code></a> + <a href="https://github.com/chainguard-dev/melange" target="_blank" rel="noopener"><code>melange</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>声明式组装零冗余最小 OCI 镜像与 Wolfi APK，并在镜像内建高置信度 SBOM 证明。</td>
+            <td><strong>商业治本首选</strong>：在自研平台“自动减面修复建议”中优先推荐与集成 <code>apko</code>/Distroless 构建模版，无任何法律顾虑。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/mintoolkit/mint" target="_blank" rel="noopener">MinToolkit (<code>mint</code>)</a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>CNCF 项目（原 DockerSlim），运行期动态探测应用访问路径以删减未用 OS 包和共享库。</td>
+            <td>协议合规，但<strong>工程风险高</strong>：仅建议作为有高覆盖率（&gt;85%）集成测试保护时的辅助 CLI 建议，禁止在缺乏回归校验时全自动生产改写客户镜像。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/canonical/chisel" target="_blank" rel="noopener">Canonical <code>chisel</code></a></strong><br/>（Chiseled Ubuntu）</td>
+            <td><span class="badge badge-danger">AGPL-3.0</span></td>
+            <td>把传统 Ubuntu <code>.deb</code> 包按切片定义（Slices）拆成极简文件集用于无壳最小化镜像构建。</td>
+            <td><span class="badge badge-danger">商用 SaaS 红线</span> 客户自行在外部 CI 作为 CLI 调用合规，但<strong>严禁嵌入或修改打包进闭源商业 SaaS 后端服务中</strong>，否则触发 AGPL 网络传染要求全端开源！</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大经典生产场景（Log4j Exploit-Only 冷路径、Spring 反射实锤、静态漏报反向自愈、容器冗余 OS 包窗口校验），实时观察融合裁决结果与标准 Layer 2 IR 载荷；在<strong>模式二</strong>中组合不同容器裁剪路线与运行时探针层级，量化测算“有效待修 CVE 压降率、3% 生产 CPU 性能税红线与冷路径误删崩毁风险”。</p>
+    </div>
+
+    <!-- INTERACTIVE RUNTIME REACHABILITY & CONTAINER TRIMMING LAB -->
+    <section class="widget-panel full-width" data-widget="runtime-reachability-lab">
+      <script type="application/json" class="runtime-reachability-lab-data">
+        {
+          "title": "交互实验台：静动态三维融合裁决器与容器裁剪 ROI / 风险计算器",
+          "intro": "亲手调节静态结论、运行时信号粒度、观测窗口及容器瘦身路线，校验如何在压降 70%+ 容器噪音的同时死守冷路径零漏报与 3% 性能红线。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 4 运行时可达性与容器裁剪架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正为商业闭源 SCA 平台拍板运行时上下文融入与镜像瘦身能力，需在 < 3% 生产 CPU 开销、极低冷路径漏报与严格商业协议合规间取得最优解。",
+          "summary": {
+            "optimal": "全部 {optimal} 项架构决策精准卡在第三代商业 SCA 的最优工程甜点区！你守住了 Mission 范围边界、JFR 低开销规范、冷路径防漏报铁律以及 AGPL/GPL 合规红线，可以直接进入 Lesson 0013（EPSS / KEV / OpenVEX 协同降噪）。",
+            "warning": "总体架构可执行，但在 {warning} 项上存在生产性能抖动、冷路径误删隐患或重复造轮子（标黄项），建议按构建期最小闭包与标准化接入网关进一步收敛。",
+            "critical": "当前方案踩中 {critical} 处会引发致命冷路径漏报、生产业务雪崩或 AGPL 闭源法务违约的红区雷坑（标红项）！请立即修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "运行时遥测接入架构定位（借力 vs 自研）",
+              "layer": "L1/L4 采集边界 · Mission 聚焦",
+              "context": "团队讨论是否从零自研一套全内核 C/CO-RE eBPF 运行时安全探针并与 SCA 后端混编。",
+              "options": [
+                {
+                  "label": "定义厂商无关 RuntimeEvidence 接入契约，优先对接客户现有 Kubescape/OTel/CNAPP 或轻量语言钩子",
+                  "status": "optimal",
+                  "verdictTitle": "聚焦核心差异化，避免陷入底层内核驱动维护泥潭",
+                  "feedback": "用统一网关消费标准 ApplicationProfile / JFR / OTel 事件，既满足 90% 企业“不愿再装新探针”诉求，又保住平台融合主权。"
+                },
+                {
+                  "label": "把商业核心定位改为重型全能 CNAPP，投入 70% 人力自研内核 eBPF 入侵防御与容器防火墙",
+                  "status": "warning",
+                  "verdictTitle": "严重偏离 SCA 核心赛道，研发资源被内核兼容性拖垮",
+                  "feedback": "跨内核版本 BTF/CO-RE 适配与合规维护极其耗费人力，初创/0-1 SCA 团队应把精力花在融合裁决与精准修复上。"
+                },
+                {
+                  "label": "直接将 GPL-2.0 eBPF 内核源码与闭源 SaaS 管理面及扫描引擎静态链接成单一二进制发布",
+                  "status": "critical",
+                  "verdictTitle": "触犯 GPL 静态混编边界与商业闭源交付红线",
+                  "feedback": "内核侧 GPL eBPF 必须与用户态及商业后端保持清晰进程/IPC 边界，绝不能混入闭源核心单体二进制。"
+                }
+              ]
+            },
+            {
+              "name": "JVM 生产环境类装载与调用确认机制",
+              "layer": "Tier R2/R3 · < 1% 开销",
+              "context": "大量 Java 微服务因 Spring DI 与反射落入 POTENTIALLY_REACHABLE，需在生产侧无感实证。",
+              "options": [
+                {
+                  "label": "在 Java Agent 中每 3 秒周期性轮询 Instrumentation.getAllLoadedClasses() 并遍历堆栈",
+                  "status": "critical",
+                  "verdictTitle": "高并发微服务易诱发 GC 抖动与 Safepoint 停顿",
+                  "feedback": "高频遍历 JVM 内部类表并分配巨型数组会直接冲击核心交易服务 P99 延迟，生产环境严禁周期性轮询该接口。"
+                },
+                {
+                  "label": "开启 OpenJDK 原生 JFR jdk.ClassLoad 流事件（稳态关闭 stackTrace）并复用轻量采样或 OTel 上下文",
+                  "status": "optimal",
+                  "verdictTitle": "持续生产开销稳定 < 1%，精准打穿静态反射盲区",
+                  "feedback": "直接复用 JVM 内核低延迟环形缓冲，同时零摩擦兼容 Apache-2.0 的 async-profiler 与 OTel Java 探针。"
+                },
+                {
+                  "label": "对容器内所有第三方 JAR 执行全量字节码逐行方法调用追踪并实时同步上报",
+                  "status": "warning",
+                  "verdictTitle": "超出 3% 生产 CPU 性能红线，遭业务团队强力拔线",
+                  "feedback": "全量字节码插桩会引入 10%–15%+ 的性能退化，仅能用于测试/预发压测，不可常驻生产。"
+                }
+              ]
+            },
+            {
+              "name": "静动态融合核心策略（冷路径与反向校验）",
+              "layer": "L4 融合引擎 · 零漏报护栏",
+              "context": "线上观测 14 天后某静动态分支出现相反信号：静态 REACHABLE 但运行时 NOT_OBSERVED；另有一静态 UNREACHABLE 组件却被执行。",
+              "options": [
+                {
+                  "label": "只要运行时 7 天未观测到任何记录，一律无条件推翻静态可达结论并自动签发 VEX 豁免关闭告警",
+                  "status": "critical",
+                  "verdictTitle": "在 Exploit-Only Gadget（如 Log4Shell）与月结冷路径上爆发 P0 漏报",
+                  "feedback": "攻击载荷触发的漏洞函数在正常流量下本就“从未运行”，用短期 NOT_OBSERVED 豁免静态可达等于主动撤防。"
+                },
+                {
+                  "label": "坚守静态 REACHABLE 保留为 LATENT_REACHABLE 禁签 VEX；遇 UNREACHABLE+EXECUTED 立刻报 P0 并反哺修正静态图",
+                  "status": "optimal",
+                  "verdictTitle": "兼具降噪收益与工程自愈闭环的最稳健融合公理",
+                  "feedback": "只对长窗成熟且静态非确定的 OS/存疑态做谨慎降噪，同时用真实运行信号持续揪出并修复静态调用图盲区。"
+                },
+                {
+                  "label": "一旦启用运行时采集就完全抛弃静态调用图，所有项目一刀切只以运行时探针抓到的包为准",
+                  "status": "warning",
+                  "verdictTitle": "测试环境与 CI 阶段彻底失明，且无法覆盖低频边缘分支",
+                  "feedback": "CI/PR 阶段没有生产流量；静动态不是替代关系，而是覆盖面与实证精度的正交互补。"
+                }
+              ]
+            },
+            {
+              "name": "容器镜像裁剪（Debloating）与消减 OS CVE 战略",
+              "layer": "减面修复 · 稳定性优先",
+              "context": "某业务方基础镜像带有 180 条闲置 OS 包 CVE，集成测试代码覆盖率目前只有 50%。",
+              "options": [
+                {
+                  "label": "全自动对生产容器运行 MinToolkit (Mint) 删减所有测试期未触及文件并直接上线",
+                  "status": "critical",
+                  "verdictTitle": "50% 覆盖率下动态删文件极易误删冷路径 libnss_dns / 异常处理库导致线上崩溃",
+                  "feedback": "动态删包无法感知未覆盖到的冷路径和异常分支，在低测试覆盖率下自动删改文件是典型生产故障制造机。"
+                },
+                {
+                  "label": "优先推送「构建期最小闭包（Google Distroless / Chainguard apko）」替换臃肿基础镜像，辅以 seccomp 加固",
+                  "status": "optimal",
+                  "verdictTitle": "源头物理消灭近九成 OS 漏洞与 Shell 武器库，且保留完整确定性 SBOM",
+                  "feedback": "Apache-2.0 构建底座既避免了冷路径误删崩毁，又契合 Confine Syscall 减面思路（排障需配套 kubectl debug）。"
+                },
+                {
+                  "label": "直接在 Dockerfile 末尾加一句 rm -rf /var/lib/dpkg 删除包管理数据库让扫描器扫不到",
+                  "status": "critical",
+                  "verdictTitle": "掩耳盗铃式“清零”，破坏资产审计可观测性且保留全部实体漏洞文件",
+                  "feedback": "删除包元数据只是让第一代扫描器失明，二进制攻击面毫发无损，严厉违反企业合规审计要求。"
+                }
+              ]
+            },
+            {
+              "name": "镜像切片构建底座与 AGPL-3.0 商用交付合规",
+              "layer": "商用闭源红线 · 法务审查",
+              "context": "研发提议将 Canonical chisel 源码集成进闭源 SaaS 后端服务里，为客户自动生成极简 Chiseled Ubuntu 镜像。",
+              "options": [
+                {
+                  "label": "把 Canonical chisel 直接编译嵌入闭源商业 SaaS 后端服务对外提供订阅制切片构建",
+                  "status": "critical",
+                  "verdictTitle": "严重触犯 AGPL-3.0 网络传染性条款，面临全 SaaS 后端代码强制开源风险",
+                  "feedback": "chisel 为 AGPL-3.0 许可！仅客户在自己外部 CI 里单独调用可行，绝不可嵌进商业闭源 SaaS 服务端。"
+                },
+                {
+                  "label": "选用 Apache-2.0 的 apko / melange 与 Distroless 底座构建 SaaS 级最小镜像推荐与装配引擎",
+                  "status": "optimal",
+                  "verdictTitle": "100% 满足商业闭源 SaaS 交付合规，零 AGPL 传染隐患",
+                  "feedback": "apko 与 melange 采用对商业完全友好的 Apache-2.0 协议，还原生生成高质量构件级 SBOM。"
+                },
+                {
+                  "label": "只保留 chisel 二进制在内部私有化脚本里且不向任何客户或外部网络暴露服务端功能",
+                  "status": "warning",
+                  "verdictTitle": "若未来需要对外交付私有化包或接入在线 SaaS 仍存在法务灰区，不如统一用 Apache-2.0",
+                  "feedback": "既然商业产品矩阵需要同时覆盖 SaaS 与私有化交付，从 Day 1 统一选用 Apache-2.0 底座最省心。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核场景题涵盖 <strong>JVM 零抖动运行态采集、冷路径防漏报与反向自愈公理、容器裁剪路线风险权衡以及 AGPL-3.0/eBPF 商业许可边界</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0012 · 动态运行时可达性与容器裁剪回忆测验",
+          "intro": "重点检验 JFR vs getAllLoadedClasses、冷路径融合铁律、Distroless/Mint 权衡与 chisel AGPL-3.0 红线。",
+          "questions": [
+            {
+              "prompt": "在 JVM 生产容器上采集运行时加载上下文以消除 Spring 反射导致的静态可达性盲区，同时要求 CPU 额外开销严格控制在 1% 以内，以下哪种工程采集方案最稳健？",
+              "options": [
+                "轮询 getAllLoadedClasses 枚举全部类表并每次抓取全堆栈。",
+                "订阅 JFR jdk.ClassLoad 流并关 stackTrace 采样。",
+                "挂载全量字节码 ClassFileTransformer 对每方法同步插桩。",
+                "借助 sys.settrace 与链路追踪在生产端实时拦截每次动态调用。"
+              ],
+              "answerIndex": 1,
+              "explanation": "OpenJDK 原生 JFR 的 jdk.ClassLoad 事件（稳态设 stackTrace=false）直接利用 JVM 内部线程本地环形缓冲流式记录，生产持续 CPU 开销小于 1%；相反，高频轮询 Instrumentation.getAllLoadedClasses() 会遍历内部类表并分配巨型 Class 数组引发内存与 Safepoint 压力，全量字节码插桩与 sys.settrace 则会远超 3% 性能红线（B 正确）。"
+            },
+            {
+              "prompt": "某核心 Java 服务引入了存在远程代码执行风险的 Log4j 组件。静态分析明确判定业务接口可达，但生产集群通过 JFR 连续观测 14 天（含月度批处理）后显示“从未观测到执行（NOT_OBSERVED）”。与此同时，另一个静态判为 UNREACHABLE 的 YAML 解析库却在 JFR 中捕获到了实际调用。架构融合引擎应如何裁决？",
+              "options": [
+                "把 Log4j 签 VEX 豁免并关告警，同时维持 YAML 库静默不可达。",
+                "把 Log4j 直接降噪消除，同时仅将 YAML 标为观察态但暂缓修补。",
+                "将两项漏洞统一视为运行期不活跃噪音彻底清除，并全面覆盖静态调用图全部结论。",
+                "保 Log4j 高危禁签 VEX，将 YAML 升 P0 并反哺修静态漏边。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Log4j JndiLookup 等属于典型的 Exploit-Only Gadget 或冷路径——正常流量下本就不会运行，绝不允许用 NOT_OBSERVED 推翻静态 REACHABLE（必须保留为 LATENT_REACHABLE 并禁发 VEX）；而静态判 UNREACHABLE 却在生产实际被调用，说明静态调用图发生了漏边（STATIC_SOUNDNESS_ALERT），须立刻升级 P0 并反馈修正 L4 静态前端（D 正确）。"
+            },
+            {
+              "prompt": "在为商业产品客户制定容器镜像瘦身与减面方案时，某团队考虑用 MinToolkit（Mint）对测试覆盖率仅 45% 的业务容器做运行期动态删文件瘦身，对比构建期 Distroless / Chainguard apko 方案，以下哪项风险判断最准确？",
+              "options": [
+                "低覆盖下动态删文件极易误删冷路径并崩溃，优选 Distroless/apko。",
+                "动态删文件会强制静态分析器重算系统调用白名单，故比构建期最小化更稳零风险。",
+                "Distroless 缺包管而难出 SBOM，唯有运行期动态删文件能保清单。",
+                "在任意测试覆盖率下，运行期删文件均可完整保留全量异常处理及 DNS 依赖。"
+              ],
+              "answerIndex": 0,
+              "explanation": "正如 SoK: Software Debloating (arXiv:2407.11259) 所指出，基于运行期画像的动态删文件高度依赖测试覆盖完备度；45% 覆盖率下极易把冷路径动态加载库（如 libnss_dns.so）或异常分支依赖误删引发线上崩溃，且会毁坏包管理器收据制造“SBOM 虚假清零”。构建期使用 Distroless 或 apko 声明式最小闭包既减面又保留完整确定性 SBOM（A 正确）。"
+            },
+            {
+              "prompt": "你在设计商业闭源 SCA 平台的容器裁剪与运行时收集架构时，研发团队提出直接把 Canonical chisel 源码嵌进闭源 SaaS 后端服务来生成极简 Ubuntu 镜像，同时以独立 DaemonSet 集成 Kubescape node-agent 消费其 ApplicationProfile。关于商业合规边界，哪项判断正确？",
+              "options": [
+                "chisel 属宽松 MIT 许可可直接嵌入闭源后端，而 Kubescape 含传染性条款禁用。",
+                "chisel 与内核 eBPF 均属纯 Apache-2.0，可直接静态链接进闭源商业核心后端。",
+                "chisel 属 AGPL-3.0 禁嵌闭源，Kubescape 为 Apache-2.0。",
+                "SaaS 嵌入 AGPL-3.0 并不触发网络传染，反而是 Apache-2.0 须公开全部代码。"
+              ],
+              "answerIndex": 2,
+              "explanation": "Canonical chisel 采用 AGPL-3.0 协议，将其嵌入商业闭源 SaaS 服务端对外提供网络服务会直接触发开源传染条款（客户在外部 CI 独立运行 CLI 则不波及平台）；相比之下，Kubescape 及其 node-agent 为 CNCF Apache-2.0 项目，独立作为集群探针运行并由 SaaS 消费 CRD 遥测数据完全符合商业闭源红线（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地 Layer 4 运行时可达性融合网关与容器减面引擎时，推荐精读以下一手规范、论文与 Apache-2.0 代码库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://kubescape.io/docs/components/node-agent/" target="_blank" rel="noopener"><strong>Kubescape <code>node-agent</code> &amp; Relevancy Filtering</strong></a>（<code>Apache-2.0</code>）：<code>ApplicationProfile</code> + <code>SBOMSyftFiltered</code> 生产级容器 OS 降噪范本。</li>
+          <li><a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener"><strong>Python PEP 669 (<code>sys.monitoring</code>)</strong></a> · <a href="https://nodejs.org/api/cli.html#node_v8_coveragedir" target="_blank" rel="noopener"><strong>Node.js <code>NODE_V8_COVERAGE</code></strong></a> · <strong>OpenJDK JFR <code>jdk.ClassLoad</code></strong>：三大主流运行时的低开销生产观测原生接口。</li>
+          <li><a href="https://arxiv.org/abs/2407.11259" target="_blank" rel="noopener"><strong><em>SoK: Software Debloating</em> (<code>arXiv:2407.11259</code>)</strong></a> · <a href="https://doi.org/10.1145/3106237.3106271" target="_blank" rel="noopener"><strong><em>Cimplifier</em> (ESEC/FSE 2017)</strong></a> · <a href="https://doi.org/10.1145/3368089.3409738" target="_blank" rel="noopener"><strong><em>JShrink</em> (ESEC/FSE 2020)</strong></a> · <a href="https://arxiv.org/abs/2008.05561" target="_blank" rel="noopener"><strong><em>Confine</em> (RAID 2020)</strong></a>：容器与字节码裁剪的精度、冷路径与系统调用边界学术定论。</li>
+          <li><a href="https://github.com/chainguard-dev/apko" target="_blank" rel="noopener"><strong>Chainguard <code>apko</code> / <code>melange</code></strong></a> &amp; <a href="https://github.com/mintoolkit/mint" target="_blank" rel="noopener"><strong>MinToolkit (<code>mint</code>)</strong></a>（均 <code>Apache-2.0</code>）：构建期最小闭包 vs 运行期瘦身（与 <code>AGPL-3.0</code> 的 <a href="https://github.com/canonical/chisel" target="_blank" rel="noopener"><code>canonical/chisel</code></a> 划清边界）。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>我们打通了静态调用图与运行态执行上下文的双模态融合。带着下面三个高阶问题随时向我发问，或直接进入 <strong>Lesson 0013</strong>：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在一个集群部署同一份容器镜像的多个副本（如金丝雀灰度 Pod vs 全量 Pod）时，<code>RuntimeEvidence</code> 聚合网关应该如何按 <code>image_digest</code> 做跨 Pod 窗口合并而不被短命重启容器稀释？”</li>
+          <li>“静态、动态与部署暴露面上下文全对齐后，怎么和 <strong>EPSS 30 天在野利用概率</strong>、<strong>CISA KEV</strong> 以及标准化 <strong>OpenVEX / CycloneDX VEX / CSAF</strong> 协同完成企业级可审计降噪闭环？”</li>
+          <li>“准备就绪！请为我开启 <strong>Lesson 0013（超越 CVSS：EPSS、CISA KEV 与 VEX 协同降噪）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">← 上一课：Lesson 0011 · 静态函数级可达性</a>
+      <a href="../reference/layer4-reachability-and-remediation-matrix.html">配套速查卡：Ref 05 · L4 可达与修复矩阵</a>
+      <a href="../index.html">返回课程总览 · 准备进入 Lesson 0013（EPSS / KEV / VEX） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/runtime-reachability-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -100,6 +100,18 @@
 - [Multi-Language Syntax, CPG & OSV Call Analysis: `tree-sitter` (`MIT`) · `google/osv-scanner` (`Apache-2.0`) · `AppThreat/atom` (`Apache-2.0`) & `joernio/joern` (`Apache-2.0`)](https://github.com/google/osv-scanner)
   [`tree-sitter/tree-sitter`](https://github.com/tree-sitter/tree-sitter)（`MIT`）仅提供单文件增量 CST/AST 语法解析，适合做 L3 修复 Commit Patch-Diff 符号提取，**不可充当跨文件调用图引擎**；[`google/osv-scanner`](https://github.com/google/osv-scanner) 的 `--call-analysis` 目前默认支持 Go（`govulncheck`）、实验性支持 Rust（需执行 `build.rs`）、尚无原生 Java CLI 调用分析；[`AppThreat/atom`](https://github.com/AppThreat/atom) 与 [`joernio/joern`](https://github.com/joernio/joern)（`Apache-2.0`）提供重型代码属性图（CPG）离线深度参考。
 
+### 动态运行时可达性、执行遥测与容器裁剪（Layer 4 Runtime & Debloating）
+- [Runtime Container Relevancy: Kubescape & `kubescape/node-agent` (`Apache-2.0`, CNCF)](https://github.com/kubescape/node-agent) ([Kubescape Docs](https://kubescape.io/docs/components/node-agent/))
+  CNCF 孵化项目；以轻量 eBPF Node Agent 观察生产容器文件与进程访问，生成 `ApplicationProfile` CRD 并与 `SBOMSyft` 交叉过滤输出 `SBOMSyftFiltered`（消除 60%–80% 未使用 OS 冗余包 CVE）。用于：作为 BYO-Telemetry 标准接入参照及容器 OS 层运行态过滤标杆。
+- [eBPF Runtime Sensors & Dual-License Boundary: Cilium Tetragon (`cilium/tetragon`) · Aqua Tracee (`aquasecurity/tracee`) · Falco Libs (`falcosecurity/libs`) · Inspektor Gadget (`inspektor-gadget/inspektor-gadget`)](https://github.com/cilium/tetragon)
+  四者用户态组件均采用 `Apache-2.0`，但内核侧调用 GPL-only helper 的 eBPF C 程序须声明 `GPL-2.0` / `Dual BSD-GPL`（`SEC("license") = "GPL"`）。商用闭源架构边界：严禁把 GPL eBPF 内核源码静态混编进核心闭源二进制，须独立进程/DaemonSet 运行并通过 gRPC/JSON 输出标准化 `RuntimeEvidence`。
+- [Language-Level Low-Overhead Telemetry: OpenJDK JFR (`jdk.ClassLoad`) · `async-profiler` (`Apache-2.0`) · OpenTelemetry Java (`Apache-2.0`) · Python PEP 669 (`sys.monitoring`) · Node.js `NODE_V8_COVERAGE`](https://peps.python.org/pep-0669/)
+  语言级低开销（`< 1%–2.5%` CPU）生产遥测原语：Java 使用 JFR `jdk.ClassLoad`（稳态设 `stackTrace=false`）替代会引发类表锁与数组分配抖动的 `Instrumentation.getAllLoadedClasses()`；Python 3.12+ 采用集成进自适应解释器的 [PEP 669 `sys.monitoring`](https://peps.python.org/pep-0669/) 淘汰慢十倍的 `sys.settrace`；Node.js 使用原生 [`NODE_V8_COVERAGE`](https://nodejs.org/api/cli.html#node_v8_coveragedir) 与 `v8.takeCoverage()`。
+- [Minimal Images & Debloating Toolchains: Google Distroless (`Apache-2.0`) · Chainguard `apko` & `melange` (`Apache-2.0`) · MinToolkit `mint` (`Apache-2.0`) vs Canonical `chisel` (`AGPL-3.0`)](https://github.com/chainguard-dev/apko)
+  构建期最小闭包首选 [`GoogleContainerTools/distroless`](https://github.com/GoogleContainerTools/distroless) 与 [`chainguard-dev/apko`](https://github.com/chainguard-dev/apko)（消除近九成 OS 臃肿 CVE 且输出确定性 SBOM）；运行期动态瘦身 [`mintoolkit/mint`](https://github.com/mintoolkit/mint)（原 DockerSlim，CNCF `Apache-2.0`）受限测试覆盖率，易误删冷路径库并破坏包管理收据。**商用闭源红线**：[`canonical/chisel`](https://github.com/canonical/chisel) 为 `AGPL-3.0`，严禁嵌入商业闭源 SaaS 后端服务！
+- [Debloating Research Foundations: *SoK: Software Debloating* (`arXiv:2407.11259`) · *Cimplifier* (ESEC/FSE 2017, DOI `10.1145/3106237.3106271`) · *JShrink* (ESEC/FSE 2020, DOI `10.1145/3368089.3409738`) · *Confine* (RAID 2020, `arXiv:2008.05561`)](https://arxiv.org/abs/2407.11259)
+  确立软件与容器裁剪三大铁律：纯动态删文件面临冷路径崩毁（如遗漏 `libnss_dns.so`）、黑盒排障困难与“删元数据造成扫描清零假象”缺陷；*JShrink* 揭示字节码裁剪须静动态类型结合；*Confine* 提供不删文件而通过静态提取 Syscall 白名单生成 `seccomp` 策略的正交减面路线。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -116,8 +128,7 @@
   PURL 与 VERS 版本规范的核心维护社区。用于：解决跨生态冷门包管理器命名规范与版本区间边界争议。
 
 ## Gaps
-- **动态运行时可达性（JVMTI / eBPF / 容器运行态裁剪）基准与开销实测**：尚缺 JVM 类加载/类初始化、eBPF/文件系统访问跟踪在生产容器下的性能损耗与与静态调用图融合置信度模型基准（将在 Lesson 0012 调研补齐）。
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
-- **静态函数级可达性（Call Graph）跨语言评测基准（Ch 04 · Lesson 0011 已收口）**：已于第 11 课及 Ref 05 补齐 RTA（OOPSLA 1996）、VTA（OOPSLA 2000 / Go `govulncheck`）、Java Unsoundness（*Judge* ISSTA 2019 / `opalj/JCG` & *Eclipse Steady* ICSME 2018）、JS/TS（ISSTA 2021 / ECOOP 2024 `cs-au-dk/jelly`）与 Python（*PyCG* ICSE 2021 `arXiv:2103.00587` & *JARVIS* `arXiv:2305.05949` 预印本）跨语言对比、商用许可红线与 L3 符号映射/生态预计算拼接架构。
+- **静态与运行时可达性融合及容器裁剪（Ch 04 · Lessons 0011–0012 已收口）**：第 11 课已覆盖 RTA/VTA/Java Unsoundness/JS `Jelly`/Python `PyCG`+`JARVIS`；第 12 课及 Ref 05 第 03 节已补齐 Kubescape `ApplicationProfile`、OpenJDK JFR `jdk.ClassLoad`（vs `getAllLoadedClasses()`）、PEP 669、`NODE_V8_COVERAGE`、静动态三维融合矩阵（含冷路径防漏报与反向 Soundness 校验）、容器裁剪（Distroless/`apko` vs Mint/*SoK* `arXiv:2407.11259`/*Cimplifier*/*JShrink*/*Confine*）及 `chisel` `AGPL-3.0`/eBPF GPL 双层隔离红线。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。
