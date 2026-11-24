@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0013：超越 CVSS：EPSS、CISA KEV 与 VEX 协同降噪</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012 · 运行时可达与容器裁剪</a>
+        <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html" class="active">Lesson 0013 · EPSS / KEV / VEX</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0013</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 04 第三课（威胁优先级与可审计降噪闭环）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>超越 CVSS：EPSS、CISA KEV 与 VEX（OpenVEX / CycloneDX / CSAF）协同降噪</h1>
+      <p class="subtitle">在 <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> 与 <a href="./0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012</a> 中，我们用静动态融合把“代码/包是否可达”拆成了明确的四态结论。但在真实企业现场，即使只看可达漏洞，团队仍然面临“几百条中高危先修哪几条”以及“已证不可达的结论如何在 CI、安全审计与下游客户之间合法流转”两大难题。本课围绕总架构师与核心研发视角，拍板<strong>EPSS + CISA KEV + SSVC 非补偿决策树</strong>、<strong>三大 VEX 标准映射与统一不可变账本</strong>，以及<strong>Safety Floor 信任冲突裁决与事件驱动撤销机制</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 CVSS v4.0 vs EPSS v4（Probability &ne; Percentile）、CISA KEV（Floor 非 Ceiling）与 SSVC 非补偿树；掌握 OpenVEX / CycloneDX 1.7 / CSAF 2.0 语义映射与 <code>subcomponents</code> 作用域陷阱；落地纯 Apache-2.0 VEX 账本与事件撤销闭环</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="./0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md）</div>
+      <p>第一代 SCA 靠 <code>CVSS &ge; 7.0</code> 一刀切，导致 <strong>80% 以上警报是死代码或永不被利用的噪音</strong>，却同时漏掉 <strong>CVSS 5.3 但正在被勒索软件大规模利用的 KEV 漏洞</strong>。第三代商业 SCA 的高溢价能力，是把 L4 可达性、实时威胁情报（EPSS/KEV）与标准化 <strong>VEX 证据链</strong> 拧成同一套“只叫对人修关键 5%”的决策引擎——既要压降噪音，更要扛住合规审计与 0-day 反扑。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么 CVSS-B 与加权平均会制造“告警疲劳 + KEV 漏杀”</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 四套核心标尺的真实物理含义（严禁混用）</h3>
+      <p>漏洞优先级设计中最大的工程错误，就是把“理论破坏力（Severity）”当成“现实风险（Risk）”。构建 Layer 4 优先级引擎前，必须先把四套权威标尺的正交边界钉死：</p>
+      <ul>
+        <li><strong><a href="https://www.first.org/cvss/v4.0/specification-document" target="_blank" rel="noopener">FIRST CVSS v4.0</a>（<code>CVSS-B</code> vs <code>CVSS-BT</code>）：</strong><code>CVSS-B</code>（Base Score）衡量的是漏洞在通用最坏假设下的<strong>固有技术严重性</strong>——如果未指定 Threat 维度，<code>CVSS-B</code> 默认按最坏威胁态（相当于存在主动攻击）计分；<code>CVSS-BT</code> 引入了离散的 <strong>Exploit Maturity（<code>E:A</code> / <code>E:P</code> / <code>E:U</code>）</strong>，但它依然只是“有没有公开 PoC/攻击”的阶梯开关，无法回答统计概率。</li>
+        <li><strong><a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS v4</a>（<code>arXiv:2302.14172</code> 演进）：</strong>Jay Jacobs 等人在 <a href="https://arxiv.org/abs/2302.14172" target="_blank" rel="noopener">EPSS v3（IEEE EuroS&amp;PW 2023，~1,500 维特征）</a>基础上于 2025 年 3 月演进至 <strong>EPSS v4</strong>（强化恶意软件/勒索遥测、Shodan 与 HackerOne 等信号），每日输出每个 CVE 在<strong>未来 30 天内被真实在野利用的概率（0%–100%）</strong>。历史统计表明，全库超过 95% 的 CVE 利用概率贴近 0%。</li>
+        <li><strong><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener">CISA KEV Catalog</a>（美国联邦公有领域可商用）：</strong>经过人工核验确认已经在野被攻击者实际利用的高置信度漏洞清单，标准 JSON 提供 <strong>8 个必填字段</strong>（<code>cveID</code>、<code>vendorProject</code>、<code>product</code>、<code>vulnerabilityName</code>、<code>dateAdded</code>、<code>shortDescription</code>、<code>requiredAction</code>、<code>dueDate</code>）及关键附加字段 <code>knownRansomwareCampaignUse</code>（取值为 <code>"Known"</code> 或 <code>"Unknown"</code>）。</li>
+        <li><strong><a href="https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc" target="_blank" rel="noopener">CISA SSVC</a>（Stakeholder-Specific Vulnerability Categorization）：</strong>由 CISA 与 CMU SEI 联合提出的<strong>非补偿性决策树</strong>，结合 <code>Exploitation</code>（Active/PoC/None）、<code>Automatable</code>（Yes/No）、<code>Technical Impact</code>（Total/Partial）与 <code>Mission &amp; Well-being</code>，直接给出确定性动作输出：<strong><code>Act</code> / <code>Attend</code> / <code>Track*</code> / <code>Track</code></strong>。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">工程避坑：EPSS Probability &ne; Percentile，KEV 是 Floor 非 Ceiling</span>
+        <strong>坑 1 · 把 Percentile 当概率：</strong>EPSS API 同时返回 <code>epss</code>（绝对概率，如 <code>0.004</code> = 0.4%）和 <code>percentile</code>（相对分位，如 <code>0.58</code> = 超过 58% 的 CVE）。由于 90%+ CVE 几乎不被利用，<strong>第 60 百分位对应的绝对概率往往不到 0.5%</strong>！写阈值策略必须用 <code>epss</code>（Probability）而不是 <code>percentile</code>。<br/>
+        <strong>坑 2 · KEV 的滞后性与字段误读：</strong>KEV 具有天然滞后性（只收录已观测到实锤的少数漏洞），所以它是<strong>优先级底线（Floor）而非上限（Ceiling）</strong>——不在 KEV 不代表安全；同时 <code>knownRansomwareCampaignUse: "Unknown"</code> 只代表 CISA 暂未证实勒索关联，绝不等于“不会用于勒索”。<br/>
+        <strong>坑 3 · 同步查 API 与商业 ToS：</strong>严禁在扫描热路径逐条同步调用 <code>api.first.org/data/v1/epss</code>！后端必须每日定时拉取官方全量 gzip CSV 注入 Layer 3 内存/KV 索引，并严格遵守 <a href="https://www.first.org/about/policies/terms" target="_blank" rel="noopener">FIRST Services Terms of Use</a>（仅限漏洞披露与防御性安全用途，须保留版权署名，严禁脱离产品单独转售原始数据集）。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 为什么“线性加权平均”是反模式？拥抱 SSVC 非补偿决策树</h3>
+      <p>很多初创安全团队喜欢发明一个看似科学的多维打分公式：<code>RiskScore = 0.3&times;CVSS + 0.25&times;EPSS + 0.2&times;KEV + 0.15&times;Reach + 0.1&times;Exposure</code>。在决策论中，这种加法模型存在致命的<strong>补偿掩蔽（Compensatory Masking）</strong>问题：</p>
+      <ul>
+        <li><strong>场景 A（死代码虚高）：</strong>某组件 CVSS 9.8 且 EPSS 62%，但 Layer 4 静态调用图与运行态已证 <code>VERIFIED_UNREACHABLE</code>（死代码）。线性加权仍会算出 6.5–7.2 的“高分”，迫使研发去修一条永远执行不到的代码。</li>
+        <li><strong>场景 B（低 CVSS KEV 被稀释）：</strong>某身份认证绕过漏洞因前置条件被评 CVSS 5.3，却已入选 CISA KEV 且直接挂载在公网网关上。线性加权被 <code>0.3&times;5.3</code> 拉低总分，错失 P0 阻断时机。</li>
+      </ul>
+      <p>正确解法是将 <strong>Lesson 0011–0012 的 L4 可达性</strong> 与 <strong>CISA SSVC 非补偿决策树</strong> 做硬逻辑门控（Gating Logic）融合：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:21%" />
+          <col style="width:23%" />
+          <col style="width:18%" />
+          <col style="width:38%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>L4 可达性输入（0011–0012）</th>
+            <th>威胁与暴露条件（KEV / EPSS / 暴露面）</th>
+            <th>SSVC 输出与 SLA</th>
+            <th>商业 SCA 动作与 VEX 签发权限</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>VERIFIED_UNREACHABLE</code><br/>（静动态双证不可达）</td>
+            <td>无论 CVSS 多高、EPSS 多高（甚至即使在 KEV）</td>
+            <td><span class="badge badge-ok">Track</span><br/>常规周期 / 豁免</td>
+            <td><strong>可审计消噪</strong>：自动签发 VEX <code>not_affected</code>（<code>vulnerable_code_not_in_execute_path</code>），附调用图剪枝与运行窗哈希。</td>
+          </tr>
+          <tr>
+            <td><code>CONFIRMED_EXPLOITABLE</code> / <code>REACHABLE</code></td>
+            <td><strong>命中 KEV</strong>（尤其勒索 <code>Known</code>）或 <code>EPSS &ge; 20%</code> + 非隔离资产</td>
+            <td><span class="badge badge-danger">Act (P0)</span><br/>&le; 24h–72h 阻断</td>
+            <td><strong>最高优阻断</strong>：无视 CVSS 是否低于 7.0；<strong>严禁签发 VEX</strong>，立即推送 <strong>Lesson 0014</strong> 无破坏性升级 PR。</td>
+          </tr>
+          <tr>
+            <td><code>LATENT_REACHABLE</code> / <code>REACHABLE</code></td>
+            <td><code>EPSS &lt; 1%</code>（低在野概率）且无 KEV，但存在公网或内网路径</td>
+            <td><span class="badge badge-warn">Attend (P1/P2)</span><br/>&le; 7d–14d 排期</td>
+            <td><strong>低 EPSS 护栏</strong>：EPSS 低只代表“近期没被大规模扫”，<strong>绝不允许自动签发 VEX</strong>！正常进迭代排期修补。</td>
+          </tr>
+          <tr>
+            <td><code>POTENTIALLY_REACHABLE</code> / <code>DORMANT_POTENTIAL</code></td>
+            <td>低暴露面 + <code>EPSS &lt; 5%</code> + 无 KEV</td>
+            <td><span class="badge badge-blue">Track* (P3)</span><br/>&le; 30d 增强监听</td>
+            <td>纳入重点观察列表（Watchlist）；一旦每日 EPSS 任务检测到 7 天飙升或新入 KEV，立即自动升格为 <code>Attend</code>/<code>Act</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>VEX 三大标准（OpenVEX / CycloneDX 1.7 / CSAF 2.0）深度拆解与语义映射</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 VEX 不是“永久删告警”，而是可机器校验的“影响状态声明”</h3>
+      <p>当 Layer 4 证明了某个组件在特定应用中 <code>VERIFIED_UNREACHABLE</code>，或者某上游安全团队已经通过本地热补丁修复了漏洞，传统的做法是在扫描器 UI 里点一下 <code>Ignore</code>——这种黑盒操作无法跨工具链流转，更过不了金融、车企或政企客户（如欧盟 CRA、美国联邦采购）的合规审计。<strong>VEX（Vulnerability Exploitability eXchange）</strong>就是用来解决“SBOM 之外的漏洞可达性与影响声明交换”的开放标准。</p>
+      <p>目前全球供应链形成三大主流 VEX 载体，它们共享 <a href="https://www.cisa.gov/sites/default/files/2023-04/minimum-requirements-for-vex-508c.pdf" target="_blank" rel="noopener">CISA Minimum Requirements for VEX</a> 的核心语义，但数据结构与适用场景截然不同：</p>
+      <ul>
+        <li><strong><a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a>（<code>Apache-2.0</code> · OpenSSF / Chainguard 主导）：</strong>极简、与 SBOM 格式解耦的 JSON-LD 流式声明模型，原生支持将签名后的 VEX 作为 <strong>OCI 1.1 Referrers</strong> 附着在容器镜像旁随镜像流转（Trivy <code>--vex oci</code> / <code>vexctl</code>），是云原生与 CI/CD 内部交换的最佳默认格式。</li>
+        <li><strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.6 / 1.7</a>（ECMA-424）：</strong>组件为中心，把 <code>vulnerabilities[].analysis</code> 直接内嵌在 SBOM 中（此时充当 <strong>VDR 漏洞披露报告</strong>）或导出为独立 VEX 文件。支持最细粒度的状态（含 <code>resolved_with_pedigree</code> 与扫描器误报专用态 <code>false_positive</code>）。</li>
+        <li><strong><a href="https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html" target="_blank" rel="noopener">OASIS CSAF 2.0 VEX Profile</a>（<code>csaf_vex</code>）：</strong>安全公告（Advisory）中心，以复杂的 <code>product_tree</code> 绑定多个产品版本家族，被 Red Hat、Cisco、Siemens 及欧洲监管机构（BSI）广泛采用。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">必纠概念：VDR vs VEX 与 false_positive 语义红线</span>
+        <strong>1. VDR &ne; VEX：</strong><strong>VDR（Vulnerability Disclosure Report）</strong>是随软件发布的“全量已知漏洞台账+处置计划”；<strong>VEX</strong> 只回答“某个漏洞在特定产品上下文是否受影响”。<br/>
+        <strong>2. 严禁滥用 <code>false_positive</code>：</strong>在 CycloneDX 中，<code>false_positive</code> <strong>专指扫描器识别错了包/版本</strong>（例如把同名私包或误报正则匹配成了上游库）；如果产品<strong>确实包含了该漏洞组件</strong>只是调用路径不可达，必须使用 <code>not_affected</code> + <code>code_not_reachable</code>！OpenVEX 没有 <code>false_positive</code> 状态，同样统一归入 <code>not_affected</code> 并注明理由。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.2 三大标准状态与理由码精确对照表（编码零失真字典）</h3>
+      <p>平台架构中最常见的序列化 Bug，就是把 OpenVEX/CSAF 的枚举字面量直接写进 CycloneDX 字段（例如把 <code>vulnerable_code_not_in_execute_path</code> 塞进 CycloneDX，导致上游校验器直接报错）。以下对照表为 Layer 2 统一编解码网关的黄金规范：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:27%" />
+          <col style="width:27%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>语义维度</th>
+            <th>OpenVEX (<code>v0.2.0</code>)</th>
+            <th>CycloneDX (<code>1.6 / 1.7</code>)</th>
+            <th>OASIS CSAF 2.0 (<code>csaf_vex</code>)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>影响状态<br/><code>Status / State</code></strong></td>
+            <td><code>not_affected</code><br/><code>affected</code><br/><code>fixed</code><br/><code>under_investigation</code></td>
+            <td><code>not_affected</code> · <code>exploitable</code><br/><code>resolved</code> · <code>resolved_with_pedigree</code><br/><code>in_triage</code> · <code>false_positive</code></td>
+            <td><code>product_status</code> 分组键（<strong>带 <code>known_</code> 前缀</strong>）：<br/><code>known_not_affected</code> · <code>known_affected</code><br/><code>fixed</code> · <code>under_investigation</code></td>
+          </tr>
+          <tr>
+            <td><strong>组件未包含</strong></td>
+            <td><code>component_not_present</code></td>
+            <td><code>requires_dependency</code>（或 SBOM 中移除该组件）</td>
+            <td><code>flags[].label: "component_not_present"</code></td>
+          </tr>
+          <tr>
+            <td><strong>漏洞代码未编译/被删</strong></td>
+            <td><code>vulnerable_code_not_present</code></td>
+            <td><code>code_not_present</code></td>
+            <td><code>flags[].label: "vulnerable_code_not_present"</code></td>
+          </tr>
+          <tr>
+            <td><strong>代码在但不可达（L4 核心）</strong></td>
+            <td><code>vulnerable_code_not_in_execute_path</code></td>
+            <td><code>code_not_reachable</code></td>
+            <td><code>flags[].label: "vulnerable_code_not_in_execute_path"</code></td>
+          </tr>
+          <tr>
+            <td><strong>参数不受攻击者控制</strong></td>
+            <td><code>vulnerable_code_cannot_be_controlled_by_adversary</code></td>
+            <td><code>requires_environment</code> / <code>requires_configuration</code></td>
+            <td><code>flags[].label: "vulnerable_code_cannot_be_controlled_by_adversary"</code></td>
+          </tr>
+          <tr>
+            <td><strong>已有内联缓解保护</strong></td>
+            <td><code>inline_mitigations_already_exist</code></td>
+            <td><code>protected_by_mitigating_control</code>（另有 <code>protected_at_runtime</code> / <code>perimeter</code> / <code>compiler</code>）</td>
+            <td><code>flags[].label: "inline_mitigations_already_exist"</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.3 OpenVEX <code>subcomponents</code> 作用域陷阱与 Canonical VEX Ledger</h3>
+      <p>在真实容器与微服务场景下，签发 VEX 最容易埋下全局失明雷坑的就是<strong>PURL 作用域缺失</strong>：假设某团队发现镜像 A 中的 <code>golang.org/x/oauth2@v0.18.0</code> 某个函数不可达，如果在 VEX 的 <code>products</code> 中直接把 <code>@id</code> 写成裸库 <code>pkg:golang/golang.org/x/oauth2@v0.18.0</code>，那么当这个库被镜像 B 的高危支付接口真实调用时，全局消费该 VEX 的扫描器就会把镜像 B 也一起静默掉！</p>
+      <p>正确的做法（也是 <a href="https://trivy.dev/latest/docs/supply-chain/vex/" target="_blank" rel="noopener">Trivy OpenVEX 规范</a> 强制推荐的方式），是利用 OpenVEX 的 <strong><code>products[].subcomponents[]</code> 双层锚点</strong>：外层 <code>@id</code> 锁定具体的应用制品或容器摘要（<code>pkg:oci/checkout-api@sha256:...</code>），内层 <code>subcomponents[]</code> 才写具体的脆弱三方库 PURL，确保豁免严格局限在“经过实证的特定容器/二进制边界内”。</p>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 2 统一不可变 VEX 事件账本（Canonical VEX Ledger）与三协议双向编解码网关</strong>
+        <span>平台内部绝不以单一外部 JSON 格式作为存储真值，也不直接修改或删除 Layer 3 原始漏洞记录</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">多源 VEX 声明与平台实证输入</span>
+              <span class="badge badge-blue">带置信度等级标签</span>
+            </div>
+            <ul>
+              <li><strong>内部自动实证：</strong>L4 静态 <code>UNREACHABLE</code> + 运行态 <code>NOT_OBSERVED</code> 签发事件（绑定 <code>commit_sha</code> / <code>image_digest</code>）。</li>
+              <li><strong>外部厂商/社区输入：</strong>CSAF 2.0（Red Hat/厂商）、OpenVEX OCI Referrers、Trivy VEX Hub、人工安全评审（带 TTL）。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Canonical VEX Ledger（不可变事件账本）</span>
+              <span class="badge badge-ok">Append-Only + Safety Floor</span>
+            </div>
+            <ul>
+              <li><strong>核心字段：</strong><code>(stmt_id, cve_id, product_purl, subcomponent_purl, status, justification, trust_tier, evidence_ref, expires_at, revoked_by)</code>。</li>
+              <li><strong>非破坏叠加：</strong>原始 CVE 匹配结果永久保留，VEX 仅作为视图叠加层与门禁过滤器，支持一键追溯与撤销。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 按客户消费方需求无损投影导出（Schema-Checked Projection） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">三协议无损投影输出网关</span>
+            <span class="orch-stage-kicker">OpenVEX + CycloneDX 1.7 + CSAF 2.0</span>
+          </div>
+          <p class="orch-stage-desc">
+            <strong>① OpenVEX + Sigstore/OCI：</strong>面向云原生流水线与 Kubernetes 准入控制器（<code>go-vex</code> / <code>vexctl</code>）；
+            <strong>② CycloneDX 1.7 VDR/VEX：</strong>嵌入企业资产台账与交付物 SBOM（<code>cyclonedx-go</code>）；
+            <strong>③ OASIS CSAF 2.0：</strong>面向金融/工控/欧盟 CRA 政企客户正式安全通报（<code>gocsaf/csaf</code>）。
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>企业级 VEX 信任层级、冲突裁决（Safety Floor）与事件驱动撤销</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 当社区 VEX Hub 声称“不受影响”，而你方调用图显示“可达”时信谁？</h3>
+      <p>随着 Aqua 推出 <a href="https://github.com/aquasecurity/vexhub" target="_blank" rel="noopener">VEX Hub</a> 以及各大开源项目开始随包分发 VEX，平台很快会面临<strong>多方 VEX 冲突</strong>：例如上游开源维护者发了一份 OpenVEX 声明“<code>not_affected</code>”（因为该组件默认配置不触发），但你方客户在业务代码里偏偏开启了那个危险选项，且 Lesson 0011–0012 已捕获到了真实调用链。</p>
+      <p>参考 <a href="https://trivy.dev/latest/docs/supply-chain/vex/" target="_blank" rel="noopener">Trivy <code>--vex</code></a> 的显式优先级链设计（命令行最先传入的源优先级最高，例如 <code>--vex local.json --vex oci --vex repo</code>）与商业 SCA 零漏报红线，平台必须建立不可逾越的<strong>四级 VEX 信任层级与安全底线（Safety Floor）</strong>：</p>
+      <ol>
+        <li><strong>Tier 0 · Hard Evidence Safety Floor（不可推翻的硬实证底线）：</strong>只要本平台 L4 捕获到 <code>CONFIRMED_EXPLOITABLE</code>、<code>REACHABLE</code> 或生产 <code>EXECUTED_FUNC</code>，<strong>任何外部或历史 VEX <code>not_affected</code> 声明一律被强行驳回</strong>，触发 <code>VEX_CONFLICT_OVERRIDE</code> 告警。</li>
+        <li><strong>Tier 1 · 本平台实证签发 / 组织内审签名 VEX（<code>internal_verified</code>）：</strong>附带本仓库 Call Graph 摘要或已签名人工缓解审批（且未过 TTL）。</li>
+        <li><strong>Tier 2 · 上游厂商密码学签名 VEX（<code>vendor_signed</code>）：</strong>通过 Sigstore/PGP 验签的原厂 CSAF/OpenVEX（如 Red Hat 对自有 RHEL Backport 的声明），且要求产品 PURL 与版本精确命中。</li>
+        <li><strong>Tier 3 · 社区未签名 VEX Hub（<code>community_unsigned</code>）：</strong>仅用于“降级标注与人工参考提示”，<strong>严禁</strong>在没有 L4 静态/动态印证的情况下直接自动阻断 P0 告警或屏蔽 KEV 漏洞。</li>
+      </ol>
+      <aside class="sidenote">
+        <span class="sidenote-title">VEX 必须具备“事件驱动自动撤销”机制</span>
+        任何 <code>not_affected</code> 结论只在特定时间切片与拓扑下成立。参考 <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> 的时间线覆盖原则（同产品+漏洞下最新时间戳/版本语句覆盖旧语句），平台必须监听五大<strong>撤销触发器</strong>：<br/>
+        ① 代码提交改变 Call Graph 连通性；<br/>
+        ② JFR/eBPF 在生产抓到原判不可达类的加载；<br/>
+        ③ 漏洞新入 CISA KEV（强制复核潜伏与人工缓解项）；<br/>
+        ④ EPSS 7 日内飙升 &ge; +20%；<br/>
+        ⑤ 人工缓解型 VEX（<code>inline_mitigations_already_exist</code>）强制设置的 30–90 天 <strong>TTL 到期</strong>。
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：SSVC 非补偿裁决器、Safety Floor 冲突拦截与 VEX 事件撤销校验</strong>
+        <span>Pure Go 自研核心（可无缝对接 go-vex / cyclonedx-go / gocsaf）</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> SSVCAction <span class="tok-kw">string</span>
+<span class="tok-kw">const</span> (
+    ActionAct    SSVCAction = <span class="tok-str">"Act"</span>    <span class="tok-cmt">// P0: 24h-72h 紧急阻断与自动 PR</span>
+    ActionAttend SSVCAction = <span class="tok-str">"Attend"</span> <span class="tok-cmt">// P1/P2: 7d-14d 常规迭代修复</span>
+    ActionTrackS SSVCAction = <span class="tok-str">"Track*"</span> <span class="tok-cmt">// P3: 增强监控 EPSS/KEV 异动</span>
+    ActionTrack  SSVCAction = <span class="tok-str">"Track"</span>  <span class="tok-cmt">// P4: 已证不可达或 VEX 生效豁免</span>
+)
+
+<span class="tok-kw">type</span> TriageInput <span class="tok-kw">struct</span> {
+    CVSSBase          <span class="tok-kw">float64</span>
+    EPSSProb          <span class="tok-kw">float64</span> <span class="tok-cmt">// 注意：必须用 Probability (0.0-1.0)，绝不用 Percentile!</span>
+    InCISAKEV         <span class="tok-kw">bool</span>
+    RansomwareKnown   <span class="tok-kw">bool</span>
+    ReachState        <span class="tok-kw">string</span>  <span class="tok-cmt">// CONFIRMED_EXPLOITABLE | REACHABLE | LATENT_REACHABLE | VERIFIED_UNREACHABLE</span>
+    InternetExposed   <span class="tok-kw">bool</span>
+    ExternalVEXStatus <span class="tok-kw">string</span>  <span class="tok-cmt">// "" | "not_affected"</span>
+    VEXTrustTier      <span class="tok-kw">int</span>     <span class="tok-cmt">// 1:InternalVerified, 2:VendorSigned, 3:CommunityUnsigned</span>
+    VEXExpired        <span class="tok-kw">bool</span>
+}
+
+<span class="tok-kw">func</span> EvaluatePriorityAndVEX(in TriageInput) (SSVCAction, <span class="tok-kw">string</span>) {
+    hardReachable := in.ReachState == <span class="tok-str">"CONFIRMED_EXPLOITABLE"</span> ||
+        in.ReachState == <span class="tok-str">"REACHABLE"</span> || in.ReachState == <span class="tok-str">"LATENT_REACHABLE"</span>
+
+    <span class="tok-cmt">// 1. Safety Floor：硬可达实证拥有最高否决权，直接驳回外部/社区 VEX 豁免</span>
+    <span class="tok-kw">if</span> hardReachable &amp;&amp; in.ExternalVEXStatus == <span class="tok-str">"not_affected"</span> {
+        emitVexConflictAlert(in)
+        <span class="tok-kw">return</span> ActionAct, <span class="tok-str">"REJECTED_VEX_CONFLICT"</span>
+    }
+    <span class="tok-cmt">// 2. 静动态双证不可达 -> 压降为 Track 并可安全签发带子组件作用域的 VEX</span>
+    <span class="tok-kw">if</span> in.ReachState == <span class="tok-str">"VERIFIED_UNREACHABLE"</span> {
+        <span class="tok-kw">return</span> ActionTrack, <span class="tok-str">"ISSUE_INTERNAL_VEX_NOT_AFFECTED"</span>
+    }
+    <span class="tok-cmt">// 3. KEV 或高 EPSS 命中非补偿 Act 路径（无视 CVSS 是否低于 7.0）</span>
+    <span class="tok-kw">if</span> in.InCISAKEV || (in.ReachState == <span class="tok-str">"CONFIRMED_EXPLOITABLE"</span> &amp;&amp; (in.EPSSProb &gt;= <span class="tok-num">0.20</span> || in.InternetExposed)) {
+        <span class="tok-kw">return</span> ActionAct, <span class="tok-str">"VEX_PROHIBITED"</span>
+    }
+    <span class="tok-cmt">// 4. 校验有效 VEX（仅 Tier 1/2 且未过 TTL 才允许生效消噪）</span>
+    <span class="tok-kw">if</span> in.ExternalVEXStatus == <span class="tok-str">"not_affected"</span> &amp;&amp; !in.VEXExpired &amp;&amp; in.VEXTrustTier &lt;= <span class="tok-num">2</span> {
+        <span class="tok-kw">return</span> ActionTrack, <span class="tok-str">"VALID_EXTERNAL_VEX"</span>
+    }
+    <span class="tok-cmt">// 5. 低 EPSS 护栏：LATENT_REACHABLE / REACHABLE 绝不因 EPSS 低而豁免</span>
+    <span class="tok-kw">if</span> hardReachable {
+        <span class="tok-kw">return</span> ActionAttend, <span class="tok-str">"NO_AUTO_VEX_LOW_EPSS_GUARD"</span>
+    }
+    <span class="tok-kw">return</span> ActionTrackS, <span class="tok-str">"WATCHLIST_EVENT_REVAL"</span>
+}</code></pre>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 优先级与 VEX 生态纯 Apache-2.0 商用底座选型矩阵</h3>
+      <p>与之前各层一样，VEX 编解码、签名与情报源接入在 Go 技术栈下已有非常成熟、对商业闭源完全友好的底座，无需自己手写复杂的 JSON Schema 校验器：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:24%" />
+          <col style="width:18%" />
+          <col style="width:30%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源底座 / 数据源</th>
+            <th>许可 / 使用条款</th>
+            <th>核心能力与标杆对齐</th>
+            <th>商业闭源整合边界与工程规范</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/openvex/go-vex" target="_blank" rel="noopener"><code>openvex/go-vex</code></a> &amp; <a href="https://github.com/openvex/vexctl" target="_blank" rel="noopener"><code>vexctl</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>OpenVEX 官方 Go SDK 与 CLI：支持文档生成、合并、<code>subcomponents</code> 校验与 Sigstore OCI Attestation。</td>
+            <td>直接库级嵌入平台 Go 核心，充当 CI/CD 与 OCI 镜像级 VEX 编解码与签名默认引擎。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/CycloneDX/cyclonedx-go" target="_blank" rel="noopener"><code>CycloneDX/cyclonedx-go</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>CycloneDX 1.6/1.7 官方 Go SDK，完整覆盖 <code>vulnerabilities[].analysis</code>（VDR/VEX）与 <code>pedigree</code> 结构。</td>
+            <td>直接在 Layer 2 投影层复用，严守 <code>false_positive</code> 与 <code>not_affected</code> 枚举隔离。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/gocsaf/csaf" target="_blank" rel="noopener"><code>gocsaf/csaf</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>BSI/Intevation 维护的 OASIS CSAF 2.0 官方 Go 解析、校验与下载套件（已被 <a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Grype</a> 采用）。</td>
+            <td>直接嵌入后端解析 Red Hat / 政企客户 CSAF 2.0 <code>csaf_vex</code> 公告并映射至内部账本。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/aquasecurity/trivy" target="_blank" rel="noopener">Trivy VEX</a> / <a href="https://github.com/aquasecurity/vexhub" target="_blank" rel="noopener">VEX Hub</a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>支持 <code>--vex</code> 显式序列表（本地 / <code>oci</code> / <code>repo</code>）、OCI 1.1 Referrers 自动发现及社区 VEX Hub 索引。</td>
+            <td>借鉴其显式优先级链设计；消费社区 VEX Hub 须降级为 Tier 3 参考，严禁直接覆盖本地可达实证。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS v4</a> &amp; <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener">CISA KEV</a></strong></td>
+            <td>EPSS: <span class="badge badge-warn">FIRST ToS</span><br/>KEV: <span class="badge badge-ok">Public Domain</span></td>
+            <td>每日 EPSS 全量 CSV 概率预测 + CISA KEV 实时在野/勒索目录。</td>
+            <td>EPSS 仅限网络安全防御性产品内部集成并保留 FIRST 署名，禁单独转售原始评分；全量每日同步，禁同步阻塞查 API。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大典型冲突场景（高 CVSS 死代码陷阱、低 CVSS KEV 勒索反杀、低 EPSS 潜伏可达护栏、外部 VEX 冲突底线拦截），对比传统门禁、线性加权平均与 SSVC+VEX 的裁决差异，并实时切换预览 OpenVEX / CycloneDX 1.7 / CSAF 2.0 三协议结构；在<strong>模式二</strong>中体验 1,000 条企业原始 CVE 的层层协同降噪漏斗，并点选五大生产事件观察 VEX 自动撤销流转。</p>
+    </div>
+
+    <!-- INTERACTIVE PRIORITIZATION & VEX LAB -->
+    <section class="widget-panel full-width" data-widget="prioritization-vex-lab">
+      <script type="application/json" class="prioritization-vex-lab-data">
+        {
+          "title": "交互实验台：EPSS / KEV / SSVC 非补偿决策树与 VEX 三协议信任网关",
+          "intro": "亲手调节 CVSS-B、EPSS 30 天利用概率、CISA KEV、L4 可达性与外部 VEX 声明来源，验证如何实现 90%+ 协同降噪且保证 KEV 零漏杀。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 4 优先级与 VEX 协同降噪架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正为商业闭源 SCA 平台拍板最终风险排序、VEX 协议栈与企业可审计豁免闭环，需在极致降噪、KEV 零漏杀、审计可追溯与商用合规间取得最优解。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐现代第三代 SCA 降噪引擎的最佳实践！你避开了线性补偿掩蔽、EPSS 分位误用、外部 VEX 覆盖盲区与永久静默黑洞，可以顺利进入 Chapter 04 收官课 Lesson 0014（Guided Remediation 自动修复求解器）。",
+            "warning": "方案整体可用，但在 {warning} 项上存在单协议绑定过死、性能瓶颈或人工豁免失控隐患（标黄项），建议按非补偿决策树与统一事件账本进一步收敛。",
+            "critical": "当前方案踩中 {critical} 处会引发 KEV 致命漏杀、跨镜像误豁免、审计失真或协议违约的严重雷坑（标红项）！请立即修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "多维度风险优先级计算模型选型",
+              "layer": "L4 优先级内核 · 防漏杀",
+              "context": "团队需要把 L4 可达性、CVSS、EPSS、CISA KEV 与资产暴露面整合为 PR 门禁和修复工单队列。",
+              "options": [
+                {
+                  "label": "采用「L4 可达性硬门控 + CISA SSVC 非补偿决策树」，由 KEV/高 EPSS 锁定 Act，低 EPSS 不豁免可达路径",
+                  "status": "optimal",
+                  "verdictTitle": "彻底消除线性加权“补偿掩蔽”，兼顾 90%+ 降噪与 KEV 零漏杀",
+                  "feedback": "非补偿树让 VERIFIED_UNREACHABLE 不会因高 CVSS 误报，也让低 CVSS 的 KEV 漏洞直通 P0 Act。"
+                },
+                {
+                  "label": "设计一套 0–100 线性加权平均分（CVSS×0.4 + EPSS×0.3 + Reach×0.3），统一按 >= 70 分阻断",
+                  "status": "warning",
+                  "verdictTitle": "存在致命补偿掩蔽问题，低 CVSS KEV 易被拉低而死代码高危易被拉高",
+                  "feedback": "不同维度的物理量纲不可相互抵消，线性加权会导致安全团队既嫌误报多又漏掉真实利用风险。"
+                },
+                {
+                  "label": "延续传统 CVSS-B >= 7.0 静态卡点，其他维度仅做后台纯文字备注展示不参与门禁决策",
+                  "status": "critical",
+                  "verdictTitle": "退回第一代扫描器体验，80% 噪音阻断研发且漏过低 CVSS 勒索 KEV",
+                  "feedback": "无法把可达性与威胁情报转化为实际门禁降噪价值，产品丧失第三代商业核心溢价。"
+                }
+              ]
+            },
+            {
+              "name": "FIRST EPSS 数据同步架构与阈值语义管控",
+              "layer": "L3/L4 情报对接 · 合规与性能",
+              "context": "需要把 EPSS v4 每日评分接入高并发扫描流水线，同时严格遵守 FIRST Services Terms of Use。",
+              "options": [
+                {
+                  "label": "每日定时拉取官方全量 gzip CSV 注入本地内存/KV 索引；策略引擎只用 Probability 且严禁因低 EPSS 自动签发 VEX",
+                  "status": "optimal",
+                  "verdictTitle": "微秒级离线查表零阻塞，杜绝 Percentile 误用与低概率盲目豁免",
+                  "feedback": "既满足高并发 PR 门禁延迟 SLA，又符合 FIRST 仅用于防御产品集成与署名规范。"
+                },
+                {
+                  "label": "在每次 CI/CD 扫描遇 CVE 时实时同步发起 HTTPS 请求调用 api.first.org/data/v1/epss 并按 Percentile < 70% 自动豁免",
+                  "status": "critical",
+                  "verdictTitle": "公网同步查询拖垮流水线且易遭限流，用 Percentile 自动豁免制造大规模漏报",
+                  "feedback": "绝不能在热路径同步打外部公网 API，更不能把“短期概率低”当成“代码不受影响”。"
+                },
+                {
+                  "label": "将下载的 EPSS 原始评分库直接作为独立付费数据 API 产品单独转售给外部非安全客户",
+                  "status": "critical",
+                  "verdictTitle": "直接违反 FIRST Services Terms of Use 非防御转售限制条款",
+                  "feedback": "EPSS 免费授权仅限网络安全防御、披露与响应用途，不可脱离安全产品主体单独售卖数据。"
+                }
+              ]
+            },
+            {
+              "name": "VEX 内部存储模型与多标准生态兼容策略",
+              "layer": "L2 统一账本 · 审计与互通",
+              "context": "云原生客户要求 OCI OpenVEX，企业台账需要 CycloneDX 1.7 VDR，而政企/欧企要求 OASIS CSAF 2.0。",
+              "options": [
+                {
+                  "label": "自研内部 Append-Only Canonical VEX Ledger（不删改原始漏洞），通过 go-vex / cyclonedx-go / gocsaf 三协议投影输出",
+                  "status": "optimal",
+                  "verdictTitle": "全 Apache-2.0 底座支撑三标准无损互通，保留完整审计证据链与回溯能力",
+                  "feedback": "内部账本与外部协议解耦后，既能严谨区分 CycloneDX false_positive 与 not_affected，又能无缝输出 CSAF。"
+                },
+                {
+                  "label": "直接选定 CSAF 2.0 作为内部数据库主结构，所有扫描与前端豁免全按 CSAF product_tree 树存储",
+                  "status": "warning",
+                  "verdictTitle": "CSAF 树状结构在高频 CI/CD 单镜像扫描场景过于笨重，与 CycloneDX 映射维护成本高",
+                  "feedback": "CSAF 更适合外部政企正式公告导出，内部高频状态流转仍应采用扁平不可变事件账本。"
+                },
+                {
+                  "label": "只要用户点忽略或判定不可达，直接在数据库里硬删除该条 CVE 匹配记录，不留存任何状态和理由码",
+                  "status": "critical",
+                  "verdictTitle": "彻底丧失合规审计追溯能力，且无法在代码变更或新入 KEV 时自动恢复告警",
+                  "feedback": "企业安全审计的核心诉求不是“没看见告警”，而是“拿出可验证、可复核的排除证据”。"
+                }
+              ]
+            },
+            {
+              "name": "外部 VEX 信任层级与 PURL 作用域边界",
+              "layer": "安全底线 · 防误消警",
+              "context": "接入了社区 VEX Hub 与厂商 VEX，同时平台内部也有 L4 静态调用图与 JFR 运行态实证。",
+              "options": [
+                {
+                  "label": "建立 Safety Floor（L4 硬可达永远驳回外部 not_affected）；镜像内子依赖 VEX 强制使用 product + subcomponents 双层绑定",
+                  "status": "optimal",
+                  "verdictTitle": "守住零漏报安全底线，彻底防止“一处不可达导致全公司所有镜像同名包被误屏蔽”",
+                  "feedback": "仅信任本平台实证与已验签上游厂商 VEX，未签名社区 VEX Hub 严禁越过硬可达实证。"
+                },
+                {
+                  "label": "直接信任社区 VEX Hub 的任何 not_affected 声明并按裸三方库 PURL 对全公司所有项目全局生效",
+                  "status": "critical",
+                  "verdictTitle": "极高危：既会引发跨应用误豁免漏报，又可能被恶意伪造社区 VEX 投毒绕过门禁",
+                  "feedback": "不同应用对同一依赖的调用方式完全不同，裸 PURL 全局静默是典型的 VEX 架构灾难。"
+                },
+                {
+                  "label": "不管外部还是原厂签名 VEX 一律全部拒收，只允许用户手工在平台 UI 逐条点确认",
+                  "status": "warning",
+                  "verdictTitle": "放弃了上游原厂 Backport 声明（如 Red Hat CSAF）带来的合法降噪红利",
+                  "feedback": "对于验签通过的原厂发行版/组件 VEX，配合 Safety Floor 校验即可安全采纳。"
+                }
+              ]
+            },
+            {
+              "name": "VEX 生命周期治理与事件驱动撤销闭环",
+              "layer": "L4 持续重算 · 防永久黑洞",
+              "context": "安全团队曾为一个通过 WAF 临时缓解的高危漏洞签发了 inline_mitigations_already_exist 豁免。",
+              "options": [
+                {
+                  "label": "人工缓解类 VEX 强制绑定 30–90 天 TTL；同时监听代码调用图变化、JFR 类加载、新入 KEV 与 EPSS 飙升自动撤销重算",
+                  "status": "optimal",
+                  "verdictTitle": "把 VEX 从“一次性静态免死金牌”升级为“随环境实时呼吸的动态契约”",
+                  "feedback": "确保一旦代码路径打通或攻击面突变，原豁免立刻自动失效并重新回到发布门禁视野。"
+                },
+                {
+                  "label": "所有 VEX 一旦签发默认永久有效（无过期时间），仅靠每年一次人工年度审计抽查",
+                  "status": "critical",
+                  "verdictTitle": "制造永久静默安全黑洞：代码新引入调用链或 WAF 规则变更后系统彻底失明",
+                  "feedback": "供应链风险是动态演变的，没有撤销触发器与 TTL 的 VEX 比没有 VEX 更危险。"
+                },
+                {
+                  "label": "只在 CVE 编号变更时重算 VEX，代码 PR 提交或 EPSS 飙升时不触发任何重算",
+                  "status": "warning",
+                  "verdictTitle": "对代码引入新调用边和短期爆破风险反应迟钝，存在时间窗漏防风险",
+                  "feedback": "PR 改调用图是最常见的 VEX 失效场景，必须作为核心事件源接入撤销管线。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核场景题涵盖 <strong>EPSS 概率 vs 分位与 KEV 优先级、CycloneDX VDR/VEX 枚举区分、OpenVEX <code>subcomponents</code> 与 Safety Floor 裁决以及 VEX 撤销与商用合规边界</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0013 · EPSS、KEV、SSVC 与 VEX 协同降噪回忆测验",
+          "intro": "重点检验非补偿决策逻辑、三协议枚举边界、Safety Floor 冲突拦截及事件撤销机制。",
+          "questions": [
+            {
+              "prompt": "某公网可达漏洞 CVSS-B 为 8.8，FIRST EPSS 显示 30 天利用概率 0.4%（约第 58 百分位）；另一条公网可达漏洞 CVSS-B 仅 5.3，但已被 CISA KEV 收录且 knownRansomwareCampaignUse 为 \"Unknown\"。以下优先级判断哪项正确？",
+              "options": [
+                "高分漏洞借低概率直接豁免，低分漏洞因缺勒索实锤延后处置。",
+                "分位数即三十天绝对概率，高分漏洞降观察且低分漏洞待复核。",
+                "高分漏洞禁借低概率豁免，低分漏洞因在野收录须按最高优处置。",
+                "两漏洞均未超七分且无勒索实锤，统一归入常规季度迭代中修补。"
+              ],
+              "answerIndex": 2,
+              "explanation": "EPSS 0.4% 仅代表未来 30 天绝对利用概率偏低（不可与第 58 百分位混淆，且绝不能作为自动签发 VEX 豁免可达漏洞的依据，应按 Attend 正常排期）；而 CISA KEV 是实锤在野利用底线（Floor），即使 CVSS 仅 5.3 且 knownRansomwareCampaignUse 暂标 Unknown（代表未知而非排除），在 SSVC 非补偿决策树下仍须直通最高优 Act 立即处置（C 正确）。"
+            },
+            {
+              "prompt": "在设计 CycloneDX 1.7 VDR 与 VEX 输出网关时，需区分“组件真实存在但漏洞函数未被调用”与“扫描器因版本解析或 PURL 误匹配报错”两种场景。以下状态与理由码映射哪项符合规范？",
+              "options": [
+                "前者用 not_affected 配 code_not_reachable，后者用 false_positive 标误报。",
+                "前者用 false_positive 标不可达，后者用 not_affected 配 code_not_present。",
+                "前者用 resolved_with_pedigree 标不可达，后者用 in_triage 等人工复核确认。",
+                "前者用 exploitable 配 requires_environment，后者用 resolved 标已经消除风险。"
+              ],
+              "answerIndex": 0,
+              "explanation": "在 CycloneDX 规范中，false_positive 专指扫描器把组件/版本识别错了（artifact 并不含该漏洞组件）；若漏洞组件真实存在只是调用路径不可达，必须使用 not_affected 并搭配 justification: code_not_reachable（对应 OpenVEX/CSAF 的 vulnerable_code_not_in_execute_path）。resolved_with_pedigree 则用于记录非升版本的定制补丁/Backport 谱系修复（A 正确）。"
+            },
+            {
+              "prompt": "上游社区未签名 VEX Hub 给出某 Go 依赖的 not_affected 声明，直接写死该库的裸 PURL 而未限定外层镜像；同时你方 Layer 4 静态调用图与 JFR 运行态已证实公网核心镜像确能触发该漏洞函数。VEX 信任网关应如何裁决？",
+              "options": [
+                "优先信任外部社区声明以减轻负载，直接对全平台同名库生效并消警。",
+                "按时间戳优先原则采纳外部声明，同时对所有容器镜像做全局豁免。",
+                "仅校验基础包名是否一致即放行，暂不核对调用图或镜像层上下文。",
+                "硬实证安全底线驳回外部豁免，且强制要求绑定容器与子组件作用域。"
+              ],
+              "answerIndex": 3,
+              "explanation": "必须执行两重护栏：① Safety Floor 底线：L4 硬可达/已执行实证拥有最高否决权，直接驳回外部与社区未签名 VEX 的 not_affected 声明并告警；② 作用域规范：对容器内依赖签发 VEX 时，须利用 OpenVEX products[].subcomponents[] 将内层库 PURL 严格限定在外层具体应用/镜像摘要 PURL 下，防止跨业务误消警（D 正确）。"
+            },
+            {
+              "prompt": "为商业闭源 SaaS 平台建设 EPSS 情报接入与 VEX 生命周期引擎，以下哪种工程与合规组合能同时满足高并发 SLA、防永久静默黑洞与商用协议红线？",
+              "options": [
+                "在线同步请求官方接口算分，用低传染开源库，并永久静默人工豁免。",
+                "每日同步全量压缩表，用纯 Apache 库，并靠事件与到期触发撤销。",
+                "高频轮询接口并转售原始数据集，靠手动删除台账，且跳过署名声明。",
+                "把人工缓解声明设为永不过期，改写历史扫描记录，且不绑定代码版本。"
+              ],
+              "answerIndex": 1,
+              "explanation": "后端每日拉取 FIRST EPSS 全量 gzip CSV 存入内部 KV/内存索引（保留署名且不转售原数据，合规且零热路径延迟）；VEX 编解码选用纯 Apache-2.0 的 go-vex、cyclonedx-go 与 gocsaf/csaf；并通过不可变账本监听代码图变化、运行态装载、新入 KEV、EPSS 飙升与人工 TTL 到期实现自动撤销重算，彻底消灭永久静默黑洞（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计 Layer 4 威胁优先级与企业级 VEX 账本引擎时，推荐精读以下一手规范、论文与 Apache-2.0 工程底座：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://www.first.org/epss/" target="_blank" rel="noopener"><strong>FIRST EPSS v4</strong></a> · <a href="https://arxiv.org/abs/2302.14172" target="_blank" rel="noopener"><strong>Jacobs et al., <em>Enhancing Vulnerability Prioritization</em> (<code>arXiv:2302.14172</code>)</strong></a> · <a href="https://www.first.org/cvss/v4.0/specification-document" target="_blank" rel="noopener"><strong>FIRST CVSS v4.0 Spec</strong></a>：理解 <code>CVSS-B/BT</code> 与 30 天利用概率建模本质。</li>
+          <li><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener"><strong>CISA KEV Catalog</strong></a> · <a href="https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc" target="_blank" rel="noopener"><strong>CISA SSVC Decision Tree</strong></a> · <a href="https://www.cisa.gov/sites/default/files/2023-04/minimum-requirements-for-vex-508c.pdf" target="_blank" rel="noopener"><strong>CISA VEX Minimum Requirements</strong></a>：非补偿树与联邦公有领域数据源基线。</li>
+          <li><a href="https://github.com/openvex/spec" target="_blank" rel="noopener"><strong>OpenVEX Spec &amp; <code>openvex/go-vex</code> / <code>vexctl</code></strong></a>（<code>Apache-2.0</code>）· <a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener"><strong>CycloneDX 1.7</strong></a>（<code>cyclonedx-go</code>）· <a href="https://github.com/gocsaf/csaf" target="_blank" rel="noopener"><strong>OASIS CSAF 2.0 &amp; <code>gocsaf/csaf</code></strong></a>（<code>Apache-2.0</code>）：三标准权威语义与 Go 生态 SDK。</li>
+          <li><a href="https://trivy.dev/latest/docs/supply-chain/vex/" target="_blank" rel="noopener"><strong>Trivy VEX &amp; VEX Hub</strong></a> · <a href="https://github.com/anchore/grype" target="_blank" rel="noopener"><strong>Anchore Grype VEX</strong></a>（<code>Apache-2.0</code>）：<code>--vex</code> 显式优先级链与 OCI 1.1 Referrers 实战范本。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>至此我们完成了从静态/运行态可达、威胁精筛到 VEX 可审计豁免的完整降噪闭环。带着下面三个问题随时向我发问，或直接开启 Chapter 04 收官课 <strong>Lesson 0014</strong>：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在一个拥有上万个微服务仓库的企业里，当某个基础镜像触发了大规模 <code>VEX_REVOKED</code> 事件时，Ledger 应该如何做分批告警降峰与服务 Owner 自动路由而不炸毁 IM/工单系统？”</li>
+          <li>“我们已经把待处理队列从 1,000 条压到了最关键的 30 条 <code>Act</code>，下一步在推送修复 PR 时，怎么基于依赖图求解‘升级哪个顶层直接依赖能顺带修掉最多漏洞且<strong>绝对不触发 Breaking Change</strong>’？”</li>
+          <li>“准备就绪！请为我开启 <strong>Lesson 0014（无破坏性自动修复与升级路径求解器 Guided Remediation）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0012-dynamic-runtime-reachability-and-container-trimming.html">← 上一课：Lesson 0012 · 运行时可达与容器裁剪</a>
+      <a href="../reference/layer4-reachability-and-remediation-matrix.html">配套速查卡：Ref 05 · L4 可达与修复矩阵</a>
+      <a href="../index.html">返回课程总览 · 准备进入 Lesson 0014（Guided Remediation） →</a>
+    </footer>
+  </main>
+
+  <script src="../assets/prioritization-vex-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

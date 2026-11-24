@@ -112,6 +112,16 @@
 - [Debloating Research Foundations: *SoK: Software Debloating* (`arXiv:2407.11259`) · *Cimplifier* (ESEC/FSE 2017, DOI `10.1145/3106237.3106271`) · *JShrink* (ESEC/FSE 2020, DOI `10.1145/3368089.3409738`) · *Confine* (RAID 2020, `arXiv:2008.05561`)](https://arxiv.org/abs/2407.11259)
   确立软件与容器裁剪三大铁律：纯动态删文件面临冷路径崩毁（如遗漏 `libnss_dns.so`）、黑盒排障困难与“删元数据造成扫描清零假象”缺陷；*JShrink* 揭示字节码裁剪须静动态类型结合；*Confine* 提供不删文件而通过静态提取 Syscall 白名单生成 `seccomp` 策略的正交减面路线。
 
+### 漏洞优先级排序（EPSS / KEV / SSVC）与 VEX 标准化降噪（Layer 4 Prioritization & VEX）
+- [Exploit Prediction & Scoring Specs: FIRST EPSS v4 (`first.org/epss`, FIRST Services ToS) · Jacobs et al. (EuroS&PW 2023, `arXiv:2302.14172`) · FIRST CVSS v4.0 Spec](https://www.first.org/epss/)
+  [`EPSS v4`](https://www.first.org/epss/)（2025 年 3 月演进自 [`arXiv:2302.14172`](https://arxiv.org/abs/2302.14172) ~1,500 维特征框架并强化恶意软件/勒索遥测）预测未来 30 天内漏洞在野利用概率（区分 `epss` 绝对概率与 `percentile` 相对分位）。工程必须每日定时同步官方全量 gzip CSV（禁止热路径同步调 API），并严守 [FIRST Services Terms of Use](https://www.first.org/about/policies/terms)（保留版权署名，限防御性安全用途，禁止脱离产品转售原始数据集）。[`CVSS v4.0`](https://www.first.org/cvss/v4.0/specification-document) 显式区分 `CVSS-B`（默认最坏威胁假设）与 `CVSS-BT`（`E:A/P/U` 阶梯）。
+- [Active Exploitation & Non-Compensatory Decision Tree: CISA KEV Catalog (Public Domain) & CISA SSVC Decision Tree](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+  [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)（8 个必填字段 + `knownRansomwareCampaignUse` `"Known"/"Unknown"` + `dueDate`）作为实锤在野利用底线（Floor），无视低 CVSS；[CISA SSVC](https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc)（`Exploitation × Automatable × Technical Impact × Mission & Well-being` → `Act / Attend / Track* / Track`）取代存在“补偿掩蔽”缺陷的线性加权公式。
+- [OpenVEX Ecosystem: `openvex/spec` · `openvex/go-vex` (`Apache-2.0`) · `openvex/vexctl` (`Apache-2.0`) & CISA VEX Minimum Requirements](https://github.com/openvex/spec)
+  轻量级 JSON-LD VEX 标准（`not_affected` / `affected` / `fixed` / `under_investigation` 及 5 大标准 justification）；支持通过 `products[].subcomponents[]` 把子依赖 PURL 严格绑定在父容器/制品下防止全局误消警，并配合 `vexctl` 与 Sigstore 生成 OCI 1.1 Referrers 证明。
+- [CycloneDX VDR/VEX & OASIS CSAF 2.0: `CycloneDX/cyclonedx-go` (`Apache-2.0`) · `gocsaf/csaf` (`Apache-2.0`) · `aquasecurity/trivy` (`Apache-2.0`) · `anchore/grype` (`Apache-2.0`)](https://github.com/gocsaf/csaf)
+  [`CycloneDX 1.7`](https://cyclonedx.org/docs/1.7/json/) 严格区分内嵌全量资产台账 VDR 与独立 VEX，区分 `false_positive`（扫描器误识别）与 `not_affected + code_not_reachable`，并提供 `resolved_with_pedigree`；[`OASIS CSAF 2.0`](https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html)（`product_status` 带 `known_` 前缀 + `flags[].label`）由 `gocsaf/csaf`（`Apache-2.0`）提供 Go 生态官方解析；[`Trivy VEX`](https://trivy.dev/latest/docs/supply-chain/vex/) 与 `VEX Hub` 示范 `--vex` 显式顺序优先级与 OCI Referrers 自动发现。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -129,6 +139,6 @@
 
 ## Gaps
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
-- **静态与运行时可达性融合及容器裁剪（Ch 04 · Lessons 0011–0012 已收口）**：第 11 课已覆盖 RTA/VTA/Java Unsoundness/JS `Jelly`/Python `PyCG`+`JARVIS`；第 12 课及 Ref 05 第 03 节已补齐 Kubescape `ApplicationProfile`、OpenJDK JFR `jdk.ClassLoad`（vs `getAllLoadedClasses()`）、PEP 669、`NODE_V8_COVERAGE`、静动态三维融合矩阵（含冷路径防漏报与反向 Soundness 校验）、容器裁剪（Distroless/`apko` vs Mint/*SoK* `arXiv:2407.11259`/*Cimplifier*/*JShrink*/*Confine*）及 `chisel` `AGPL-3.0`/eBPF GPL 双层隔离红线。
+- **静态、运行时可达性与优先级/VEX 协同降噪（Ch 04 · Lessons 0011–0013 已收口）**：第 11–12 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）与运行时融合/容器裁剪；第 13 课及 Ref 05 第 04 节已补齐 FIRST EPSS v4（`arXiv:2302.14172` / FIRST ToS / Probability vs Percentile）、CVSS v4.0 `CVSS-B/BT`、CISA KEV（8 必填字段 + 勒索字段）与 SSVC 非补偿树、三大 VEX 映射（OpenVEX `subcomponents` / CycloneDX `false_positive` vs `not_affected` / CSAF 2.0 `known_` 前缀）、Safety Floor 信任冲突裁决及事件驱动撤销闭环。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。
