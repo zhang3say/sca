@@ -72,23 +72,23 @@
         </thead>
         <tbody>
           <tr>
-            <td><strong><a href="https://github.com/aquasecurity/trivy-db" target="_blank" rel="noopener">Aqua <code>trivy-db</code></a></strong><br/><span class="badge badge-ok">代码 Apache-2.0</span></td>
+            <td><strong><a href="https://github.com/aquasecurity/trivy-db" target="_blank" rel="noopener">Aqua <code>trivy-db</code></a></strong><br/><span class="badge badge-ok">Apache-2.0</span><br/><small>开源代码</small></td>
             <td><strong><code>go.etcd.io/bbolt</code>（BoltDB）</strong>单文件 B+Tree；核心顶级桶 <code>vulnerability</code>（<code>CVE-ID &rarr; JSON</code>）、<code>advisory-detail</code>（<code>CVE &rarr; 平台 &rarr; 包名</code>）与 <code>data-source</code>，辅以生态包桶支持 <code>ForEachAdvisory</code> / <code>GetAdvisories</code>。</td>
             <td>封装为 <strong>OCI Artifact</strong>（<code>ghcr.io/aquasecurity/trivy-db:2</code>），层 MediaType 为 <code>application/vnd.aquasec.trivy.db.layer.v1.tar+gzip</code>；压缩包 <code>db.tar.gz</code> 约 <strong>90–125 MB</strong>（解压 300–500+ MB），含 <code>metadata.json</code>（<code>NextUpdate</code>）与 <strong>Cosign</strong> 签名。</td>
             <td>纯 Go 零 CGO；借助 OCI Registry 复用企业 Harbor/ECR 防火墙通道；<code>metadata.json</code> 的 <code>NextUpdate</code> 窗口天然节流高频 CI 重复拉取。</td>
             <td><strong>无逻辑增量：</strong>每次仍整层重拉 ~100 MB；官方已剔除 Safety DB 等非商用源，但混有 OSV 转换源且受限于 <code>ghcr.io</code> 限流，商业产品须自建洁净构建流水线。</td>
           </tr>
           <tr>
-            <td><strong><a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Anchore Grype v6</a></strong><br/><span class="badge badge-ok">代码 Apache-2.0</span></td>
+            <td><strong><a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Anchore Grype v6</a></strong><br/><span class="badge badge-ok">Apache-2.0</span><br/><small>开源代码</small></td>
             <td><strong>SQLite3（Handle + Blob 范式）</strong>：v6 彻底抛弃 v5 的冗余宽表，改用轻量索引 Handle 表（<code>affected_package_handles</code> / <code>affected_cpe_handles</code> / <code>vulnerability_handles</code> / <code>packages</code> / <code>operating_systems</code>）指向内容去重的 OSV 风格 JSON <code>blobs</code> 表，并原生合入 <strong>CISA KEV、EPSS 与 <code>withdrawn</code></strong>。</td>
-            <td>通过 <a href="https://docs.anchore.com/" target="_blank" rel="noopener"><code>v6/latest.json</code></a>（含 <code>schemaVersion</code> / <code>url</code> / <code>built</code> / <code>checksum: sha256:...</code>）分发 <code>.tar.zst</code> 压缩包；压缩体积从 v5 的约 210 MB 骤降至约 <strong>65 MB</strong>（解压约 1.6 GB）。</td>
+            <td>通过 <a href="https://grype.anchore.io/databases/v6/latest.json" target="_blank" rel="noopener"><code>v6/latest.json</code></a>（含 <code>schemaVersion</code> / <code>url</code> / <code>built</code> / <code>checksum: sha256:...</code>）分发 <code>.tar.zst</code> 压缩包；压缩体积从 v5 的约 210 MB 骤降至约 <strong>65 MB</strong>（解压约 1.6 GB）。</td>
             <td><strong>Handle + Blob 解耦</strong>是嵌入式 SQLite 存储的里程碑设计：索引表极瘦可常驻 OS Page Cache，重复的修复元数据通过 <code>blob_id</code> 归一，Zstd 解压速度与压缩比远超 gzip。</td>
-            <td>v6 客户端不可裸解压覆盖，须走 <code>grype db import --checksum</code> 重建 <code>import.json</code> 与本地索引；单机 CLI 极佳，但云端万级组件高频并发扫描仍受限于 SQLite 单库并发探针开销。</td>
+            <td>v6 客户端不可裸解压覆盖，须走 <code>grype db import &lt;archive.tar.zst&gt;</code>（或对远程 URL 附带 <code>?checksum=sha256:...</code> 查询参数）重建 <code>import.json</code> 与本地索引；单机 CLI 极佳，但云端万级组件高频并发扫描仍受限于 SQLite 单库并发探针开销。</td>
           </tr>
           <tr>
-            <td><strong><a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener">Google <code>osv-scanner</code></a></strong><br/><span class="badge badge-ok">代码 Apache-2.0</span></td>
+            <td><strong><a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener">Google <code>osv-scanner</code></a></strong><br/><span class="badge badge-ok">Apache-2.0</span><br/><small>开源代码</small></td>
             <td>直接拉取按生态切分的原始 OSV JSON 压缩包（无二进制索引层），扫描时遍历或内存加载生态内全量 JSON 文件。</td>
-            <td>通过 <code>--download-offline-databases</code> 从 GCS Bucket（<code>osv-vulnerabilities.storage.googleapis.com/&lt;eco&gt;/all.zip</code>）下载全量 ZIP 归档。</td>
+            <td>通过 <code>--offline-vulnerabilities --download-offline-databases</code> 从 GCS Bucket（<code>osv-vulnerabilities.storage.googleapis.com/&lt;eco&gt;/all.zip</code>）下载全量 ZIP 归档。</td>
             <td>零格式转换成本，对开源生态社区贡献者极为友好；天然保留 OSV v1.7.0 完整字段与函数符号扩展。</td>
             <td><span class="badge badge-danger">商业红线</span> 如 <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> 警示，GCS <code>all.zip</code> 混入 <code>CC-BY-NC-ND-4.0</code>（Wolfi/Chainguard）与 <code>CC-BY-SA-4.0</code> 源，且缺少索引，严禁直接打包进商业产品。</td>
           </tr>
@@ -98,7 +98,7 @@
 
     <div class="callout tip">
       <div class="callout-label">架构师收敛结论：站在 Grype v6 与 Trivy OCI 的肩膀上做「双模分工」</div>
-      <p>我们既不直接搬运 Aqua/Anchore 的官方公共成品库（规避上游许可证混杂与外部 CDN 依赖），也不必从零发明冷门文件格式：<strong>① 借鉴 Grype v6 的「SQLite Handle 表 + 去重 Zstd-JSON Blobs」作为本地 CLI / Agent / 断网一体机的只读交付物</strong>（纯 Go 可选 <a href="https://github.com/ncruces/go-sqlite3" target="_blank" rel="noopener"><code>ncruces/go-sqlite3</code></a> 或 <a href="https://pkg.go.dev/modernc.org/sqlite" target="_blank" rel="noopener"><code>modernc.org/sqlite</code></a>，均为 MIT/BSD 零 CGO）；<strong>② 借鉴 Trivy 的 OCI Artifact 封装思路，并补齐它缺失的「密码学签名逻辑增量链」</strong>；<strong>③ 云端 Worker 彻底绕开磁盘数据库热路径查询，直接构建全内存不可变快照</strong>。</p>
+      <p>我们既不直接搬运 Aqua/Anchore 的官方公共成品库（规避上游许可证混杂与外部 CDN 依赖），也不必从零发明冷门文件格式：<strong>① 借鉴 Grype v6 的「SQLite Handle 表 + 去重 Zstd-JSON Blobs」作为本地 CLI / Agent / 断网一体机的只读交付物</strong>（零 CGO 可选 <a href="https://github.com/ncruces/go-sqlite3" target="_blank" rel="noopener"><code>ncruces/go-sqlite3</code></a>（WASM/MIT）或 <a href="https://pkg.go.dev/modernc.org/sqlite" target="_blank" rel="noopener"><code>modernc.org/sqlite</code></a>（纯 Go 转译/BSD-3-Clause），均无需 C 工具链）；<strong>② 借鉴 Trivy 的 OCI Artifact 封装思路，并补齐它缺失的「密码学签名逻辑增量链」</strong>；<strong>③ 云端 Worker 彻底绕开磁盘数据库热路径查询，直接构建全内存不可变快照</strong>。</p>
     </div>
 
     <!-- SECTION 2 -->
@@ -121,7 +121,7 @@
       <p><strong>正确解：</strong>构建期同时导出<strong>「每周/每月全量 Base Snapshot」</strong>与<strong>「每日哈希链式逻辑增量包（Signed Logical Delta Log）」</strong>：</p>
       <ul>
         <li><strong>不可变逻辑操作集：</strong>每个 <code>delta_vN_to_vN+1.pb.zst</code> 仅包含自上次构建后变更的 <code>upserts[]</code>（精简 Protobuf 记录）与 <code>tombstones[]</code>（对应 OSV <code>withdrawn</code> 的逻辑撤回 ID），日均体积仅 <strong>200–500 KB</strong>（压缩比 &gt; 99%）。</li>
-        <li><strong>防篡改哈希双锚定：</strong>Delta 头强制携带 <code>prev_db_sha256</code>、<code>target_db_sha256</code> 与构建期 Ed25519 签名（注意：SQLite 重建后的文件字节受 <code>VACUUM</code>/页序影响，<strong>建议对逻辑规范化序列或内容表行哈希计算确定性摘要 <code>logical_state_sha256</code></strong>，而非仅依赖物理文件字节）。</li>
+        <li><strong>防篡改哈希双锚定：</strong>Delta 头强制携带 <code>prev_state_sha256</code>、<code>target_state_sha256</code> 与构建期 Ed25519 签名（注意：SQLite 重建后的文件字节受 <code>VACUUM</code>/页序影响，<strong>应针对排序规范化规则表计算确定性逻辑状态摘要 <code>logical_state_sha256</code></strong>，而非仅依赖物理文件字节）。</li>
         <li><strong>断链熔断与原子事务：</strong>本地引擎仅在<strong>验签通过且 <code>prev_state_sha256 == local_state_sha256</code></strong> 时，才开启临时库 <code>staging.db</code> 事务重放（<code>BEGIN IMMEDIATE</code>）；一旦检测到缺失中间某天增量包（Chain Break），立即拒绝重放并自动回退拉取最近签名全量 Base Snapshot，杜绝半残库静默漏报。</li>
       </ul>
       <aside class="sidenote">

@@ -25,7 +25,7 @@
       airgapNote: "内网可直接复用 Harbor/ECR OCI 仓库；离线 Cosign 需先 cosign initialize 导出 ~/.sigstore TUF 根缓存。",
       licenseVerdict: "工具 Apache-2.0；但禁止直接搬运官方 ghcr.io/aquasecurity/trivy-db 作为商业 SaaS 数据底座（混有 CC-BY-SA 数据源及 CDN 限流）。",
       badgeClass: "badge-warn",
-      badgeText: "CLI 优秀 · 商用须自建洁净构建",
+      badgeText: "CLI 优秀 · 商用须自建",
     },
     {
       id: "grype-v6",
@@ -70,8 +70,8 @@
         },
         {
           cls: "ok",
-          title: "Step 2 · 哈希链连续性校验（prev_db_sha256 == local_sha256）",
-          detail: "delta_v101 声明前置哈希 9a4f...c100 与本地一致，且序列号 100→101→102 严格连续。",
+          title: "Step 2 · 哈希链连续性校验（prev_state_sha256 == local_state_sha256）",
+          detail: "delta_v101 声明前置逻辑状态哈希 9a4f...c100 与本地一致，且序列号 100→101→102 严格连续。",
         },
         {
           cls: "ok",
@@ -81,7 +81,7 @@
         {
           cls: "ok",
           title: "Step 4 · 目标摘要核验与原子切换（Atomic Rename / atomic.Pointer）",
-          detail: "计算 staging.db SHA-256 精确等于 target_db_sha256（e81d...f102），原子替换版本指针；旧连接耗尽后回收。",
+          detail: "重算规范化规则逻辑摘要精确等于 target_state_sha256（e81d...f102），原子替换版本指针；旧连接耗尽后回收。",
         },
       ],
     },
@@ -102,7 +102,7 @@
         {
           cls: "bad",
           title: "Step 2 · 哈希链连续性校验失败（Chain Break！）",
-          detail: "delta 声明 prev_db_sha256 = 7b2c...d101，但本地库当前摘要为 9a4f...c100！强行写入会丢失 v101 的新增 CVE 与撤回记录，造成静默漏报。",
+          detail: "delta 声明 prev_state_sha256 = 7b2c...d101，但本地库当前逻辑摘要为 9a4f...c100！强行写入会丢失 v101 的新增 CVE 与撤回记录，造成静默漏报。",
         },
         {
           cls: "warn",
@@ -301,11 +301,11 @@
 
     function renderProfilerTab() {
       const p = computeProfile();
-      const maxBar = Math.max(p.sqliteSingleMs, 100);
+      const maxBar = Math.max(p.sqliteSingleMs, 1);
       const pct = (ms) => Math.max(2, Math.min(100, Math.round((ms / maxBar) * 100)));
 
       return `
-        <div class="ver-form-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="idx-grid-4">
           <div class="ver-field">
             <label for="idx-sbom-size">单次 SBOM 组件数</label>
             <select id="idx-sbom-size" class="ver-select" data-field="sbomComponents">

@@ -263,7 +263,7 @@
               <td><strong>Grype DB v6 对标</strong><br/>（<code>anchore/grype</code>）</td>
               <td>SQLite3 + Zstd（<code>.tar.zst</code> ~65 MB / 解压 ~1.6 GB）；<code>v6/latest.json</code></td>
               <td><strong>Handle + Blob 解耦：</strong><code>affected_package_handles</code> / <code>vulnerability_handles</code> 指向去重 JSON <code>blobs</code>，内置 KEV/EPSS。</td>
-              <td>不可裸解压覆盖，须经 <code>import</code> 重建索引；高并发万级组件云端热路径不宜直接单条查 SQLite。</td>
+              <td>不可裸解压覆盖，须走 <code>grype db import &lt;archive.tar.zst&gt;</code> 重建 <code>import.json</code> 与索引；高并发万级组件云端热路径不宜直接单条查 SQLite。</td>
             </tr>
             <tr>
               <td><strong>断网私有化分发与增量同步</strong><br/>（Air-Gap Track）</td>
