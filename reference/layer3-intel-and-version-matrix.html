@@ -256,13 +256,13 @@
           <tbody>
             <tr>
               <td><strong>Trivy DB 对标</strong><br/>（<code>aquasecurity/trivy-db</code>）</td>
-              <td><code>go.etcd.io/bbolt</code>（B+Tree）+ <code>metadata.json</code>；OCI Artifact（<code>db.tar.gz</code> ~90–125 MB）</td>
-              <td>桶结构 <code>vulnerability</code> / <code>advisory-detail</code> / <code>data-source</code>；支持 <code>NextUpdate</code> 限频与 Cosign 验签。</td>
-              <td><code>trivy.db</code> <strong>不是 SQLite</strong>；无原生逻辑增量（全层重拉）；商业平台禁直接镜像 <code>ghcr.io/aquasecurity/trivy-db</code>。</td>
+              <td><code>go.etcd.io/bbolt</code>（B+Tree）+ <code>metadata.json</code>；OCI Artifact（<code>db.tar.gz</code> ~100–145 MB）</td>
+              <td>运行态顶级桶 <code>vulnerability</code> / <code>data-source</code> / 各平台包桶（构建期 <code>advisory-detail</code> 临时桶优化后清理）；支持 <code>NextUpdate</code> 限频。</td>
+              <td><code>trivy.db</code> <strong>不是 SQLite</strong>；无原生逻辑增量且官方未默认对 DB 附 Cosign 签名；商业平台禁直接镜像 <code>ghcr.io/aquasecurity/trivy-db</code>（内置 Wolfi/Chainguard 等受限源）。</td>
             </tr>
             <tr>
               <td><strong>Grype DB v6 对标</strong><br/>（<code>anchore/grype</code>）</td>
-              <td>SQLite3 + Zstd（<code>.tar.zst</code> ~65 MB / 解压 ~1.6 GB）；<code>v6/latest.json</code></td>
+              <td>SQLite3 + Zstd（v6.0 首发 <code>.tar.zst</code> ~65 MB / 解压 ~900 MB，较 v5 的 210 MB / 1.6 GB 大幅瘦身；v6.1+ 含富化持续增长）；<code>v6/latest.json</code>（含 <code>path</code> / <code>checksum</code>）</td>
               <td><strong>Handle + Blob 解耦：</strong><code>affected_package_handles</code> / <code>vulnerability_handles</code> 指向去重 JSON <code>blobs</code>，内置 KEV/EPSS。</td>
               <td>不可裸解压覆盖，须走 <code>grype db import &lt;archive.tar.zst&gt;</code> 重建 <code>import.json</code> 与索引；高并发万级组件云端热路径不宜直接单条查 SQLite。</td>
             </tr>
@@ -323,7 +323,7 @@
             </tr>
             <tr>
               <td><strong>SPDX 运算符优先级</strong><br/>（Annex B）</td>
-              <td><code>+</code> &gt; <code>WITH</code> &gt; <code>AND</code> &gt; <code>OR</code><br/><small>运算符强制全大写</small></td>
+              <td><code>+</code> &gt; <code>WITH</code> &gt; <code>AND</code> &gt; <code>OR</code><br/><small>全大写或全小写（禁混写）</small></td>
               <td><code>OR</code> 选低风险最优分支并剪枝；<code>AND</code> 合并两侧义务并校验 OSADL/FSF 双向互斥；<code>WITH</code> 原子绑例外。</td>
               <td><code>LGPL-2.1-only OR BSD-3-Clause AND MIT</code> 等价于 <code>OR(LGPL, AND(BSD, MIT))</code>，禁扁平子串拦截。</td>
             </tr>
@@ -362,7 +362,7 @@
           <tbody>
             <tr>
               <td><strong>Go Core 内核组件</strong><br/><code>go-spdx</code> · <code>tools-golang</code> · <code>licensecheck</code></td>
-              <td>代码：<code>MIT</code> / <code>Apache-2.0</code> / <code>BSD-3-Clause</code></td>
+              <td>代码：<code>MIT</code> / <code>Apache-2.0</code>（<code>tools-golang</code> 双许可选 <code>Apache-2.0</code>） / <code>BSD-3-Clause</code></td>
               <td>毫秒级解析 SPDX AST、校验官方 ID 并快速分类根目录 <code>LICENSE</code> 原文（服务 MCP/Hook/Cloud）。</td>
               <td>100% 商业闭源安全嵌入，零 CGO、零外置运行时依赖。</td>
             </tr>

@@ -70,7 +70,7 @@
       </ol>
       <aside class="sidenote">
         <span class="sidenote-title">SPDX 语法大小写与自定义引用</span>
-        SPDX Annex B 强制要求布尔运算符 <code>AND</code>、<code>OR</code>、<code>WITH</code> <strong>必须全大写</strong>（小写 <code>and</code> / <code>or</code> 属于语法不合规）；未收录进官方列表的专有或非标条款必须采用 <code>LicenseRef-&lt;id&gt;</code>（或带跨文档前缀 <code>DocumentRef-&lt;doc&gt;:LicenseRef-&lt;id&gt;</code>）声明，引擎遇到 <code>LicenseRef-*</code> 时默认路由至法务规则映射表或人工复核。
+        SPDX v3.0.1 Annex B 规定布尔运算符须<strong>全大写（<code>AND</code> / <code>OR</code> / <code>WITH</code>）或全小写（<code>and</code> / <code>or</code> / <code>with</code>）</strong>，<strong>严禁大小写混写</strong>（如 <code>And</code> / <code>Or</code>），工程上推荐统一输出全大写以兼容 SPDX 2.x 解析器；许可证/例外 ID 本身大小写不敏感，但自定义前缀 <code>LicenseRef-&lt;id&gt;</code>、<code>AdditionRef-&lt;id&gt;</code> 与跨文档前缀 <code>DocumentRef-&lt;doc&gt;:LicenseRef-&lt;id&gt;</code> 必须严格区分大小写，引擎遇到 <code>LicenseRef-*</code> 时默认路由至法务规则映射表或人工复核。
       </aside>
     </div>
 
@@ -180,7 +180,7 @@
             <td><span class="badge badge-ok">PASS</span><br/>构建机本地运行</td>
           </tr>
           <tr>
-            <td><strong>Tier 5 · 网络传染 &amp; 非 OSI</strong><br/><code>AGPL-3.0</code> / <code>SSPL-1.0</code> / <code>BSL-1.1</code> / <code>Elastic-2.0</code> / <code>CC-BY-NC-*</code></td>
+            <td><strong>Tier 5 · 网络传染 &amp; 非 OSI</strong><br/><code>AGPL-3.0</code> / <code>SSPL-1.0</code> / <code>BUSL-1.1</code> / <code>Elastic-2.0</code> / <code>CC-BY-NC-*</code><br/><small>注：<code>BSL-1.0</code> 为宽松 Boost 协议，勿混</small></td>
             <td><span class="badge badge-danger">BLOCK</span><br/>AGPL §13 / SSPL 对网络交互照样全开源；NC 禁商用</td>
             <td><span class="badge badge-danger">BLOCK</span><br/>全系统源码传染或禁止竞品商业化</td>
             <td><span class="badge badge-danger">BLOCK</span><br/>全系统源码传染或禁止竞品商业化</td>
@@ -193,7 +193,7 @@
 
     <div class="prose-col">
       <h3>2.2 不可忽视的「协议间双向互斥（AND Compatibility）」检查</h3>
-      <p>许多工程团队甚至商业产品只检查“单个许可证会不会传染我的闭源主程序”，却漏掉了 <strong>同一款产品或开源组件内部依赖之间在 <code>AND</code> 组合时的互相冲突（License Incompatibility）</strong>——这是 <a href="https://www.gnu.org/licenses/license-list.html" target="_blank" rel="noopener">FSF 官方兼容性准则</a> 与 <a href="https://www.osadl.org/?id=2888" target="_blank" rel="noopener">OSADL 开源许可证兼容性矩阵</a> 重点解决的难题：</p>
+      <p>许多工程团队甚至商业产品只检查“单个许可证会不会传染我的闭源主程序”，却漏掉了 <strong>同一款产品或开源组件内部依赖之间在 <code>AND</code> 组合时的互相冲突（License Incompatibility）</strong>——这是 <a href="https://www.gnu.org/licenses/license-list.html" target="_blank" rel="noopener">FSF 官方兼容性准则</a> 与 <a href="https://www.osadl.org/Access-to-raw-data.oss-compliance-raw-data-access.0.html" target="_blank" rel="noopener">OSADL 开源许可证兼容性矩阵</a> 重点解决的难题：</p>
     </div>
 
     <div class="table-wrap full-width">
@@ -246,7 +246,7 @@
 
     <div class="prose-col">
       <h3>3.1 商用闭源产品在许可赛道上的「可借力底座 vs 致命红线」</h3>
-      <p>正如 <a href="../MISSION.md">MISSION.md</a> 规定的商业闭源交付红线，我们在挑选许可证扫描工具与知识库数据时，必须同时核对<strong>“程序代码许可”与“规则/数据集许可”</strong>两条线——尤其要警惕 Linux 基金会名声很大但本身是 <code>GPL-2.0-only</code> 的老牌工具：</p>
+      <p>正如 <code>MISSION.md</code>（<a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001</a>）规定的商业闭源交付红线，我们在挑选许可证扫描工具与知识库数据时，必须同时核对<strong>“程序代码许可”与“规则/数据集许可”</strong>两条线——尤其要警惕 Linux 基金会名声很大但本身是 <code>GPL-2.0-only</code> 的老牌工具：</p>
     </div>
 
     <div class="table-wrap full-width">
@@ -270,9 +270,9 @@
         <tbody>
           <tr>
             <td><strong><a href="https://github.com/github/go-spdx" target="_blank" rel="noopener"><code>github/go-spdx</code></a></strong> &amp; <strong><a href="https://github.com/spdx/tools-golang" target="_blank" rel="noopener"><code>spdx/tools-golang</code></a></strong></td>
-            <td><span class="badge badge-ok">MIT</span> / <span class="badge badge-ok">Apache-2.0</span></td>
+            <td><span class="badge badge-ok">MIT</span> / <span class="badge badge-ok">Apache-2.0 OR GPL-2.0-or-later</span></td>
             <td>SPDX List (<code>CC0-1.0</code>)</td>
-            <td>Go 原生 SPDX 表达式解析、官方列表校验与 SPDX  文档序列化。</td>
+            <td>Go 原生 SPDX 表达式解析、官方列表校验与 SPDX 2.x 文档序列化（<code>tools-golang</code> 商用择选 <code>Apache-2.0</code>）。</td>
             <td><strong>库级嵌入 Go Core</strong>（Tier 1 毫秒级求值内核）。</td>
           </tr>
           <tr>
@@ -283,7 +283,7 @@
             <td><strong>库级嵌入 Go Core</strong>，填补本地 MCP/CLI 离线识读 <code>LICENSE</code> 原文的空白。</td>
           </tr>
           <tr>
-            <td><strong><a href="https://clearlydefined.io/" target="_blank" rel="noopener">ClearlyDefined</a></strong> &amp; <strong><a href="https://www.osadl.org/?id=2888" target="_blank" rel="noopener">OSADL Matrix</a></strong></td>
+            <td><strong><a href="https://clearlydefined.io/" target="_blank" rel="noopener">ClearlyDefined</a></strong> &amp; <strong><a href="https://www.osadl.org/Access-to-raw-data.oss-compliance-raw-data-access.0.html" target="_blank" rel="noopener">OSADL Matrix</a></strong></td>
             <td><span class="badge badge-ok">MIT</span></td>
             <td>ClearlyDefined: <code>CC0-1.0</code><br/>OSADL: <code>CC-BY-4.0</code></td>
             <td>ClearlyDefined 提供全球社区人工校对后的跨生态 Declared/Discovered 坐标真值；OSADL 提供官方机器可读兼容性矩阵。</td>
@@ -599,7 +599,7 @@
         <p>落地自研 SPDX AST 合规推理引擎、双向兼容图与 Curation 交付管线时，建议精读以下规范与底座源码：</p>
         <ul style="margin-bottom:0.5rem;">
           <li><a href="https://spdx.github.io/spdx-spec/v3.0.1/annexes/spdx-license-expressions/" target="_blank" rel="noopener"><strong>SPDX v3.0.1 Annex B</strong></a> &amp; <a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener"><strong>CycloneDX 1.7 Licensing Spec</strong></a>：运算符优先级正式语法、<code>acknowledgement</code>（<code>declared</code>/<code>concluded</code>）与 <code>LicenseRef-</code> 规范。</li>
-          <li><a href="https://www.gnu.org/licenses/license-list.html" target="_blank" rel="noopener"><strong>FSF License List &amp; Compatibility</strong></a> &amp; <a href="https://www.osadl.org/?id=2888" target="_blank" rel="noopener"><strong>OSADL Compatibility Matrix (<code>CC-BY-4.0</code>)</strong></a>：双向协议兼容性真值表与机器可读 JSON/CSV 原生导出接口。</li>
+          <li><a href="https://www.gnu.org/licenses/license-list.html" target="_blank" rel="noopener"><strong>FSF License List &amp; Compatibility</strong></a> &amp; <a href="https://www.osadl.org/Access-to-raw-data.oss-compliance-raw-data-access.0.html" target="_blank" rel="noopener"><strong>OSADL Compatibility Matrix (<code>CC-BY-4.0</code>)</strong></a>：双向协议兼容性真值表与机器可读 JSON/CSV 原生导出接口。</li>
           <li><a href="https://github.com/github/go-spdx" target="_blank" rel="noopener"><strong><code>github/go-spdx</code></strong></a>（MIT）、<a href="https://github.com/google/licensecheck" target="_blank" rel="noopener"><strong><code>google/licensecheck</code></strong></a>（BSD-3-Clause）&amp; <a href="https://clearlydefined.io/" target="_blank" rel="noopener"><strong>ClearlyDefined</strong></a>（<code>CC0-1.0</code> 数据）：Go Core 内核组件与零负担社区校准真值源。</li>
           <li><a href="https://github.com/oss-review-toolkit/ort" target="_blank" rel="noopener"><strong>OSS Review Toolkit (ORT)</strong></a>（Apache-2.0）&amp; <a href="https://github.com/aboutcode-org/scancode-toolkit" target="_blank" rel="noopener"><strong>ScanCode-Toolkit</strong></a>（Apache-2.0 / LicenseDB <code>CC-BY-4.0</code>）：<code>curations.yml</code>、文件级扫描及 <code>PlainTextTemplate</code> Notice 生成标杆。</li>
         </ul>
@@ -610,7 +610,7 @@
         <p>恭喜！至此 <strong>Phase 1（统一底座架构 · Lessons 0001–0010）全部收官</strong>。L1 采集、L2 IR、L3 漏洞与合规引擎已经构成完整可落地的第一阶段商业平台底座！带着思考进入下一阶段：</p>
         <ul style="margin-bottom:0.5rem;">
           <li>“如果我们对外只卖云端 SaaS，但需要帮企业客户扫描他们将要静态打包交付给最终用户的 Go/Rust/C++ 客户端，Strategy Engine 如何按「项目画像」切换推理模式？”</li>
-          <li>“Curation 人工智能覆写层（如按 PURL + SHA-256 锁定）与上游组件版本升级之间，应该如何设计继承与失效机制？”</li>
+          <li>“Curation 人工覆写层（如按 PURL + SHA-256 锁定）与上游组件版本升级之间，应该如何设计继承与失效机制？”</li>
           <li>“Phase 1 底座已彻底封顶！我准备迈入 <strong>Phase 2（第三代高价值差异化壁垒）：Lesson 0011（静态函数级可达性 Call Graph 底层原理与跨语言工程挑战）</strong>！”</li>
         </ul>
       </div>

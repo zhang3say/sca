@@ -171,12 +171,19 @@
       noticeRequired: true,
       note: "非 OSI 认证（MongoDB SSPL §13）：若作为服务对外提供，须将支撑该服务的全栈管理/编排软件全部按 SSPL 开源，绝大多数企业法务一票否决。",
     },
-    "BSL-1.1": {
+    "BSL-1.0": {
+      tier: "Permissive",
+      rank: 0,
+      noticeRequired: true,
+      patentClause: false,
+      note: "Boost Software License 1.0（OSI 批准的宽松许可；切勿与非开源 Business Source License 1.1 的官方 ID BUSL-1.1 混淆！）。",
+    },
+    "BUSL-1.1": {
       tier: "Non-OSI Source-Available",
       rank: 5,
       nonOsiRestricted: true,
       noticeRequired: true,
-      note: "Business Source License：非开源许可，通常禁止将其直接包装为竞品商业生产服务（直到约定 Change Date 才转为开源）。",
+      note: "Business Source License 1.1（官方 SPDX ID 为 BUSL-1.1，非 BSL-1.1）：非开源源可用许可，通常禁止直接包装为竞品商业生产服务（直至约定 Change Date 才转为开源）。",
     },
     "Elastic-2.0": {
       tier: "Non-OSI Source-Available",
@@ -207,6 +214,13 @@
     "LLVM-exception": "Apache-2.0 WITH LLVM-exception：免除在特定运行时链接场景下的二进制 NOTICE 附带冲突，增强与 GPL-2.0 软件的兼容桥接能力。",
     "Autoconf-exception-2.0": "允许基于 Autoconf 生成的 configure 脚本在非 GPL 项目中自由分发。",
   };
+
+  const LICENSES_BY_LOWER = Object.fromEntries(
+    Object.keys(LICENSES).map((k) => [k.toLowerCase(), k])
+  );
+  const EXCEPTIONS_BY_LOWER = Object.fromEntries(
+    Object.keys(LINKING_EXCEPTIONS).map((k) => [k.toLowerCase(), k])
+  );
 
   const PRESETS = [
     {
@@ -326,7 +340,7 @@
     {
       id: "go-spdx",
       name: "github/go-spdx & spdx/tools-golang",
-      codeLicense: "MIT / Apache-2.0",
+      codeLicense: "MIT / Apache-2.0 OR GPL-2.0-or-later（商用选 Apache-2.0）",
       dataLicense: "SPDX License List (CC0-1.0)",
       role: "Go Core 内核 · SPDX 语法树解析与 ID 校验",
       verdictClass: "badge-ok",
@@ -408,9 +422,13 @@
       const raw = s.slice(i, j);
       if (raw === "AND" || raw === "OR" || raw === "WITH") {
         tokens.push({ type: raw, val: raw });
-      } else if (/^(and|or|with)$/i.test(raw)) {
-        warnings.push(`SPDX 规范强制运算符全大写（检测到 "${raw}"，已按 "${raw.toUpperCase()}" 容错解析并建议规范化）。`);
+      } else if (raw === "and" || raw === "or" || raw === "with") {
+        warnings.push(
+          `SPDX v3.0.1 允许全小写运算符 "${raw}"，但为清晰度与兼容 SPDX 2.x 解析器建议规范化为全大写 "${raw.toUpperCase()}"。`
+        );
         tokens.push({ type: raw.toUpperCase(), val: raw.toUpperCase() });
+      } else if (/^(and|or|with)$/i.test(raw)) {
+        tokens.push({ type: "INVALID_OP", val: raw });
       } else {
         tokens.push({ type: "ID", val: raw });
       }
@@ -423,6 +441,14 @@
     const { tokens, warnings } = tokenizeSpdx(input);
     if (tokens.length === 0) {
       return { ast: null, error: "请输入有效的 SPDX 许可证表达式（如 MIT OR Apache-2.0）。", warnings };
+    }
+    const invalidOp = tokens.find((t) => t.type === "INVALID_OP");
+    if (invalidOp) {
+      return {
+        ast: null,
+        error: `SPDX v3.0.1 Annex B 禁止大小写混写运算符 "${invalidOp.val}"（仅允许全大写或全小写）。`,
+        warnings,
+      };
     }
     let pos = 0;
 
@@ -534,34 +560,55 @@
      3. 3D Context Contagion & Compatibility Evaluator
      ------------------------------------------------------------------------ */
   function resolveLicenseInfo(id, orLater) {
-    if (id === "NOASSERTION" || id === "NONE") {
+    const upper = id.toUpperCase();
+    if (upper === "NOASSERTION" || upper === "NONE") {
       return {
-        id,
+        id: upper,
         tier: "Missing / Unverified",
         rank: 3,
         isSpecial: true,
         note: "未声明有效许可，必须送入 Tier 2 ScanCode 文件级扫描或 ClearlyDefined 校准。",
       };
     }
-    if (id.startsWith("LicenseRef-") || id.startsWith("DocumentRef-")) {
+    if (/^(licenseref-|documentref-|additionref-)/i.test(id)) {
+      const validPrefix =
+        id.startsWith("LicenseRef-") ||
+        id.startsWith("DocumentRef-") ||
+        id.startsWith("AdditionRef-");
       return {
         id,
-        tier: "Custom LicenseRef",
+        tier: validPrefix ? "Custom LicenseRef" : "Invalid Prefix Case",
         rank: 3,
         isCustom: true,
-        note: "自定义或专有许可引用（LicenseRef），无法自动推断传染性，须由法务规则库显式映射。",
+        note: validPrefix
+          ? "自定义或专有许可引用（LicenseRef），无法自动推断传染性，须由法务规则库显式映射。"
+          : "SPDX 规范要求 LicenseRef- / DocumentRef- / AdditionRef- 前缀严格区分大小写（仅后缀可变部分不区分大小写）。",
       };
     }
-    const exact = LICENSES[id];
-    if (exact) {
-      return Object.assign({ id, orLater: Boolean(orLater || exact.orLater) }, exact);
+    if (id.toLowerCase() === "bsl-1.1") {
+      return {
+        id,
+        tier: "Invalid SPDX ID",
+        rank: 3,
+        isUnknown: true,
+        note: "BSL-1.1 不是合法 SPDX ID：Business Source License 1.1 的官方 SPDX ID 为 BUSL-1.1（而 BSL-1.0 是宽松许可 Boost Software License 1.0）。",
+      };
     }
-    // Check if -or-later or + variant
-    if (orLater && LICENSES[`${id}-or-later`]) {
-      return Object.assign({ id: `${id}-or-later`, orLater: true }, LICENSES[`${id}-or-later`]);
+    const lower = id.toLowerCase();
+    const canonExact = LICENSES_BY_LOWER[lower];
+    if (canonExact) {
+      const exact = LICENSES[canonExact];
+      return Object.assign({ id: canonExact, orLater: Boolean(orLater || exact.orLater) }, exact);
     }
-    if (orLater && LICENSES[`${id}-only`]) {
-      return Object.assign({ id: `${id}+`, orLater: true }, LICENSES[`${id}-only`]);
+    if (orLater) {
+      const canonOrLater = LICENSES_BY_LOWER[`${lower}-or-later`];
+      if (canonOrLater) {
+        return Object.assign({ id: canonOrLater, orLater: true }, LICENSES[canonOrLater]);
+      }
+      const canonOnly = LICENSES_BY_LOWER[`${lower}-only`];
+      if (canonOnly) {
+        return Object.assign({ id: `${canonOnly.replace(/-only$/i, "")}+`, orLater: true }, LICENSES[canonOnly]);
+      }
     }
     return {
       id,
@@ -572,8 +619,59 @@
     };
   }
 
+  function checkOutboundLeafCompatibility(cid, excId, info, ctx) {
+    if (ctx.scope === "dev" || ctx.linking === "ipc") return null;
+    if (ctx.distribution === "oss_gpl2") {
+      if (cid === "Apache-2.0") {
+        if (excId === "LLVM-exception") {
+          return {
+            status: "PASS",
+            reason: "Apache-2.0 WITH LLVM-exception 显式附带向 GPL-2.0 兼容的例外豁免，允许并入 GPL-2.0-only 项目。",
+            obligation: "保留 Apache-2.0 WITH LLVM-exception 原声明与上游 NOTICE。",
+          };
+        }
+        return {
+          status: "BLOCK",
+          reason:
+            "FSF 双向协议冲突（死锁）：Apache-2.0（含专利报复条款）与 GPL-2.0-only 互不兼容！无法同时满足两者要求（除非改用 GPL-2.0-or-later 升级至 GPL-3.0，或移除其中一方）。",
+          obligation: "移除与出站 GPL-2.0-only 互斥的 Apache-2.0 依赖，或升级出站为 GPL-3.0。",
+        };
+      }
+      if (
+        cid === "EPL-2.0" ||
+        cid === "CDDL-1.0" ||
+        cid === "LGPL-3.0-only" ||
+        cid === "LGPL-3.0-or-later" ||
+        cid === "GPL-3.0-only" ||
+        cid === "GPL-3.0-or-later"
+      ) {
+        return {
+          status: "BLOCK",
+          reason: `出站协议冲突：${cid} 与出站 GPL-2.0-only 存在条款不兼容，禁止静态或动态链接合入。`,
+          obligation: `移除与出站 GPL-2.0-only 互斥的 ${cid} 依赖，或调整出站许可。`,
+        };
+      }
+    }
+    if (ctx.distribution === "oss_apache2") {
+      if (
+        (info.strongCopyleft || info.libraryCopyleft) &&
+        !(excId && LINKING_EXCEPTIONS[excId] && ctx.linking !== "modified")
+      ) {
+        return {
+          status: "BLOCK",
+          reason: `出站协议倒挂冲突：对外声明 Apache-2.0 的开源库不可直接静态/动态依赖强/库级传染协议 ${cid}（仅 Apache-2.0 兼容入站单向进 GPL-3.0，反之不成立）。`,
+          obligation: `移除与出站 Apache-2.0 倒挂冲突的 ${cid} 依赖或改走 IPC 独立进程。`,
+        };
+      }
+    }
+    return null;
+  }
+
   function evaluateLeaf(id, exception, orLater, ctx) {
     const info = resolveLicenseInfo(id, orLater);
+    const cid = info.id;
+    const excId = exception ? EXCEPTIONS_BY_LOWER[exception.toLowerCase()] || exception : null;
+    const exprLabel = excId ? `${cid} WITH ${excId}` : cid;
     const obligations = [];
     const reasons = [];
     let status = "PASS"; // PASS | WARN | BLOCK
@@ -581,15 +679,15 @@
 
     if (info.isSpecial || info.isCustom || info.isUnknown) {
       status = "WARN";
-      obligations.push(`人工/Tier 2 核验 ${id} 真实文本与权利边界`);
-      reasons.push(`${id}：${info.note}`);
+      obligations.push(`人工/Tier 2 核验 ${cid} 真实文本与权利边界`);
+      reasons.push(`${cid}：${info.note}`);
       return {
         status,
         score: 50,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: exception ? `${id} WITH ${exception}` : id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
@@ -597,34 +695,34 @@
     if (ctx.scope === "dev") {
       if (info.nonOsiRestricted) {
         status = "WARN";
-        obligations.push(`复核 ${id} 是否限制企业内部商业研发用途（如 CC-BY-NC）`);
-        reasons.push(`虽为 dev/test 构建期依赖（不随制品分发），但 ${id} 属于非 OSI 限制条款，需确认允许企业内部使用。`);
+        obligations.push(`复核 ${cid} 是否限制企业内部商业研发用途（如 CC-BY-NC）`);
+        reasons.push(`虽为 dev/test 构建期依赖（不随制品分发），但 ${cid} 属于非 OSI 限制条款，需确认允许企业内部使用。`);
       } else {
         status = "PASS";
-        reasons.push(`Scope = dev/test（仅开发构建期使用，不进入最终分发二进制/镜像），${id} 的分发传染条款被安全剪枝。`);
+        reasons.push(`Scope = dev/test（仅开发构建期使用，不进入最终分发二进制/镜像），${cid} 的分发传染条款被安全剪枝。`);
       }
       return {
         status,
         score: status === "PASS" ? 0 : 40,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: exception ? `${id} WITH ${exception}` : id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
     // 2. Non-OSI restricted licenses
     if (info.nonOsiRestricted) {
       status = "BLOCK";
-      obligations.push(`禁止将 ${id} 组件合入商业产品/托管服务，需替换开源替代品或采购商业授权`);
-      reasons.push(`${id}（${info.tier}）：${info.note}`);
+      obligations.push(`禁止将 ${cid} 组件合入商业产品/托管服务，需替换开源替代品或采购商业授权`);
+      reasons.push(`${cid}（${info.tier}）：${info.note}`);
       return {
         status,
         score: 100,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
@@ -632,8 +730,8 @@
     if (info.networkCopyleft) {
       if (ctx.linking === "ipc") {
         status = "WARN";
-        obligations.push(`保持 ${id} 作为独立微服务的完整网络源码披露入口，并严禁闭源核心与之同进程耦合`);
-        reasons.push(`${id} 在独立进程（IPC/HTTP）边界下可尝试隔离，但服务端本身一旦被外部用户通过网络交互仍须按 AGPL §13 提供对应服务源码。`);
+        obligations.push(`保持 ${cid} 作为独立微服务的完整网络源码披露入口，并严禁闭源核心与之同进程耦合`);
+        reasons.push(`${cid} 在独立进程（IPC/HTTP）边界下可尝试隔离，但服务端本身一旦被外部用户通过网络交互仍须按 AGPL §13 提供对应服务源码。`);
       } else {
         status = "BLOCK";
         obligations.push(`触发 AGPL-3.0 §13 网络交互传染：${ctx.distribution === "saas" ? "即便仅在云端 SaaS 运行不分发二进制" : "商业分发"}也必须开放整体链接软件源码`);
@@ -644,18 +742,31 @@
         score: status === "BLOCK" ? 95 : 55,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
+      };
+    }
+
+    // 3.5 Outbound compatibility check (drives accurate OR branch selection under oss_gpl2 / oss_apache2)
+    const outboundRes = checkOutboundLeafCompatibility(cid, excId, info, ctx);
+    if (outboundRes) {
+      return {
+        status: outboundRes.status,
+        score: outboundRes.status === "BLOCK" ? 95 : info.rank,
+        obligations: [outboundRes.obligation],
+        reasons: [outboundRes.reason],
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
     // 4. Strong Copyleft (GPL) + WITH Exception check
     if (info.strongCopyleft) {
-      if (exception && LINKING_EXCEPTIONS[exception] && ctx.linking !== "modified") {
+      if (excId && LINKING_EXCEPTIONS[excId] && ctx.linking !== "modified") {
         status = "PASS";
         effectiveRank = 1;
-        obligations.push(`保留 ${id} WITH ${exception} 原版权声明；严禁直接修改该受例外保护库自身源码`);
-        reasons.push(`WITH 例外生效：${exception} 显式免除链接传染（${LINKING_EXCEPTIONS[exception]}）。`);
+        obligations.push(`保留 ${exprLabel} 原版权声明；严禁直接修改该受例外保护库自身源码`);
+        reasons.push(`WITH 例外生效：${excId} 显式免除链接传染（${LINKING_EXCEPTIONS[excId]}）。`);
       } else if (ctx.distribution === "saas") {
         status = "PASS";
         obligations.push(`保留内部合规台账（当前仅云端 SaaS 运行未对外分发二进制，不触发 GPL-2/3 分发传染；若未来私有化交付将立即升级为 BLOCK！）`);
@@ -664,22 +775,22 @@
         status = "WARN";
         obligations.push(`确保进程边界完全独立（命令行/Socket 调用且不共享专有数据结构），并单独随包提供该 GPL 组件源码`);
         reasons.push(`Linking = IPC 独立进程：按 FSF 聚合（Aggregate）而非衍生作品原则通常不传染主程序，但须严格审计进程边界与命令行耦合度。`);
-      } else if (ctx.distribution === "oss_gpl2" && (id === "GPL-2.0-only" || id === "GPL-2.0-or-later")) {
+      } else if (ctx.distribution === "oss_gpl2" && (cid === "GPL-2.0-only" || cid === "GPL-2.0-or-later")) {
         status = "PASS";
         obligations.push(`按 GPL-2.0 整体开源对外发布对应源码与构建脚本`);
-        reasons.push(`出站产品本身即以 GPL-2.0 开源发布，与入站 ${id} 兼容。`);
+        reasons.push(`出站产品本身即以 GPL-2.0 开源发布，与入站 ${cid} 兼容。`);
       } else {
         status = "BLOCK";
-        obligations.push(`商业闭源/不兼容分发禁止静态或动态链接 ${id}${ctx.linking === "modified" ? "（且修改源码会使链接例外失效）" : ""}，须替换或拆出独立进程`);
-        reasons.push(`${id} 在「${ctx.distribution === "binary" ? "商业闭源分发" : "不兼容出站许可"} + ${ctx.linking}」下触发强传染红线：整个链接作品必须全部开源。`);
+        obligations.push(`商业闭源/不兼容分发禁止静态或动态链接 ${cid}${ctx.linking === "modified" ? "（且修改源码会使链接例外失效）" : ""}，须替换或拆出独立进程`);
+        reasons.push(`${cid} 在「${ctx.distribution === "binary" ? "商业闭源分发" : "不兼容出站许可"} + ${ctx.linking}」下触发强传染红线：整个链接作品必须全部开源。`);
       }
       return {
         status,
         score: status === "BLOCK" ? 90 : status === "WARN" ? 45 : 10 + effectiveRank,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: exception ? `${id} WITH ${exception}` : id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
@@ -687,20 +798,20 @@
     if (info.libraryCopyleft) {
       if (ctx.distribution === "saas" || ctx.linking === "ipc") {
         status = "PASS";
-        obligations.push(`保留 ${id} 版权声明与源码出处链接`);
+        obligations.push(`保留 ${cid} 版权声明与源码出处链接`);
         reasons.push(`${ctx.distribution === "saas" ? "纯云端 SaaS 不触发分发义务" : "IPC 独立进程隔离不构成链接衍生"}，安全放行。`);
       } else if (ctx.linking === "dynamic") {
         status = "WARN";
-        obligations.push(`确保用户可自由替换该动态链接库（.so/.dll/.jar），随发行包附带 ${id} 全文与源码获取书面要约（Written Offer）`);
-        reasons.push(`动态链接 ${id} 商业闭源可用，但须满足库可替换性与源码附带/书面要约合规义务。`);
+        obligations.push(`确保用户可自由替换该动态链接库（.so/.dll/.jar），随发行包附带 ${cid} 全文与源码获取书面要约（Written Offer）`);
+        reasons.push(`动态链接 ${cid} 商业闭源可用，但须满足库可替换性与源码附带/书面要约合规义务。`);
       } else if (ctx.linking === "static") {
         status = "BLOCK";
-        obligations.push(`静态链接（含 Go/Rust/Webpack 单包）触发 ${id} 重链接义务：须向客户交付闭源程序目标文件(.o/.a)或改用动态链接/替代包！`);
-        reasons.push(`常见工程暗坑：在 Go/Rust 单文件或静态编译二进制中引入 ${id}，无法满足库替换条件，默认拦截（除非产品法务明确接受交付重链接目标文件）。`);
+        obligations.push(`静态链接（含 Go/Rust/Webpack 单包）触发 ${cid} 重链接义务：须向客户交付闭源程序目标文件(.o/.a)或改用动态链接/替代包！`);
+        reasons.push(`常见工程暗坑：在 Go/Rust 单文件或静态编译二进制中引入 ${cid}，无法满足库替换条件，默认拦截（除非产品法务明确接受交付重链接目标文件）。`);
       } else {
         // modified
         status = "BLOCK";
-        obligations.push(`修改了 ${id} 库自身源码，须将修改后的库源码以 ${id} 开源并提供重链接支持`);
+        obligations.push(`修改了 ${cid} 库自身源码，须将修改后的库源码以 ${cid} 开源并提供重链接支持`);
         reasons.push(`修改 LGPL 库自身源码必须回馈该库的完整修改源码。`);
       }
       return {
@@ -708,8 +819,8 @@
         score: status === "BLOCK" ? 80 : status === "WARN" ? 35 : 8,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
@@ -717,37 +828,37 @@
     if (info.fileCopyleft) {
       if (ctx.linking === "modified") {
         status = "WARN";
-        obligations.push(`将对 ${id} 原文件所做的修改以 ${id} 单独发布源码，其余商业闭源独立文件不受传染`);
-        reasons.push(`文件级弱传染（${id}）：仅需开源你修改的那几个源文件，商业闭源核心逻辑安全隔离。`);
+        obligations.push(`将对 ${cid} 原文件所做的修改以 ${cid} 单独发布源码，其余商业闭源独立文件不受传染`);
+        reasons.push(`文件级弱传染（${cid}）：仅需开源你修改的那几个源文件，商业闭源核心逻辑安全隔离。`);
       } else {
         status = "PASS";
-        obligations.push(`保留 ${id} 许可文本、版权声明及原始源码获取链接（Notice）；EPL/CDDL 注意勿与 GPL-2.0-only 混编`);
-        reasons.push(`文件级弱传染（${id}）：未修改原文件且不与 GPLv2 混编时，可合法用于商业闭源产品或 SaaS。`);
+        obligations.push(`保留 ${cid} 许可文本、版权声明及原始源码获取链接（Notice）；EPL/CDDL 注意勿与 GPL-2.0-only 混编`);
+        reasons.push(`文件级弱传染（${cid}）：未修改原文件且不与 GPLv2 混编时，可合法用于商业闭源产品或 SaaS。`);
       }
       return {
         status,
         score: status === "WARN" ? 25 : 5,
         obligations,
         reasons,
-        leaves: [{ id, exception, orLater, info }],
-        electedExpr: id,
+        leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+        electedExpr: exprLabel,
       };
     }
 
-    // 7. Permissive (MIT / BSD / Apache-2.0 / ISC / 0BSD)
+    // 7. Permissive (MIT / BSD / Apache-2.0 / ISC / 0BSD / BSL-1.0)
     if (info.requiresUpstreamNoticeFile) {
-      obligations.push(`保留 ${id} 许可全文、所有上游版权行，并强制提取透传包内 NOTICE 文件（Apache-2.0 §4(d)）`);
+      obligations.push(`保留 ${exprLabel} 许可全文、所有上游版权行，并强制提取透传包内 NOTICE 文件（Apache-2.0 §4(d)）`);
     } else if (info.noticeRequired) {
-      obligations.push(`在 THIRD-PARTY-NOTICES 中保留 ${id} 版权声明与许可文本`);
+      obligations.push(`在 THIRD-PARTY-NOTICES 中保留 ${exprLabel} 版权声明与许可文本`);
     }
-    reasons.push(`${id} 属于商业友好型宽松许可，在所有分发与链接形态下均不触发源码传染。`);
+    reasons.push(`${exprLabel} 属于商业友好型宽松许可，在所有分发与链接形态下均不触发源码传染。`);
     return {
       status: "PASS",
       score: info.rank,
       obligations,
       reasons,
-      leaves: [{ id, exception, orLater, info }],
-      electedExpr: id,
+      leaves: [{ id: cid, exception: excId, orLater: Boolean(info.orLater), info }],
+      electedExpr: exprLabel,
     };
   }
 
@@ -758,11 +869,11 @@
       return { conflicts, warnings };
     }
 
-    // Check outbound GPL-2.0-only distribution vs inbound leaves
+    // Check outbound GPL-2.0-only / Apache-2.0 distribution vs inbound leaves
     const allItems = leaves.slice();
-    if (ctx.distribution === "oss_gpl2") {
+    if (ctx.distribution === "oss_gpl2" && !allItems.some((item) => item.id === "GPL-2.0-only")) {
       allItems.push({ id: "GPL-2.0-only", exception: null, info: LICENSES["GPL-2.0-only"], isOutbound: true });
-    } else if (ctx.distribution === "oss_apache2") {
+    } else if (ctx.distribution === "oss_apache2" && !allItems.some((item) => item.id === "Apache-2.0")) {
       allItems.push({ id: "Apache-2.0", exception: null, info: LICENSES["Apache-2.0"], isOutbound: true });
     }
 
@@ -774,12 +885,12 @@
 
         const ids = [a.id, b.id];
         const has = (x) => ids.includes(x);
-        const other = (x) => (a.id === x ? b : a);
 
         // 1. Apache-2.0 vs GPL-2.0-only
         if (has("Apache-2.0") && has("GPL-2.0-only")) {
-          const gplNode = other("Apache-2.0");
-          if (!gplNode.exception) {
+          const apacheNode = a.id === "Apache-2.0" ? a : b;
+          const gplNode = a.id === "GPL-2.0-only" ? a : b;
+          if (apacheNode.exception !== "LLVM-exception" && !gplNode.exception) {
             conflicts.push(
               `FSF 双向协议冲突（死锁）：Apache-2.0（含专利报复条款）与 GPL-2.0-only 互不兼容！无法同时满足两者要求（除非改用 GPL-2.0-or-later 升级至 GPL-3.0，或移除其中一方）。`
             );
@@ -811,7 +922,10 @@
         }
       }
     }
-    return { conflicts, warnings };
+    return {
+      conflicts: Array.from(new Set(conflicts)),
+      warnings: Array.from(new Set(warnings)),
+    };
   }
 
   function evaluateAst(node, ctx) {
@@ -924,6 +1038,14 @@
     return `${wrapStart}<div class="lic-ast-node">${badge}${verdictBadge}${branchTag}</div>${childrenHtml}${wrapEnd}`;
   }
 
+  function classifyReason(text, idx, overallStatus) {
+    if (/冲突|死锁|红线|禁止|不兼容|倒挂|默认拦截|强传染|违约/.test(text)) return "bad";
+    if (/桥接|人工|警告|审边界|审计|动态链接|非 OSI|修改|复核|书面要约/.test(text)) return "warn";
+    if (idx === 0 && overallStatus === "BLOCK") return "bad";
+    if (idx === 0 && overallStatus === "WARN") return "warn";
+    return "ok";
+  }
+
   /* ------------------------------------------------------------------------
      4. Widget Initialization
      ------------------------------------------------------------------------ */
@@ -963,10 +1085,24 @@
       if (parsed.ast) {
         evalRes = evaluateAst(parsed.ast, ctx);
         // Re-check top-level single/pairwise outbound conflicts even if root is LICENSE/WITH
-        const topPair = checkPairwiseCompatibility(evalRes.leaves, ctx);
-        if (topPair.conflicts.length > 0) {
-          evalRes.status = "BLOCK";
-          evalRes.reasons = [...topPair.conflicts, ...evalRes.reasons];
+        if (evalRes.leaves.length > 0) {
+          const topPair = checkPairwiseCompatibility(evalRes.leaves, ctx);
+          if (topPair.conflicts.length > 0) {
+            evalRes.status = "BLOCK";
+            for (const c of topPair.conflicts) {
+              if (!evalRes.reasons.includes(c)) {
+                evalRes.reasons.unshift(c);
+              }
+            }
+          }
+          if (topPair.warnings.length > 0) {
+            if (evalRes.status === "PASS") evalRes.status = "WARN";
+            for (const w of topPair.warnings) {
+              if (!evalRes.reasons.includes(w)) {
+                evalRes.reasons.push(w);
+              }
+            }
+          }
         }
         normalizedExpr = formatNormalized(parsed.ast, 0);
         astHtml = renderAstHtml(parsed.ast, true);
@@ -1062,13 +1198,7 @@
                 ${evalRes.reasons
                   .map(
                     (r, idx) =>
-                      `<li class="idx-step-item ${
-                        evalRes.status === "BLOCK" && idx === 0
-                          ? "bad"
-                          : evalRes.status === "WARN" && idx === 0
-                          ? "warn"
-                          : "ok"
-                      }">${escapeHtml(r)}</li>`
+                      `<li class="idx-step-item ${classifyReason(r, idx, evalRes.status)}">${escapeHtml(r)}</li>`
                   )
                   .join("")}
               </ul>
@@ -1219,9 +1349,11 @@
     render();
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll('[data-widget="license-compliance-lab"]').forEach(initLicenseComplianceLab);
-  });
+  if (typeof document !== "undefined") {
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll('[data-widget="license-compliance-lab"]').forEach(initLicenseComplianceLab);
+    });
+  }
 
   // Expose pure parser/evaluator for automated Node verification when loaded under CommonJS/test harnesses
   if (typeof module !== "undefined" && module.exports) {
