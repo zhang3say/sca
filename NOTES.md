@@ -33,9 +33,9 @@
   - `0011` 静态函数级可达性（Call Graph）底层原理与跨语言工程挑战（已发布；已启 Ref 05 可达与修复矩阵）
   - `0012` 动态运行时可达性与容器裁剪：用真实执行上下文击穿误报（已发布；已扩展 Ref 05 第 03 节）
   - `0013` 超越 CVSS：EPSS、CISA KEV 与 VEX（OpenVEX / CycloneDX / CSAF）协同降噪（已发布；已扩展 Ref 05 第 04 节）
-  - `0014` 无破坏性自动修复与升级路径求解器（Guided Remediation）（下一课 · ZPD）
+  - `0014` 无破坏性自动修复与升级路径求解器（Guided Remediation）（已发布；已扩展 Ref 05 第 05 节 · Ch 04 收官）
 - **Ch 05 投毒防御、同源检测与 AI 时代供应链安全**：
-  - `0015` 恶意包与供应链投毒检测引擎（对标 Socket.dev）
+  - `0015` 恶意包与供应链投毒检测引擎（对标 Socket.dev）（下一课 · ZPD）
   - `0016` 开源代码片段同源检测与无源码二进制 SCA 底层原理
   - `0017` AI-BOM 统一建模：模型权重、数据集与推理框架血缘（CycloneDX ML-BOM / SPDX 3.0）
   - `0018` 模型序列化安全与恶意载荷扫描（Pickle RCE vs Safetensors）

@@ -122,6 +122,18 @@
 - [CycloneDX VDR/VEX & OASIS CSAF 2.0: `CycloneDX/cyclonedx-go` (`Apache-2.0`) · `gocsaf/csaf` (`Apache-2.0`) · `aquasecurity/trivy` (`Apache-2.0`) · `anchore/grype` (`Apache-2.0`)](https://github.com/gocsaf/csaf)
   [`CycloneDX 1.7`](https://cyclonedx.org/docs/1.7/json/) 严格区分内嵌全量资产台账 VDR 与独立 VEX，区分 `false_positive`（扫描器误识别）与 `not_affected + code_not_reachable`，并提供 `resolved_with_pedigree`；[`OASIS CSAF 2.0`](https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html)（`product_status` 带 `known_` 前缀 + `flags[].label`）由 `gocsaf/csaf`（`Apache-2.0`）提供 Go 生态官方解析；[`Trivy VEX`](https://trivy.dev/latest/docs/supply-chain/vex/) 与 `VEX Hub` 示范 `--vex` 显式顺序优先级与 OCI Referrers 自动发现。
 
+### 无破坏性自动修复、依赖求解与升级影响分析（Layer 4 Guided Remediation）
+- [Guided Remediation & Dependency Graph Resolution: `google/osv-scanner` (`Apache-2.0`) · `google/deps.dev` (`Apache-2.0`)](https://google.github.io/osv-scanner/experimental/guided-remediation/)
+  Google 官方 `osv-scanner fix` 提出 `in-place`、`relock`/`relax` 与 `override` 三大策略及 `--upgrade-config`/`--min-severity`/`--max-depth` 过滤框架，底层依托 `deps.dev/util/resolve` 进行跨生态传递图求解；注意重锁会调用原生包管理器，必须进入 Tier 3 隔离沙箱执行。
+- [Empirical Upgrade Impact: Ochoa, Degueule, Falleri & Vinju, *"Breaking bad? Semantic versioning and impact of breaking changes in Maven Central"* (EMSE 2022, DOI `10.1007/s10664-021-10052-y`)](https://doi.org/10.1007/s10664-021-10052-y)
+  基于 *Maracas* 对约 120,000 次升级与 293,000 个客户端的实证研究：83.4% 遵守 SemVer，但即便包含破坏性变更也仅 ~7.9% 客户端实际调用到受影响符号（同时 16.6% 非 Major 更新暗藏破坏），奠定「`API Diff ∩ 第一方调用图` 放行 Safe Major」的核心依据。
+- [Version Solving Algorithms: Natalie Weizenbaum (*PubGrub: Next-Generation Version Solving*) · `pubgrub-rs/pubgrub` (`MPL-2.0`)](https://github.com/dart-lang/pub/blob/master/doc/solver.md)
+  CDCL 冲突驱动子句学习版本求解算法（驱动 Dart `pub` 与 Astral `uv`）；`pubgrub-rs` 为 `MPL-2.0` 文件级弱传染许可，修改源码须公开对应修改文件。
+- [Lossless Code Refactoring & Updaters: `openrewrite/rewrite` (`Apache-2.0`) · `dependabot/dependabot-core` (`MIT`) vs `renovatebot/renovate` (`AGPL-3.0`)](https://github.com/openrewrite/rewrite)
+  `OpenRewrite` 以 Lossless Semantic Tree（LST）实现类型感知且保留格式/注释的 XML 与源码迁移（注意区分 Apache-2.0 开源核心与 Moderne 商业专有 Recipes）；`dependabot-core` 已重授权为 `MIT` 可安全隔离复用；**商业红线**：`renovatebot/renovate` 为 `AGPL-3.0` 强网络传染，严禁嵌入商业闭源 SaaS 后端。
+- [Ecosystem API Diff Engines: `siom79/japicmp` (`Apache-2.0`) · `revapi/revapi` (`Apache-2.0`) · `golang.org/x/exp/apidiff` (`BSD-3-Clause`) · `mkdocstrings/griffe` (`ISC`) · `obi1kenobi/cargo-semver-checks` (`MIT OR Apache-2.0`)](https://pkg.go.dev/golang.org/x/exp/apidiff)
+  五大语言生态二进制/AST 破坏性变更检测底座；特别警惕**不要**把 `golang.org/x/exp/apidiff`（BSD-3-Clause）与 OpenJDK 同名 `apidiff`（`GPL-2.0 + Classpath Exception`）混淆。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -139,6 +151,6 @@
 
 ## Gaps
 - **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
-- **静态、运行时可达性与优先级/VEX 协同降噪（Ch 04 · Lessons 0011–0013 已收口）**：第 11–12 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）与运行时融合/容器裁剪；第 13 课及 Ref 05 第 04 节已补齐 FIRST EPSS v4（`arXiv:2302.14172` / FIRST ToS / Probability vs Percentile）、CVSS v4.0 `CVSS-B/BT`、CISA KEV（8 必填字段 + 勒索字段）与 SSVC 非补偿树、三大 VEX 映射（OpenVEX `subcomponents` / CycloneDX `false_positive` vs `not_affected` / CSAF 2.0 `known_` 前缀）、Safety Floor 信任冲突裁决及事件驱动撤销闭环。
+- **静态、运行时可达性与优先级/VEX/自动修复协同闭环（Ch 04 · Lessons 0011–0014 已全面收口）**：第 11–13 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）、运行时融合/容器裁剪与 EPSS/KEV/SSVC/VEX 协同降噪；第 14 课及 Ref 05 第 05 节已补齐 OSV-Scanner v2 Guided Remediation（`in-place/relock/override`）、`deps.dev/util/resolve`、PubGrub（`MPL-2.0`）、Ochoa et al. (EMSE 2022) `API Diff ∩ Call Graph` 实证与五大生态 Diff 底座、OpenRewrite LST（`Apache-2.0`）、`dependabot-core`（`MIT`）vs `Renovate`（`AGPL-3.0`）红线及双触点防 PR 风暴闭环。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。

@@ -15,6 +15,7 @@
         <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011 · 静态可达性</a>
         <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012 · 运行时与裁剪</a>
         <a href="../lessons/0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013 · EPSS / KEV / VEX</a>
+        <a href="../lessons/0014-guided-remediation-and-upgrade-path-solver.html">Lesson 0014 · 无破坏性自动修复</a>
         <a href="./layer4-reachability-and-remediation-matrix.html" class="active">Ref 05 · L4 可达与修复矩阵</a>
         <a href="./layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
       </div>
@@ -29,10 +30,10 @@
         <span>PRINT-READY LAYER 4 CHEAT SHEET</span>
       </div>
       <h1>Layer 4 可达性分析、智能降噪与安全修复速查矩阵</h1>
-      <p class="subtitle">供 Layer 4 静态调用图、运行时可达性融合网关、容器减面路线、EPSS/KEV/SSVC 威胁分级与 VEX 账本评审时随时翻阅（当前已覆盖 Lesson 0011–0013，并将随 Chapter 04 收官扩展至 Lesson 0014）。</p>
+      <p class="subtitle">供 Layer 4 静态调用图、运行时可达性融合网关、容器减面路线、EPSS/KEV/SSVC 威胁分级、VEX 账本与 Guided Remediation 自动修复求解评审时随时翻阅（已全面覆盖 Lesson 0011–0014 · Chapter 04 完整收官版）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> &amp; VEX · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV</a> · <a href="https://kubescape.io/docs/operator/runtime-threat-detection/" target="_blank" rel="noopener">Kubescape</a> · OpenJDK JFR · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS v4</a> · <a href="https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc" target="_blank" rel="noopener">CISA KEV / SSVC</a> · <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> · <a href="https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html" target="_blank" rel="noopener">OASIS CSAF 2.0</a></span>
-        <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012</a> · <a href="../lessons/0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013</a>（后续将接入 0014）</span>
+        <span><strong>依据标准与基准：</strong><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7</a> <code>evidence.callstack</code> &amp; VEX · <a href="https://ossf.github.io/osv-schema/" target="_blank" rel="noopener">OSV</a> · <a href="https://kubescape.io/docs/operator/runtime-threat-detection/" target="_blank" rel="noopener">Kubescape</a> · OpenJDK JFR · <a href="https://peps.python.org/pep-0669/" target="_blank" rel="noopener">PEP 669</a> · <a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS v4</a> · <a href="https://www.cisa.gov/stakeholder-specific-vulnerability-categorization-ssvc" target="_blank" rel="noopener">CISA KEV / SSVC</a> · <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> · <a href="https://docs.oasis-open.org/csaf/csaf/v2.0/csaf-v2.0.html" target="_blank" rel="noopener">OASIS CSAF 2.0</a> · <a href="https://google.github.io/osv-scanner/experimental/guided-remediation/" target="_blank" rel="noopener">OSV-Scanner Guided Remediation</a> · <a href="https://github.com/openrewrite/rewrite" target="_blank" rel="noopener">OpenRewrite LST</a></span>
+        <span><strong>关联课程：</strong><a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012</a> · <a href="../lessons/0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013</a> · <a href="../lessons/0014-guided-remediation-and-upgrade-path-solver.html">Lesson 0014</a></span>
       </div>
     </header>
 
@@ -245,15 +246,59 @@
     </section>
 
     <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">Chapter 04 后续扩展规划（Lesson 0014 收官）</div>
-      <p>本速查卡已收录 <strong>Lesson 0011–0013</strong> 核心矩阵，下一课将完成 Chapter 04 最后一块拼图：<strong>无破坏性自动修复与升级路径求解器 Guided Remediation（Lesson 0014）</strong>。</p>
+      <div class="callout-label">Chapter 04 全面收官 · 后续路线预告（Chapter 05）</div>
+      <p>本速查卡已完整覆盖 <strong>Phase 2 · Chapter 04（Lesson 0011–0014）</strong>全链路工程矩阵——从静态调用图、运行时动态融合与裁剪、EPSS/KEV/SSVC+VEX 协同降噪到 Guided Remediation 无破坏自动修复。下一章 <strong>Chapter 05（Lesson 0015 起）</strong>将切入无 CVE 威胁与 AI 时代供应链安全：恶意包投毒检测（对标 Socket.dev）、二进制同源与 AI-BOM。</p>
     </div>
 
+    <!-- SECTION 5: GUIDED REMEDIATION & UPGRADE IMPACT -->
+    <section class="full-width">
+      <h2><span class="sec-num">05</span>无破坏性自动修复策略、跨语言 API Diff 与双触点闭环速查（Lesson 0014）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>维度 / 领域</th>
+              <th>推荐标准与商用底座</th>
+              <th>核心求解 / 交集规则</th>
+              <th>高危陷阱与商业闭源红线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>依赖图修复策略</strong><br/>（帕累托求解）</td>
+              <td><a href="https://google.github.io/osv-scanner/experimental/guided-remediation/" target="_blank" rel="noopener">OSV-Scanner Guided Remediation</a> · <a href="https://github.com/google/deps.dev" target="_blank" rel="noopener"><code>deps.dev/util/resolve</code></a> (<code>Apache-2.0</code>) · <a href="https://github.com/pubgrub-rs/pubgrub" target="_blank" rel="noopener"><code>pubgrub-rs</code></a> (<code>MPL-2.0</code>)</td>
+              <td>优先级阶梯：<code>in-place</code> &rarr; <code>relock</code>（按顶层直接依赖聚合）&rarr; 受中间父包 ABI 校验的 <code>override</code>；强制零新 CVE 与零 GPL/AGPL 漂移双刹车。</td>
+              <td>严禁无校验强行 Maven <code>override</code> 导致运行期 <code>NoSuchMethodError</code>；<code>relock</code> 执行原生包管理器必须进 Tier 3 沙箱防 <code>postinstall</code>；<code>pubgrub-rs</code> 修改源码须遵守文件级 MPL-2.0 公开。</td>
+            </tr>
+            <tr>
+              <td><strong>API Diff &cap; 调用图</strong><br/>（Ochoa 实证）</td>
+              <td><a href="https://doi.org/10.1007/s10664-021-10052-y" target="_blank" rel="noopener">Ochoa et al. (EMSE 2022)</a> · <a href="https://github.com/siom79/japicmp" target="_blank" rel="noopener"><code>japicmp</code></a>/<a href="https://github.com/revapi/revapi" target="_blank" rel="noopener"><code>revapi</code></a> (<code>Apache-2.0</code>) · <a href="https://pkg.go.dev/golang.org/x/exp/apidiff" target="_blank" rel="noopener"><code>x/exp/apidiff</code></a> (<code>BSD-3</code>) · <a href="https://github.com/mkdocstrings/griffe" target="_blank" rel="noopener"><code>griffe</code></a> (<code>ISC</code>) · <a href="https://github.com/obi1kenobi/cargo-semver-checks" target="_blank" rel="noopener"><code>cargo-semver-checks</code></a> (<code>MIT/Apache-2.0</code>)</td>
+              <td>云端按 <code>(purl, v1, v2)</code> 预计算库级破坏符号，在线与 L4 第一方调用图求交：0 命中直接放行 <strong>Safe Major</strong>（Ochoa 实证仅 ~7.9% 客户端受波及）；非 0 命中精准标注 <code>file:line</code>。</td>
+              <td>严禁仅凭 SemVer 主版本一刀切禁升，亦禁盲信 Minor/Patch 绝对兼容（16.6% 非 Major 违规）；<span class="badge badge-danger">严防同名混淆</span> OpenJDK <code>apidiff</code> 为 <code>GPL-2.0 + Classpath</code>！</td>
+            </tr>
+            <tr>
+              <td><strong>无损改写与双触点</strong><br/>（PR + Agent MCP）</td>
+              <td><a href="https://github.com/openrewrite/rewrite" target="_blank" rel="noopener">OpenRewrite LST</a> (<code>Apache-2.0</code>) · <a href="https://github.com/dependabot/dependabot-core" target="_blank" rel="noopener"><code>dependabot-core</code></a> (<code>MIT</code>) · MCP <code>sca_plan_remediation</code></td>
+              <td>LST 保留注释与类型信息做无损 XML/源码改写；按直接父依赖聚合 + 单仓并发限流（3–5 个）；Agent 侧走 MCP 在本地改完并跑通单测再提 PR。</td>
+              <td><span class="badge badge-danger">严禁嵌入 SaaS</span>：<a href="https://github.com/renovatebot/renovate" target="_blank" rel="noopener"><code>renovatebot/renovate</code></a> 为 <code>AGPL-3.0</code> 强网络传染协议；区分 OpenRewrite Apache-2.0 核心与 Moderne 专有商业 Recipes。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">← 返回 Lesson 0013 · EPSS / KEV / VEX 协同降噪</a>
+      <a href="../lessons/0014-guided-remediation-and-upgrade-path-solver.html">← 返回 Lesson 0014 · 无破坏性自动修复</a>
+      <a href="../lessons/0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013 · EPSS / KEV / VEX</a>
       <a href="../lessons/0012-dynamic-runtime-reachability-and-container-trimming.html">Lesson 0012 · 运行时与裁剪</a>
       <a href="../lessons/0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011 · 静态可达性</a>
-      <a href="../index.html">返回课程总览 · 继续 Lesson 0014</a>
+      <a href="../index.html">返回课程总览 · 开启 Ch 05 Lesson 0015</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>
   </main>

@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0014：无破坏性自动修复与升级路径求解器（Guided Remediation）</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013 · EPSS / KEV / VEX</a>
+        <a href="./0014-guided-remediation-and-upgrade-path-solver.html" class="active">Lesson 0014 · 无破坏性自动修复</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+        <a href="../reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0014</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 04 收官课（安全闭环与自动修复求解）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>无破坏性自动修复与升级路径求解器（Guided Remediation）</h1>
+      <p class="subtitle">经过 <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a>–<a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">0013</a> 的静动态可达性过滤与 SSVC/VEX 协同降噪，我们已经把 1,000 条噪音漏洞浓缩为 30 条真正该修的 <code>Act / Attend</code> 队列。但若在“最后一公里”退回传统扫描器“发现一个 CVE 就盲目发一个单包升级 PR”的做法，研发团队会立刻被 <strong>PR 风暴（PR Fatigue）</strong> 与构建崩毁淹没。本课作为 Chapter 04 收官，带你设计<strong>多目标图约束求解器</strong>、<strong><code>API Diff ∩ 第一方调用图</code> 零破坏升级影响引擎</strong>，以及面向人类与 AI Coding Agent 的双触点自愈闭环。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 OSV-Scanner v2 三大策略（<code>in-place</code> / <code>relock</code> / <code>override</code>）与 PubGrub 求解边界；落地基于 Ochoa 实证与 <code>japicmp</code>/<code>apidiff</code>/<code>griffe</code> 的 Safe Major 交集引擎；掌握 OpenRewrite LST 与 <code>AGPL-3.0</code> Renovate 避坑及双触点交付</span>
+        <span><strong>先修底座：</strong><a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a> · <a href="./0010-oss-license-compliance-and-copyleft-reasoning.html">Lesson 0010</a> · <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md）</div>
+      <p>第一代修复机器人只是“版本号搬运工”——把锁文件里每个漏洞包单点替换成最新补丁号，既不管上层父依赖是否兼容，也不管新版本是否换成了 <code>AGPL-3.0</code> 或引入新 CVE。第三代商业 SCA（如 Snyk Remediation Graph、Endor Labs Upgrade Impact、Google OSV-Scanner v2）的真正壁垒，是把修复重构升级为<strong>基于依赖图 + 许可证 + 调用图破坏面交集的多目标帕累托求解问题</strong>：用最少个数的 PR，零破坏地拔除最多真实风险，并能在 AI Agent 本地写代码阶段直接通过 MCP 完成自愈。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么“单包无脑升级”会制造 PR 风暴与构建崩毁？—— 三大策略与图求解模型</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 拆解 Google OSV-Scanner v2 Guided Remediation 三大修复策略</h3>
+      <p>在现代传递依赖占 80% 以上的软件供应链中，一个漏洞往往藏在 3–5 层深的传递包里。参考 <a href="https://google.github.io/osv-scanner/experimental/guided-remediation/" target="_blank" rel="noopener">Google OSV-Scanner Guided Remediation（<code>osv-scanner fix</code>）</a> 与 <code>deps.dev/util/resolve</code> 的图求解架构，自动修复必须区分风险与收益截然不同的三种修改策略：</p>
+      <ul>
+        <li><strong>① <code>in-place</code>（原位锁文件更新）：</strong>严格遵守当前 Manifest（如 <code>package.json</code>）既有的语义版本区间，仅原地重写 Lockfile（<code>package-lock.json</code>）中可向上滑动的传递依赖节点。<strong>优点：</strong>变更面最小、几乎不改变直接依赖约束；<strong>局限：</strong>一旦修复版本落在 Manifest 区间之外（例如被 <code>^2.14.0</code> 锁死而安全版在 <code>3.0.4</code>），原位策略直接无解。</li>
+        <li><strong>② <code>relock</code> / <code>relax</code>（放宽并重算直接依赖）：</strong>允许突破 Manifest 的版本上下界，向上升级<strong>顶层直接依赖（Direct Dependency）</strong>并重新计算整棵依赖子树，从而顺带把深层多个脆弱传递依赖一并“冲洗”出图。配合 <code>--upgrade-config</code>（限制 Patch / Minor / Major）、<code>--min-severity</code> 与 <code>--max-depth</code>，可以把“升级几个直接包”转化为最大 ROI 排序问题。</li>
+        <li><strong>③ <code>override</code>（强行传递依赖覆写）：</strong>典型用于 Java Maven <code>&lt;dependencyManagement&gt;</code> 或 npm <code>overrides</code>，在不升级直接父依赖的前提下，强行把深层传递依赖钉死到安全版本。</li>
+      </ul>
+      <p>数学上，Guided Remediation 求解器并非贪心寻找“单一最低修复版”，而是在候选升级向量 \(X = \{d_1 \to v_1', \dots, d_k \to v_k'\}\) 上求解<strong>多目标帕累托最优</strong>：同时最小化「直接依赖变更数」「语义版本距离（Patch &lt; Minor &lt; Major）」「真实业务调用破坏点数」，并最大化「消除的 <code>Act / Attend</code> 漏洞数」，且硬性约束<strong>零许可证传染漂移 &amp; 零高危新 CVE 回归</strong>。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">工程红线：Override 隐形定时炸弹与沙箱隔离</span>
+        <strong>坑 1 · <code>override</code> 的运行期崩毁陷阱：</strong>当中间父依赖（如 <code>reactor-netty</code>）硬绑定了传递库 <code>netty@4.1.x</code> 的内部构造方法时，用 Maven <code>&lt;dependencyManagement&gt;</code> 强行 <code>override</code> 跨大版本至 <code>4.2.0</code>，主工程源码本身不直接调 Netty 所以往往<strong>编译通过</strong>，一到线上流量路径就抛出 <code>NoSuchMethodError</code>！因此商业求解器必须在优先度上遵循 <strong><code>in-place</code> &rarr; <code>relock (直接父包)</code> &rarr; 带中间父包字节码校验的受控 <code>override</code></strong>。<br/>
+        <strong>坑 2 · 重锁执行的供应链投毒风险：</strong><code>osv-scanner fix</code> 等重锁工具一旦调用原生包管理器解析依赖，可能触发 npm <code>postinstall</code> 或 Maven 插件下载。与 <a href="./0003-source-dependency-resolution-traps.html">Lesson 0003</a> 一致，所有 <code>relock</code> 解析<strong>严禁在宿主机热路径裸跑</strong>，必须进入无特权、无宿主机密钥的 Tier 3 沙箱（如配 <code>--ignore-scripts</code>）。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 跨生态依赖图求解算法与锁文件重写规范</h3>
+      <p>不同包生态的依赖解析语义差异巨大，统一修复求解器绝不能把 npm 的树形嵌套逻辑套用到 Python 或 Go 上。下表是 Layer 4 修复引擎跨四大主力生态的核心求解契约：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:24%" />
+          <col style="width:28%" />
+          <col style="width:30%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>语言生态</th>
+            <th>底层求解算法 / 核心引擎</th>
+            <th>支持策略与文件改写锚点</th>
+            <th>工程避坑与商用许可边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>JavaScript / npm</strong></td>
+            <td><a href="https://github.com/google/deps.dev" target="_blank" rel="noopener"><code>deps.dev/util/resolve</code></a>（<code>Apache-2.0</code>）+ 最大版本号优先匹配</td>
+            <td><code>in-place</code>（<code>package-lock.json</code>）与 <code>relock</code>（<code>package.json</code> + lock）；支持嵌套重复依赖独立去重。</td>
+            <td>注意同库多版本共存（Diamond 保留双副本）时，单测“仅修其中一个路径”会残留另一副本的漏洞！</td>
+          </tr>
+          <tr>
+            <td><strong>Java / Maven &amp; Gradle</strong></td>
+            <td><code>deps.dev</code> Effective POM 解析 + Nearest-Wins 树裁决 + <a href="https://github.com/openrewrite/rewrite" target="_blank" rel="noopener">OpenRewrite LST</a></td>
+            <td>支持 <code>relock</code> 直接父依赖与 <code>override</code>（注入 <code>&lt;dependencyManagement&gt;</code> 或 Gradle <code>constraints</code>）。</td>
+            <td>必须检查 Multi-Module 父 POM <code>&lt;properties&gt;</code> 变量占位符，禁正则硬替换破坏 XML 格式与注释。</td>
+          </tr>
+          <tr>
+            <td><strong>Python (<code>uv</code> / Poetry)</strong></td>
+            <td><strong>PubGrub</strong>（<a href="https://github.com/dart-lang/pub/blob/master/doc/solver.md" target="_blank" rel="noopener">Dart <code>pub</code></a> / <a href="https://github.com/pubgrub-rs/pubgrub" target="_blank" rel="noopener"><code>pubgrub-rs</code></a> CDCL 冲突驱动子句学习）</td>
+            <td>支持多平台标记（<code>sys_platform</code> / <code>python_version</code>）与全局单版本约束求解并生成人类可读冲突解释。</td>
+            <td><span class="badge badge-warn">MPL-2.0 注意</span>：<code>pubgrub-rs</code> 为 <code>MPL-2.0</code>（文件级弱传染），若修改其 Rust 源码须开源该文件，推荐以独立 Crate/Worker 边界引用。</td>
+          </tr>
+          <tr>
+            <td><strong>Go Modules</strong></td>
+            <td>官方 <strong>MVS（Minimal Version Selection）</strong>确定性最小版本选择</td>
+            <td><code>go.mod</code> 显式升顶层 <code>require</code> + <code>go mod tidy</code>（对 <code>v2+</code> 主版本须同步改写 import path）。</td>
+            <td>MVS 天然偏爱满足约束的最小版本而非盲目最新版，天然契合“最小扰动升级”哲学。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>超越 SemVer 盲猜——“API Diff &cap; 第一方调用图”的升级影响分析</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 来自 29 万客户端的实证反转：库有破坏性变更 &ne; 你的业务会崩</h3>
+      <p>第一代与第二代修复工具在面对跨 Major 升级（例如 <code>2.14.3 &rarr; 3.0.4</code>）时几乎全部选择“躺平”——仅凭主版本号变更就标为“高破坏风险”不敢动，导致大量跨大版本的 KEV 漏洞在企业仓库里一躺就是两年。</p>
+      <p>但学术界与工业界的大规模实证彻底推翻了这种粗糙假设。Lina Ochoa 等人在 <em>Empirical Software Engineering</em>（2022，DOI <a href="https://doi.org/10.1007/s10664-021-10052-y" target="_blank" rel="noopener"><code>10.1007/s10664-021-10052-y</code></a>）发表的标杆研究，利用静态字节码分析工具 <em>Maracas</em> 横向实测了 Maven Central 约 <strong>120,000 次库升级</strong> 与 <strong>293,000 个下游客户端应用</strong>，揭示了两条决定第三代 SCA 架构设计的铁律：</p>
+      <ul>
+        <li><strong>铁律 A（高 SemVer 遵从下的低真实波及率）：</strong>约 <strong>83.4%</strong> 的库升级遵守了 SemVer 规范；更重要的是，即便升级包含了破坏性 API 变更，由于绝大多数破坏发生在客户端根本没调到的边缘公开方法或内部类上，<strong>最终实际受到破坏性变更波及的客户端仅占约 7.9%（超过 92% 的客户端其实安然无恙）</strong>！</li>
+        <li><strong>铁律 B（非 Major 升级的暗雷不可忽视）：</strong>仍有约 <strong>16.6%</strong> 的库升级存在 SemVer 违规（在 Minor/Patch 中悄悄删改签名或破坏行为），单纯迷信“Patch/Minor 一定安全”同样会导致 CI 爆炸。</li>
+      </ul>
+      <aside class="sidenote">
+        <span class="sidenote-title">第三代核心公式：Upgrade Impact Analysis</span>
+        <strong>真实破坏面 = <code>BreakingSymbols(v_old &rarr; v_new) &cap; ReachableUsedSymbols(App, Lib)</code></strong><br/>
+        • 若交集为 <strong>&empty;（0 命中）</strong>，即使从 <code>2.x</code> 升到 <code>3.x</code> 也是 <strong>Safe Major</strong>——随 PR 附上调用图零命中证明，研发合并率飙升至 90%+！<br/>
+        • 若交集 <strong>非空（命中具体文件与行号）</strong>，精确标注 <code>OrderService.java:142</code> 供 OpenRewrite LST 或 AI Coding Agent 精准改写，彻底消灭盲猜。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.2 工程落地：云端离线预计算 API Diff + 在线毫秒级调用图求交</h3>
+      <p>与 <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> 的云端函数摘要缓存同构，升级影响分析绝不能在 PR 扫描热路径现拉两个版本的源码/JAR 现算 Diff。正确架构是两段式解耦：</p>
+      <ol>
+        <li><strong>云端异步预计算（<code>L3/L4 Artifact Diff Cache</code>）：</strong>按 <code>(purl, v_old, v_new)</code> 键对热门开源包版本跃迁离线提取公开符号破坏集合（移除类/方法、签名变更、参数收缩、访问级别收窄及中间父依赖兼容断点），写入分布式 KV 索引。</li>
+        <li><strong>PR / Agent 在线毫秒级求交：</strong>直接复用 Lesson 0011 已生成的第一方应用调用图 <code>ReachableUsedSymbols(App)</code>，在内存中与预计算集合做集合求交（<code>O(|Used|)</code>），毫秒级判定该升级候选属于 <code>ZERO_BREAKING</code>（安全放行）还是 <code>TARGETED_BREAKING(sites[])</code>。</li>
+      </ol>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:24%" />
+          <col style="width:16%" />
+          <col style="width:42%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>语言生态</th>
+            <th>推荐开源 API Diff 引擎</th>
+            <th>精确许可证</th>
+            <th>核心检测能力与商业闭源边界（务必验清同名项目！）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Java / JVM</strong></td>
+            <td><a href="https://github.com/siom79/japicmp" target="_blank" rel="noopener"><code>siom79/japicmp</code></a> · <a href="https://github.com/revapi/revapi" target="_blank" rel="noopener"><code>revapi/revapi</code></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>直接对比新旧 <code>.jar</code> 字节码，精确识别二进制/源码不兼容变更（删除方法、改返回值、抛新受检异常、改接口默认方法）；纯 Apache-2.0 可直接嵌入分析服务。</td>
+          </tr>
+          <tr>
+            <td><strong>Go</strong></td>
+            <td><a href="https://pkg.go.dev/golang.org/x/exp/apidiff" target="_blank" rel="noopener"><code>golang.org/x/exp/apidiff</code></a></td>
+            <td><span class="badge badge-ok">BSD-3-Clause</span></td>
+            <td>基于 Go <code>go/types</code> 校验导出类型、结构体字段、函数签名及方法集兼容性；<strong>严禁与 OpenJDK Code Tools 同名工具 <code>apidiff</code>（<code>GPL-2.0 + Classpath</code>）混淆！</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Python</strong></td>
+            <td><a href="https://github.com/mkdocstrings/griffe" target="_blank" rel="noopener"><code>mkdocstrings/griffe</code></a></td>
+            <td><span class="badge badge-ok">ISC</span></td>
+            <td>基于 AST 静态提取模块/类/函数签名、关键字参数、默认值与类型注解并内置 Breaking Change 规则引擎；ISC 等价 MIT，无任何传染限制。</td>
+          </tr>
+          <tr>
+            <td><strong>Rust</strong></td>
+            <td><a href="https://github.com/obi1kenobi/cargo-semver-checks" target="_blank" rel="noopener"><code>cargo-semver-checks</code></a></td>
+            <td><span class="badge badge-ok">MIT OR Apache-2.0</span></td>
+            <td>消费 <code>rustdoc</code> JSON 语义模型运行上百条 SemVer 破坏性 lint；注意 <code>rustdoc</code> 需进 Tier 3 沙箱防止 build script 越权执行。</td>
+          </tr>
+          <tr>
+            <td><strong>TypeScript / JS</strong></td>
+            <td><a href="https://github.com/microsoft/TypeScript" target="_blank" rel="noopener">TypeScript Compiler API</a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>比对公开 <code>.d.ts</code> 类型声明树（导出符号删除、必选参数新增、联合类型收窄），并与 Lesson 0011 的 <code>Jelly</code> 调用边求交。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · Layer 4 无破坏性自动修复求解与「人类 PR + Coding Agent MCP」双触点闭环架构</strong>
+        <span>将 Lesson 0013 的 <code>Act/Attend</code> 精筛队列输入约束求解器，经三重安全刹车与调用图破坏面求交后分流双触点执行</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">上游精筛输入与云端预计算知识</span>
+              <span class="badge badge-blue">输入契约</span>
+            </div>
+            <ul>
+              <li><strong>SSVC 队列（0013）：</strong>仅消费 <code>Act</code> / <code>Attend</code> 漏洞集合（VEX <code>not_affected</code> 跳过）。</li>
+              <li><strong>图与符号缓存：</strong><code>deps.dev</code> 传递版本空间 + <code>(purl, v1, v2)</code> 预计算 API Diff + 第一方调用图 <code>UsedSymbols</code>。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Tier 3 沙箱约束求解 + 三重安全刹车</span>
+              <span class="badge badge-ok">零传染 · 零回归</span>
+            </div>
+            <ul>
+              <li><strong>策略阶梯：</strong><code>in-place</code> &rarr; <code>relock</code>（聚合顶层直接依赖）&rarr; 受控 <code>override</code>（校验中间父包 ABI）。</li>
+              <li><strong>三重硬刹车：</strong>① 禁引新 <code>GPL/AGPL</code> 许可；② 禁引新中高危/KEV CVE；③ <code>API Diff &cap; Call Graph</code> 算真实影响行。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 按调用图破坏面与研发工作流分流交付（Dual-Touchpoint Delivery） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">双触点无损执行层（人类 PR 流水线 + AI Coding Agent 本地自愈）</span>
+            <span class="orch-stage-kicker">OpenRewrite LST / Dependabot-Core / MCP Server</span>
+          </div>
+          <p class="orch-stage-desc">
+            <strong>① 人类研发 PR Bot：</strong>按顶层直接依赖聚合（防 PR 风暴）+ 单仓并发限流；无损改写 XML/JSON（OpenRewrite LST）；附带 <code>0-Breaking</code> 证明或精确修复 Recipe。<br/>
+            <strong>② AI Coding Agent（对齐 LR-0002）：</strong>通过 <code>sca_plan_remediation</code> MCP 工具把目标版本与 <code>file:line</code> 调用改动点直接喂给 Agent，在本地跑通单测后再提绿灯 PR！
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>无损改写、双触点闭环与商用开源底座排雷</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 Go 核心原语：多目标求解、三重回归刹车与双触点计划生成</h3>
+      <p>在我们的四层架构中，<strong>依赖求解调度、三重安全刹车（许可/新 CVE/中间父包 ABI）、调用图影响交集裁决与防 PR 风暴聚合逻辑</strong>属于平台的核心差异化资产，必须以 Pure Go 自研稳控在 Layer 4；底层锁文件改写与代码重构则封装 Apache-2.0/MIT 引擎输出。</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">企业级防 PR 风暴 4 条工程铁律</span>
+        ① <strong>仅修 <code>Act / Attend</code>：</strong>死代码 <code>Track</code> 已被 VEX 消噪，绝不发 PR 骚扰研发；<br/>
+        ② <strong>按顶层直接依赖聚合：</strong>1 棵直接依赖下的 6 条传递 CVE 合并为 1 个聚合 PR；<br/>
+        ③ <strong>单仓并发上限（默认 3–5 个）：</strong>超额进入排序缓冲池，合并一个再放行下一个；<br/>
+        ④ <strong>Agent 优先本地自愈：</strong>当存在非零业务代码破坏点时，通过 MCP/Hook 直接把调用点和迁移方案交给 Coding Agent 本地改代码并跑单测，远比往 Git 推一个“编译失败的红灯 PR”优雅得多。
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：Guided Remediation 多目标求解、三重安全刹车与双触点计划</strong>
+        <span>Pure Go 自研核心（对接 deps.dev/util/resolve · API Diff Cache · OpenRewrite/MCP）</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> RemediationStrategy <span class="tok-kw">string</span>
+<span class="tok-kw">const</span> (
+    StrategyInPlace RemediationStrategy = <span class="tok-str">"in-place"</span>
+    StrategyRelock  RemediationStrategy = <span class="tok-str">"relock"</span>
+    StrategyOverride RemediationStrategy = <span class="tok-str">"override"</span>
+)
+
+<span class="tok-kw">type</span> UpgradeCandidate <span class="tok-kw">struct</span> {
+    DirectRootPURL     <span class="tok-kw">string</span>              <span class="tok-cmt">// 聚合后的顶层直接依赖（非裸传递子包）</span>
+    FromVer, ToVer     <span class="tok-kw">string</span>
+    Strategy           RemediationStrategy
+    SemverSpan         <span class="tok-kw">int</span>                 <span class="tok-cmt">// 1:Patch, 2:Minor, 3:Major</span>
+    FixedVulnIDs       []<span class="tok-kw">string</span>            <span class="tok-cmt">// 本次顺带拔除的全部 Act/Attend 漏洞</span>
+    IntroducedNewCVEs  []<span class="tok-kw">string</span>            <span class="tok-cmt">// 升级后引入的新高危或 KEV 漏洞（必为 0）</span>
+    LicenseViolations  []<span class="tok-kw">string</span>            <span class="tok-cmt">// 新增 GPL/AGPL 等红线许可证（必为 0）</span>
+    ParentABIConflicts []<span class="tok-kw">string</span>            <span class="tok-cmt">// override 时中间父包字节码签名冲突点</span>
+    BreakingCallSites  []<span class="tok-kw">string</span>            <span class="tok-cmt">// API Diff ∩ 第一方调用图真实命中的 file:line</span>
+}
+
+<span class="tok-kw">type</span> RemediationPlan <span class="tok-kw">struct</span> {
+    Candidate      UpgradeCandidate
+    AutoMergeSafe  <span class="tok-kw">bool</span>   <span class="tok-cmt">// 仅当 BreakingCallSites == 0 且三重刹车全绿时为 true</span>
+    HumanPRSummary <span class="tok-kw">string</span> <span class="tok-cmt">// 人类侧 PR 说明 + OpenRewrite LST 配方引用</span>
+    AgentMCPAction <span class="tok-kw">string</span> <span class="tok-cmt">// Coding Agent 侧 sca_plan_remediation 结构化修改指令</span>
+}
+
+<span class="tok-kw">func</span> SelectOptimalRemediationPlans(cands []UpgradeCandidate, maxOpenPRs <span class="tok-kw">int</span>) []RemediationPlan {
+    <span class="tok-kw">var</span> valid []UpgradeCandidate
+    <span class="tok-kw">for</span> _, c := <span class="tok-kw">range</span> cands {
+        <span class="tok-cmt">// 三重硬性安全刹车：新 CVE 回归、许可证传染漂移、Override 撕裂中间父包 ABI 一票否决</span>
+        <span class="tok-kw">if</span> <span class="tok-kw">len</span>(c.IntroducedNewCVEs) &gt; <span class="tok-num">0</span> || <span class="tok-kw">len</span>(c.LicenseViolations) &gt; <span class="tok-num">0</span> || <span class="tok-kw">len</span>(c.ParentABIConflicts) &gt; <span class="tok-num">0</span> {
+            <span class="tok-kw">continue</span>
+        }
+        valid = <span class="tok-kw">append</span>(valid, c)
+    }
+
+    <span class="tok-cmt">// 多目标帕累托排序：1) 业务破坏调用点最少  2) 消除漏洞最多  3) 版本跨度最小  4) 优先 in-place/relock</span>
+    sort.Slice(valid, <span class="tok-kw">func</span>(i, j <span class="tok-kw">int</span>) <span class="tok-kw">bool</span> {
+        <span class="tok-kw">if</span> <span class="tok-kw">len</span>(valid[i].BreakingCallSites) != <span class="tok-kw">len</span>(valid[j].BreakingCallSites) {
+            <span class="tok-kw">return</span> <span class="tok-kw">len</span>(valid[i].BreakingCallSites) &lt; <span class="tok-kw">len</span>(valid[j].BreakingCallSites)
+        }
+        <span class="tok-kw">if</span> <span class="tok-kw">len</span>(valid[i].FixedVulnIDs) != <span class="tok-kw">len</span>(valid[j].FixedVulnIDs) {
+            <span class="tok-kw">return</span> <span class="tok-kw">len</span>(valid[i].FixedVulnIDs) &gt; <span class="tok-kw">len</span>(valid[j].FixedVulnIDs)
+        }
+        <span class="tok-kw">return</span> valid[i].SemverSpan &lt; valid[j].SemverSpan
+    })
+
+    <span class="tok-cmt">// 单仓并发限流（防 PR 风暴）并生成人类 + AI Agent 双触点交付载荷</span>
+    <span class="tok-kw">return</span> buildDualTouchpointPlans(valid, maxOpenPRs)
+}</code></pre>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 自动修复与重构开源底座选型矩阵（警惕 Renovate AGPL-3.0 陷阱！）</h3>
+      <p>很多初创团队一做自动发 PR 功能就想把开源界功能最全的 <code>Renovate</code> 直接打包进自己的商业 SaaS 平台——这是典型的<strong>致命合规地雷</strong>。下表严格界定了自动修复领域各标杆项目的许可证与商用边界：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:24%" />
+          <col style="width:18%" />
+          <col style="width:30%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源项目 / 核心组件</th>
+            <th>精确许可证</th>
+            <th>核心能力与技术机制</th>
+            <th>商业闭源架构集成边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener"><code>google/osv-scanner</code></a> &amp; <a href="https://github.com/google/deps.dev" target="_blank" rel="noopener"><code>deps.dev</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>提供 <code>osv-scanner fix</code> 策略架构与 <code>deps.dev/util/resolve</code> Go 跨生态图求解核心，直接对齐 OSV 漏洞格式。</td>
+            <td><strong>首选 Go 求解底座</strong>：直接库级集成求解核心至平台 Layer 4，配合 Tier 3 沙箱安全重锁。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/openrewrite/rewrite" target="_blank" rel="noopener"><code>openrewrite/rewrite</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>独创 <strong>Lossless Semantic Tree（LST，无损语义树）</strong>：同时保留全量编译器类型信息与原始代码空白/注释，精确修改 XML/Gradle/Java/YAML 并自动适配破坏性 API 迁移。</td>
+            <td><strong>无损改写首选</strong>：开源核心与开源 Recipes 为 Apache-2.0（注意商业公司 Moderne 部分企业专项 Recipes 为专有商用授权，需隔离勿误引）。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/dependabot/dependabot-core" target="_blank" rel="noopener"><code>dependabot/dependabot-core</code></a></strong></td>
+            <td><span class="badge badge-ok">MIT</span></td>
+            <td>覆盖 25+ 生态的无状态 Manifest/Lockfile 更新器（已从早年 Prosperity License 正式重授权为 MIT）。</td>
+            <td>适合通过容器化隔离 Worker 调用，补齐冷门语言生态（如 Ruby/PHP/NuGet）的锁文件改写执行器。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/pubgrub-rs/pubgrub" target="_blank" rel="noopener"><code>pubgrub-rs/pubgrub</code></a></strong></td>
+            <td><span class="badge badge-warn">MPL-2.0</span></td>
+            <td>基于 CDCL 的高性能版本求解 Rust 实现（驱动 Astral <code>uv</code> 等现代解析器）。</td>
+            <td><strong>文件级弱传染</strong>：原封引用通常安全，若修改其 <code>.rs</code> 源文件则须公开修改后的对应文件源码。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/renovatebot/renovate" target="_blank" rel="noopener"><code>renovatebot/renovate</code></a></strong></td>
+            <td><span class="badge badge-danger">AGPL-3.0</span></td>
+            <td>功能极全的开源依赖自动更新编排机器人（支持海量包管理器规则与分组预设）。</td>
+            <td><span class="badge badge-danger">严禁嵌入 SaaS</span>：AGPL-3.0 具有严格网络交互传染性！将其集成入闭源商业 SaaS 后端服务可能触发整套平台代码开源义务，仅可作为架构参考。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大实战场景（隐形 Major 零破坏升级、Maven Override 炸弹、许可/新 CVE 回归双刹车、精准命中调用点双触点修复），对比传统 PR Bot、纯 SemVer 与第三代 Guided Remediation 求解器的裁决差异，并实时切换查看人类 OpenRewrite Diff 与 AI Coding Agent MCP JSON 载荷；在<strong>模式二</strong>中调节升级跨度、Safe Major 放行开关与并发 PR 限流阈值，直观评估帕累托收益与 PR 风暴压降效果。</p>
+    </div>
+
+    <!-- INTERACTIVE GUIDED REMEDIATION LAB -->
+    <section class="widget-panel full-width" data-widget="guided-remediation-lab">
+      <script type="application/json" class="guided-remediation-lab-data">
+        {
+          "title": "交互实验台：依赖图修复求解、API Diff 破坏面与防 PR 风暴模拟器",
+          "intro": "亲手切换修复策略（in-place / relock / override）、调用图交集与合规回归刹车，验证如何实现零破坏、防风暴与双触点闭环。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 4 无破坏性自动修复架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为商业闭源 SCA 平台设计“发现可达 Act/Attend 漏洞之后”的自动修复与重构引擎，需兼顾零破坏率、开发体验、双触点闭环与商用许可证红线。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐现代第三代 Guided Remediation 架构最佳实践！至此 Phase 2 Chapter 04（静态可达 → 运行态融合 → 威胁降噪/VEX → 无破坏自动修复）已全链路闭环，准备进军 Chapter 05（恶意包投毒、同源检测与 AI-BOM）！",
+            "warning": "方案可用，但在 {warning} 项上存在单包盲目提 PR、误杀 Safe Major 或重锁解析性能/合规隐患（标黄项），建议按调用图交集与帕累托求解进一步收敛。",
+            "critical": "当前方案踩中 {critical} 处会引发 AGPL-3.0 强传染违约、Override 运行崩毁或沙箱逃逸投毒的严重雷坑（标红项）！请立即修正标红项。"
+          },
+          "modules": [
+            {
+              "name": "自动修复调度与改写底座商业选型",
+              "layer": "L4 自动修复 · 商用红线",
+              "context": "需要在商业闭源 SaaS 中长期演进支持 Java/JS/Python/Go 的依赖更新与代码无损重构。",
+              "options": [
+                {
+                  "label": "Go 自研多目标求解核心 + Apache-2.0 deps.dev/osv-scanner 理念 + OpenRewrite LST（Apache-2.0）+ MIT dependabot-core 隔离 Worker",
+                  "status": "optimal",
+                  "verdictTitle": "纯宽松商用许可拼装，兼得图求解灵活性与 AST/LST 无损代码改写能力",
+                  "feedback": "既保留了核心策略与双触点编排主权，又通过全 Apache-2.0/MIT 底座避开了任何强传染风险。"
+                },
+                {
+                  "label": "直接把 AGPL-3.0 的 Renovate 源码深度嵌入并改造成闭源商业 SaaS 后端服务核心引擎",
+                  "status": "critical",
+                  "verdictTitle": "致命合规违约！AGPL-3.0 网络传染条款将迫使整个商业平台面临开源风险",
+                  "feedback": "Renovate 虽功能丰富但采用 AGPL-3.0，严禁深度整合进商业闭源网络服务交付。"
+                },
+                {
+                  "label": "全部生态一律自己手写正则表达式去改 package.json、pom.xml 和 Java 源码",
+                  "status": "warning",
+                  "verdictTitle": "极其脆弱，面对 Maven 父 POM 属性占位符、XML 注释与跨文件类型迁移必出乱码",
+                  "feedback": "Java/Gradle 与源码重构必须使用类型感知的 OpenRewrite LST 等成熟引擎，不可手搓正则。"
+                }
+              ]
+            },
+            {
+              "name": "深层传递依赖修复路径与 Override 策略边界",
+              "layer": "图求解核心 · 防线上崩溃",
+              "context": "3 层传递依赖存在 CISA KEV 漏洞，同时直接父依赖也有修复后的新版本可用。",
+              "options": [
+                {
+                  "label": "按「in-place → relock 聚合直接父包 → 受中间父包 ABI 校验的受控 override」阶梯求解",
+                  "status": "optimal",
+                  "verdictTitle": "彻底杜绝 Override 引发的中间层 NoSuchMethodError 线上炸弹",
+                  "feedback": "优先升级直接父包保持整棵子树 ABI 同源一致，只有在无法升级父包且校验中间层兼容时才受控 override。"
+                },
+                {
+                  "label": "只要遇到传递依赖漏洞，一律无条件向 pom.xml 或 package.json 插入强硬 override 钉死版本",
+                  "status": "critical",
+                  "verdictTitle": "极高线上事故率：主程序编译虽过，但中间父依赖调用已被删除的方法会在运行期崩溃",
+                  "feedback": "无校验的强行 override 是典型的“账面修好 CVE、线上炸毁生产”反模式。"
+                },
+                {
+                  "label": "只启用 in-place 锁文件修改，凡是需要动 Manifest 或跨 Minor/Major 的漏洞全部放弃修复",
+                  "status": "warning",
+                  "verdictTitle": "大量必须升直接依赖才能消除的 P0 Act 漏洞被遗留积压",
+                  "feedback": "in-place 只能作为最小扰动首选，不能取代完整的 relock 图求解能力。"
+                }
+              ]
+            },
+            {
+              "name": "升级兼容性与破坏性影响评估范式",
+              "layer": "L4 调用图延伸 · 破除 SemVer 盲猜",
+              "context": "修复某可达高危漏洞必须跨 Major 升级直接依赖（2.14.3 → 3.0.4），新版本 Release Notes 列出了 18 项 Breaking Changes。",
+              "options": [
+                {
+                  "label": "云端离线预计算库级 API Diff（japicmp/apidiff/griffe），在线与 L4 第一方调用图求交：0 命中即 Safe Major 放行",
+                  "status": "optimal",
+                  "verdictTitle": "依托 Ochoa 实证与调用图交集，以毫秒级算力证明零破坏并撬动 90%+ 合并率",
+                  "feedback": "如实定位未命中或精准命中的 file:line 调用点，远胜过无脑阻断所有 Major 升级。"
+                },
+                {
+                  "label": "严格按 SemVer 规则一刀切：所有 Patch/Minor 盲目自动合并，所有 Major 一律永久禁止",
+                  "status": "warning",
+                  "verdictTitle": "既漏防 16.6% 的非 Major 隐藏破坏，又错杀超 90% 本可安全升级的 Major 修复",
+                  "feedback": "SemVer 只是维护者意图而非字节码/AST 事实，必须下沉到符号级调用交集。"
+                },
+                {
+                  "label": "把 3.0.4 直接强制推 PR 自动合入主干，既不查 API Diff 也不附调用点分析",
+                  "status": "critical",
+                  "verdictTitle": "一旦命中被删改签名即打断主干构建，彻底摧毁研发对安全团队的信任",
+                  "feedback": "自动修复 PR 被研发关闭的头号原因就是“不可信且经常弄挂构建”。"
+                }
+              ]
+            },
+            {
+              "name": "重锁安全沙箱与双回归刹车（许可 + 新 CVE）",
+              "layer": "执行安全 · 合规底线",
+              "context": "在执行 relock 重新求解版本空间时，需要防止目标版本切换开源协议或引入新漏洞，同时防解析脚本攻击。",
+              "options": [
+                {
+                  "label": "relock 强制跑在无网络密钥的 Tier 3 沙箱（禁 lifecycle scripts）；求解器内建新 CVE 与 GPL/AGPL 漂移一票否决",
+                  "status": "optimal",
+                  "verdictTitle": "守住沙箱防投毒底线，绝不“修掉一个老 CVE 却引进两个新 KEV 或一颗 AGPL 炸弹”",
+                  "feedback": "安全闭环绝不能产生次生灾难，合规与新漏洞回归门禁必须前置在候选排序阶段。"
+                },
+                {
+                  "label": "为了追求极速直接在中心调度节点宿主机执行 npm install / mvn 解析生成锁文件",
+                  "status": "critical",
+                  "verdictTitle": "严重供应链安全漏洞：恶意包的 preinstall/postinstall 脚本将直接接管调度服务器",
+                  "feedback": "永远不要在非隔离宿主机上对用户仓库运行原生包管理器求解。"
+                },
+                {
+                  "label": "只检查原目标 CVE 是否消除，升级后新增的传递漏洞和许可证变更留给下个月定期全量扫描再说",
+                  "status": "warning",
+                  "verdictTitle": "容易造成“越修漏洞越多”或将传染性协议带入主分支的返工尴尬",
+                  "feedback": "回归检查与目标求解在同一个图模型上即可顺手完成，代价极低。"
+                }
+              ]
+            },
+            {
+              "name": "面向人类团队与 AI Coding Agent 的双触点交付架构",
+              "layer": "L4 闭环交付 · 对齐 LR-0002",
+              "context": "企业内部既有传统 Git PR 评审流程，也有大量工程师直接用对话式 AI Coding Agent 在本地写代码。",
+              "options": [
+                {
+                  "label": "PR 侧按顶层直接依赖聚合 + 并发限流（防风暴）；Agent 侧提供 MCP 结构化调用点与重构方案实现本地测通后再提 PR",
+                  "status": "optimal",
+                  "verdictTitle": "既根治传统 PR 轰炸，又把对话式 AI Agent 转化为零破坏自愈执行器",
+                  "feedback": "当升级命中 2 处业务代码修改时，让 Agent 本地改好并跑过单元测试再推送 PR，体验实现代际跃迁。"
+                },
+                {
+                  "label": "沿用单 CVE 单 PR 轰炸策略：有 30 个漏洞就一口气推 30 个 PR，也不支持任何 MCP 接口",
+                  "status": "critical",
+                  "verdictTitle": "研发通知频道瞬间爆炸，90% 安全 PR 被批量关闭或永久静默忽略",
+                  "feedback": "没有聚合限流与双触点协作的修复引擎在大型团队中根本推不动落地。"
+                },
+                {
+                  "label": "只做网页版修复建议报告展示版本号，完全不生成可执行 Diff、OpenRewrite 配方或 MCP 结构化计划",
+                  "status": "warning",
+                  "verdictTitle": "停留在第二代被动报表阶段，将全部图求解与改代码成本甩回给业务研发",
+                  "feedback": "第三代 SCA 的商业溢价正是把“排查与安全改写”自动化闭环。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核场景题涵盖 <strong>Guided Remediation 三大策略与 Override 炸弹、Ochoa 实证与调用图交集、开源底座/API Diff 许可边界以及重锁沙箱与双触点自愈</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0014 · 无破坏性自动修复与升级路径求解器回忆测验",
+          "intro": "重点检验修复策略阶梯、API Diff 交集公式、AGPL/GPL 开源红线及双触点防风暴闭环。",
+          "questions": [
+            {
+              "prompt": "某 Java 工程三层传递依赖 netty-codec-http 存在高危 KEV，而直接父依赖有兼容新版本。若不加校验直接用 Maven <dependencyManagement> override 跨版本钉死该传递包，容易引发什么问题？以下策略排序哪项正确？",
+              "options": [
+                "强制跨大版本覆写传递包即可根治，完全不用关注中间父依赖调用的签名变化。",
+                "盲目覆写会撕裂中间父依赖的调用契约导致运行崩溃，应优先升级直接父依赖。",
+                "应禁止所有自动重锁升级策略，只允许针对漏洞子包单独发版本锁文件的补丁。",
+                "只要主工程代码没有直接导入该传递库，强制覆写任何大版本都绝对不会出错。"
+              ],
+              "answerIndex": 1,
+              "explanation": "直接强行 override 跨版本改写深层传递包时，中间父依赖调用的旧方法可能已被删除或改签名，主工程看似编译通过，线上运行路径却会抛出 NoSuchMethodError。正确阶梯应是优先 in-place，其次通过 relock 同步升级顶层直接父依赖保持子树同源，仅在校验中间父包 ABI 兼容时才受控使用 override（B 正确）。"
+            },
+            {
+              "prompt": "Ochoa 等人在 Empirical Software Engineering (2022) 对 Maven Central 约 12 万次库升级与 29 万客户端的实证研究，为第三代 SCA 求解跨 Major 升级提供了什么关键依据？",
+              "options": [
+                "只要升级包含了破坏性变更，超过八成下游客户端都会立刻遭遇编译或运行崩溃。",
+                "所有遵守语义版本号的次版本与补丁更新都绝不会包含破坏性签名或行为变化。",
+                "只需离线统计目标开源库删改了多少公开方法，无需结合业务仓库调用图来求交。",
+                "绝大多数库级破坏变更并未波及应用调用点，可用调用图交集放行安全大升级。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Ochoa 等人实证显示：约 83.4% 升级遵守 SemVer，且真正受到库级破坏性变更波及的客户端仅约 7.9%（同时约 16.6% 的非 Major 更新仍潜藏破坏）。因此必须计算「API Diff ∩ 第一方调用图」，当交集为空时即使跨 Major 也能安全放行（D 正确）。"
+            },
+            {
+              "prompt": "为商业闭源 SaaS 平台建设自动修复、代码重构与 Go 语言 API Diff 引擎，以下哪组开源底座与协议选型完全避开了强传染或非商用雷区？",
+              "options": [
+                "整合 Apache 求解重写树与 BSD 差异库，彻底避开 AGPL 引擎。",
+                "直接把 AGPL 更新机器人源码合入闭源商用后端，并按托管 SaaS 售卖。",
+                "将 OpenJDK 遵循 GPL 协议的差异工具静态打进闭源核心服务以省钱。",
+                "把商业专有迁移配方直接混入开源基础包，且故意略去全部衍生修改的版权声明。"
+              ],
+              "answerIndex": 0,
+              "explanation": "Google deps.dev / osv-scanner 与 OpenRewrite 核心（Apache-2.0）、Go 官方 golang.org/x/exp/apidiff（BSD-3-Clause）及 Java japicmp/revapi（Apache-2.0）、Python griffe（ISC）均可合规用于闭源商业平台；而 Renovate 采用 AGPL-3.0 严禁嵌入商业 SaaS 后端，OpenJDK 同名 apidiff 为 GPLv2（A 正确）。"
+            },
+            {
+              "prompt": "在落地企业级自动修复交付流水线时，应如何兼顾重锁执行的安全性、防止次生风险以及消除人类 PR 风暴（兼顾 AI Coding Agent）？",
+              "options": [
+                "直接在中心调度机宿主机跑原生包管理重锁，遇新引入传染协议则留待季度人工清查。",
+                "为每条可达漏洞单独推送升级请求至主干，并忽略对话式智能体所需的调用点数据。",
+                "在隔离沙箱执行重锁与双回归刹车，按直接依赖聚合限流，并经接口协同智能体自愈。",
+                "将全部待修漏洞打包为单一巨型升级并跳过单测验证，由机器人直接强推合入默认分支。"
+              ],
+              "answerIndex": 2,
+              "explanation": "重锁会触发包管理器脚本执行，必须进 Tier 3 隔离沙箱；求解器须内置“零新中高危 CVE + 零 GPL/AGPL 漂移”双刹车；交付侧按顶层直接依赖聚合并限流防 PR 风暴，同时通过 MCP 把目标版本与精确调用修改行喂给 Coding Agent 在本地单测通过后再提 PR（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计 Layer 4 约束求解引擎、API 破坏面求交与无损代码改写底座时，推荐精读以下一手规范、论文与商用合规开源库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://google.github.io/osv-scanner/experimental/guided-remediation/" target="_blank" rel="noopener"><strong>Google OSV-Scanner Guided Remediation</strong></a> · <a href="https://github.com/google/osv-scanner" target="_blank" rel="noopener"><code>google/osv-scanner</code></a> &amp; <a href="https://github.com/google/deps.dev" target="_blank" rel="noopener"><code>google/deps.dev</code></a>（<code>Apache-2.0</code>）：<code>in-place / relock / override</code> 策略原典与跨生态依赖求解器源码。</li>
+          <li><a href="https://doi.org/10.1007/s10664-021-10052-y" target="_blank" rel="noopener"><strong>Ochoa et al., <em>Breaking bad? Semantic versioning and impact of breaking changes in Maven Central</em> (EMSE 2022)</strong></a>：12 万次升级与 29 万客户端的 SemVer 与真实调用影响实证基石。</li>
+          <li><a href="https://github.com/dart-lang/pub/blob/master/doc/solver.md" target="_blank" rel="noopener"><strong>Natalie Weizenbaum, <em>PubGrub: Next-Generation Version Solving</em></strong></a> · <a href="https://github.com/pubgrub-rs/pubgrub" target="_blank" rel="noopener"><code>pubgrub-rs/pubgrub</code></a>（<code>MPL-2.0</code>）：CDCL 冲突驱动版本求解算法精读。</li>
+          <li><a href="https://github.com/openrewrite/rewrite" target="_blank" rel="noopener"><strong>OpenRewrite (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/dependabot/dependabot-core" target="_blank" rel="noopener"><code>dependabot-core</code> (<code>MIT</code>)</a> · <a href="https://github.com/siom79/japicmp" target="_blank" rel="noopener"><code>japicmp</code></a> / <a href="https://github.com/revapi/revapi" target="_blank" rel="noopener"><code>revapi</code></a>（<code>Apache-2.0</code>）· <a href="https://pkg.go.dev/golang.org/x/exp/apidiff" target="_blank" rel="noopener"><code>golang.org/x/exp/apidiff</code></a>（<code>BSD-3-Clause</code>）· <a href="https://github.com/mkdocstrings/griffe" target="_blank" rel="noopener"><code>griffe</code></a>（<code>ISC</code>）· <a href="https://github.com/obi1kenobi/cargo-semver-checks" target="_blank" rel="noopener"><code>cargo-semver-checks</code></a>（<code>MIT OR Apache-2.0</code>）。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>恭喜！至此我们完成了 <strong>Phase 2 · Chapter 04（L4 静态可达 &rarr; 运行态融合 &rarr; EPSS/KEV/VEX 降噪 &rarr; Guided Remediation 自动修复）</strong>全链路闭环。接下来将进入 <strong>Chapter 05（无 CVE 投毒防御、同源检测与 AI-BOM）</strong>。你可以继续追问以下问题，或直接开启下一课：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在 Mono-repo（上百个微服务共享根目录 <code>pnpm-lock.yaml</code> 或 Gradle Root）里，如何做子项目粒度的 PR 所有权路由与锁文件锁竞争冲突拆分？”</li>
+          <li>“除了已知 CVE 的修复，针对 PyPI/npm 上刚发布 10 分钟、还没有任何 CVE 编号的‘恶意投毒包’与 AI 幻觉包名（Slopsquatting），Layer 3/4 怎么在安装前就抓出来？”</li>
+          <li>“准备就绪！请为我开启 Chapter 05 首课 <strong>Lesson 0015（恶意包与供应链投毒检测引擎，对标 Socket.dev）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">&larr; 上一课：Lesson 0013 · EPSS / KEV / VEX</a>
+      <a href="../reference/layer4-reachability-and-remediation-matrix.html">配套速查卡：Ref 05 · L4 可达与修复矩阵（Ch 04 完整版）</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Ch 05 Lesson 0015（恶意包投毒检测） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/guided-remediation-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
