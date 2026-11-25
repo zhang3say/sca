@@ -49,11 +49,11 @@
       <h3>1.1 拆解 Google OSV-Scanner v2 Guided Remediation 三大修复策略</h3>
       <p>在现代传递依赖占 80% 以上的软件供应链中，一个漏洞往往藏在 3–5 层深的传递包里。参考 <a href="https://google.github.io/osv-scanner/experimental/guided-remediation/" target="_blank" rel="noopener">Google OSV-Scanner Guided Remediation（<code>osv-scanner fix</code>）</a> 与 <code>deps.dev/util/resolve</code> 的图求解架构，自动修复必须区分风险与收益截然不同的三种修改策略：</p>
       <ul>
-        <li><strong>① <code>in-place</code>（原位锁文件更新）：</strong>严格遵守当前 Manifest（如 <code>package.json</code>）既有的语义版本区间，仅原地重写 Lockfile（<code>package-lock.json</code>）中可向上滑动的传递依赖节点。<strong>优点：</strong>变更面最小、几乎不改变直接依赖约束；<strong>局限：</strong>一旦修复版本落在 Manifest 区间之外（例如被 <code>^2.14.0</code> 锁死而安全版在 <code>3.0.4</code>），原位策略直接无解。</li>
-        <li><strong>② <code>relock</code> / <code>relax</code>（放宽并重算直接依赖）：</strong>允许突破 Manifest 的版本上下界，向上升级<strong>顶层直接依赖（Direct Dependency）</strong>并重新计算整棵依赖子树，从而顺带把深层多个脆弱传递依赖一并“冲洗”出图。配合 <code>--upgrade-config</code>（限制 Patch / Minor / Major）、<code>--min-severity</code> 与 <code>--max-depth</code>，可以把“升级几个直接包”转化为最大 ROI 排序问题。</li>
-        <li><strong>③ <code>override</code>（强行传递依赖覆写）：</strong>典型用于 Java Maven <code>&lt;dependencyManagement&gt;</code> 或 npm <code>overrides</code>，在不升级直接父依赖的前提下，强行把深层传递依赖钉死到安全版本。</li>
+        <li><strong>① <code>in-place</code>（<code>--strategy=in-place</code> · 原位锁文件更新）：</strong>严格遵守当前 Manifest（如 <code>package.json</code>）既有的语义版本区间，仅原地重写 Lockfile（<code>package-lock.json</code>）中可向上滑动的传递依赖节点。<strong>优点：</strong>变更面最小、几乎不改变直接依赖约束；<strong>局限：</strong>一旦修复版本落在 Manifest 区间之外（例如被 <code>^2.14.0</code> 锁死而安全版在 <code>3.0.4</code>），原位策略直接无解。</li>
+        <li><strong>② <code>relock</code> / <code>relax</code>（<code>--strategy=relax</code> · 放宽并重算直接依赖）：</strong>在官方文档中称为 Relock and relax direct dependencies，允许突破 Manifest 的版本上下界，向上升级<strong>顶层直接依赖（Direct Dependency）</strong>并重新计算整棵依赖子树，从而顺带把深层多个脆弱传递依赖一并“冲洗”出图。配合 <code>--upgrade-config</code>（限制 Patch / Minor / Major）、<code>--min-severity</code> 与 <code>--max-depth</code>，可以把“升级几个直接包”转化为最大 ROI 排序问题。</li>
+        <li><strong>③ <code>override</code>（<code>--strategy=override</code> · 强行传递依赖覆写）：</strong>典型用于 Java Maven <code>&lt;dependencyManagement&gt;</code>（可配合 <code>--maven-fix-management</code> 覆盖未直接解析的受管依赖）或 npm <code>overrides</code>，在不升级直接父依赖的前提下，强行把深层传递依赖钉死到安全版本。</li>
       </ul>
-      <p>数学上，Guided Remediation 求解器并非贪心寻找“单一最低修复版”，而是在候选升级向量 \(X = \{d_1 \to v_1', \dots, d_k \to v_k'\}\) 上求解<strong>多目标帕累托最优</strong>：同时最小化「直接依赖变更数」「语义版本距离（Patch &lt; Minor &lt; Major）」「真实业务调用破坏点数」，并最大化「消除的 <code>Act / Attend</code> 漏洞数」，且硬性约束<strong>零许可证传染漂移 &amp; 零高危新 CVE 回归</strong>。</p>
+      <p>数学上，Guided Remediation 求解器并非贪心寻找“单一最低修复版”，而是在候选升级向量 <code>X = {d<sub>1</sub> &rarr; v<sub>1</sub>&prime;, &hellip;, d<sub>k</sub> &rarr; v<sub>k</sub>&prime;}</code> 上求解<strong>多目标帕累托最优</strong>：同时最小化「直接依赖变更数」「语义版本距离（Patch &lt; Minor &lt; Major）」「真实业务调用破坏点数」，并最大化「消除的 <code>Act / Attend</code> 漏洞数」，且硬性约束<strong>零许可证传染漂移 &amp; 零高危新 CVE 回归</strong>。</p>
 
       <aside class="sidenote">
         <span class="sidenote-title">工程红线：Override 隐形定时炸弹与沙箱隔离</span>
@@ -293,6 +293,16 @@
     }
 
     <span class="tok-cmt">// 多目标帕累托排序：1) 业务破坏调用点最少  2) 消除漏洞最多  3) 版本跨度最小  4) 优先 in-place/relock</span>
+    strategyRank := <span class="tok-kw">func</span>(s RemediationStrategy) <span class="tok-kw">int</span> {
+        <span class="tok-kw">switch</span> s {
+        <span class="tok-kw">case</span> StrategyInPlace:
+            <span class="tok-kw">return</span> <span class="tok-num">1</span>
+        <span class="tok-kw">case</span> StrategyRelock:
+            <span class="tok-kw">return</span> <span class="tok-num">2</span>
+        <span class="tok-kw">default</span>:
+            <span class="tok-kw">return</span> <span class="tok-num">3</span>
+        }
+    }
     sort.Slice(valid, <span class="tok-kw">func</span>(i, j <span class="tok-kw">int</span>) <span class="tok-kw">bool</span> {
         <span class="tok-kw">if</span> <span class="tok-kw">len</span>(valid[i].BreakingCallSites) != <span class="tok-kw">len</span>(valid[j].BreakingCallSites) {
             <span class="tok-kw">return</span> <span class="tok-kw">len</span>(valid[i].BreakingCallSites) &lt; <span class="tok-kw">len</span>(valid[j].BreakingCallSites)
@@ -300,7 +310,10 @@
         <span class="tok-kw">if</span> <span class="tok-kw">len</span>(valid[i].FixedVulnIDs) != <span class="tok-kw">len</span>(valid[j].FixedVulnIDs) {
             <span class="tok-kw">return</span> <span class="tok-kw">len</span>(valid[i].FixedVulnIDs) &gt; <span class="tok-kw">len</span>(valid[j].FixedVulnIDs)
         }
-        <span class="tok-kw">return</span> valid[i].SemverSpan &lt; valid[j].SemverSpan
+        <span class="tok-kw">if</span> valid[i].SemverSpan != valid[j].SemverSpan {
+            <span class="tok-kw">return</span> valid[i].SemverSpan &lt; valid[j].SemverSpan
+        }
+        <span class="tok-kw">return</span> strategyRank(valid[i].Strategy) &lt; strategyRank(valid[j].Strategy)
     })
 
     <span class="tok-cmt">// 单仓并发限流（防 PR 风暴）并生成人类 + AI Agent 双触点交付载荷</span>
@@ -563,7 +576,7 @@
               "options": [
                 "整合 Apache 求解重写树与 BSD 差异库，彻底避开 AGPL 引擎。",
                 "直接把 AGPL 更新机器人源码合入闭源商用后端，并按托管 SaaS 售卖。",
-                "将 OpenJDK 遵循 GPL 协议的差异工具静态打进闭源核心服务以省钱。",
+                "将 OpenJDK 遵循 GPL 协议的差异工具静态打进闭源核心降研发成本。",
                 "把商业专有迁移配方直接混入开源基础包，且故意略去全部衍生修改的版权声明。"
               ],
               "answerIndex": 0,

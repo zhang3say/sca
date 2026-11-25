@@ -245,11 +245,6 @@
       </div>
     </section>
 
-    <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">Chapter 04 全面收官 · 后续路线预告（Chapter 05）</div>
-      <p>本速查卡已完整覆盖 <strong>Phase 2 · Chapter 04（Lesson 0011–0014）</strong>全链路工程矩阵——从静态调用图、运行时动态融合与裁剪、EPSS/KEV/SSVC+VEX 协同降噪到 Guided Remediation 无破坏自动修复。下一章 <strong>Chapter 05（Lesson 0015 起）</strong>将切入无 CVE 威胁与 AI 时代供应链安全：恶意包投毒检测（对标 Socket.dev）、二进制同源与 AI-BOM。</p>
-    </div>
-
     <!-- SECTION 5: GUIDED REMEDIATION & UPGRADE IMPACT -->
     <section class="full-width">
       <h2><span class="sec-num">05</span>无破坏性自动修复策略、跨语言 API Diff 与双触点闭环速查（Lesson 0014）</h2>
@@ -273,7 +268,7 @@
             <tr>
               <td><strong>依赖图修复策略</strong><br/>（帕累托求解）</td>
               <td><a href="https://google.github.io/osv-scanner/experimental/guided-remediation/" target="_blank" rel="noopener">OSV-Scanner Guided Remediation</a> · <a href="https://github.com/google/deps.dev" target="_blank" rel="noopener"><code>deps.dev/util/resolve</code></a> (<code>Apache-2.0</code>) · <a href="https://github.com/pubgrub-rs/pubgrub" target="_blank" rel="noopener"><code>pubgrub-rs</code></a> (<code>MPL-2.0</code>)</td>
-              <td>优先级阶梯：<code>in-place</code> &rarr; <code>relock</code>（按顶层直接依赖聚合）&rarr; 受中间父包 ABI 校验的 <code>override</code>；强制零新 CVE 与零 GPL/AGPL 漂移双刹车。</td>
+              <td>优先级阶梯：<code>in-place</code>（<code>--strategy=in-place</code>）&rarr; <code>relock/relax</code>（<code>--strategy=relax</code>，按顶层直接依赖聚合）&rarr; 受中间父包 ABI 校验的 <code>override</code>；强制零新 CVE 与零 GPL/AGPL 漂移双刹车。</td>
               <td>严禁无校验强行 Maven <code>override</code> 导致运行期 <code>NoSuchMethodError</code>；<code>relock</code> 执行原生包管理器必须进 Tier 3 沙箱防 <code>postinstall</code>；<code>pubgrub-rs</code> 修改源码须遵守文件级 MPL-2.0 公开。</td>
             </tr>
             <tr>
@@ -292,6 +287,11 @@
         </table>
       </div>
     </section>
+
+    <div class="callout tip full-width" style="max-width:100%;">
+      <div class="callout-label">Chapter 04 全面收官 · 后续路线预告（Chapter 05）</div>
+      <p>本速查卡已完整覆盖 <strong>Phase 2 · Chapter 04（Lesson 0011–0014）</strong>全链路工程矩阵——从静态调用图、运行时动态融合与裁剪、EPSS/KEV/SSVC+VEX 协同降噪到 Guided Remediation 无破坏自动修复。下一章 <strong>Chapter 05（Lesson 0015 起）</strong>将切入无 CVE 威胁与 AI 时代供应链安全：恶意包投毒检测（对标 Socket.dev）、二进制同源与 AI-BOM。</p>
+    </div>
 
     <footer class="lesson-end-nav no-print">
       <a href="../lessons/0014-guided-remediation-and-upgrade-path-solver.html">← 返回 Lesson 0014 · 无破坏性自动修复</a>

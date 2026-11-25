@@ -124,7 +124,7 @@
 
 ### 无破坏性自动修复、依赖求解与升级影响分析（Layer 4 Guided Remediation）
 - [Guided Remediation & Dependency Graph Resolution: `google/osv-scanner` (`Apache-2.0`) · `google/deps.dev` (`Apache-2.0`)](https://google.github.io/osv-scanner/experimental/guided-remediation/)
-  Google 官方 `osv-scanner fix` 提出 `in-place`、`relock`/`relax` 与 `override` 三大策略及 `--upgrade-config`/`--min-severity`/`--max-depth` 过滤框架，底层依托 `deps.dev/util/resolve` 进行跨生态传递图求解；注意重锁会调用原生包管理器，必须进入 Tier 3 隔离沙箱执行。
+  Google 官方 `osv-scanner fix` 提出 `--strategy=in-place`（仅锁文件原位修补）、`--strategy=relax`（Relock and relax 直接依赖重算）与 `--strategy=override`（Maven `<dependencyManagement>` 覆写，可配 `--maven-fix-management`）三大策略及 `--upgrade-config`/`--min-severity`/`--max-depth` 过滤框架，底层依托 `deps.dev/util/resolve` 进行跨生态传递图求解；注意重锁会调用原生包管理器，必须进入 Tier 3 隔离沙箱执行。
 - [Empirical Upgrade Impact: Ochoa, Degueule, Falleri & Vinju, *"Breaking bad? Semantic versioning and impact of breaking changes in Maven Central"* (EMSE 2022, DOI `10.1007/s10664-021-10052-y`)](https://doi.org/10.1007/s10664-021-10052-y)
   基于 *Maracas* 对约 120,000 次升级与 293,000 个客户端的实证研究：83.4% 遵守 SemVer，但即便包含破坏性变更也仅 ~7.9% 客户端实际调用到受影响符号（同时 16.6% 非 Major 更新暗藏破坏），奠定「`API Diff ∩ 第一方调用图` 放行 Safe Major」的核心依据。
 - [Version Solving Algorithms: Natalie Weizenbaum (*PubGrub: Next-Generation Version Solving*) · `pubgrub-rs/pubgrub` (`MPL-2.0`)](https://github.com/dart-lang/pub/blob/master/doc/solver.md)

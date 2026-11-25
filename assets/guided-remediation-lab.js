@@ -60,7 +60,7 @@
         nodes: {
           direct: { name: "grpc-netty-shaded-client (直接依赖)", from: "1.58.0", safeTo: "1.66.0", minorTo: "1.61.1", license: "Apache-2.0" },
           parent: { name: "reactor-netty-http (中间父包)", from: "1.1.12", safeTo: "1.2.0", minorTo: "1.1.22", role: "强绑定 Netty ABI" },
-          vuln: { name: "io.netty:netty-codec-http (传递)", from: "4.1.94.Final", safeTo: "4.1.115.Final (跟随父包)", minorTo: "4.1.108.Final" },
+          vuln: { name: "io.netty:netty-codec-http (传递)", from: "4.1.94.Final", safeTo: "4.1.115.Final (跟随父包)", minorTo: "4.1.108.Final (仍含 KEV)" },
         },
         apiDiffTotal: 9,
         apiHitCalls: [
@@ -81,9 +81,9 @@
           payloadMode: "pr",
         },
         nodes: {
-          direct: { name: "pdf-render-core (直接依赖)", from: "3.4.1", safeTo: "3.4.9-sec (合规热修版)", minorTo: "3.4.9-sec", license: "MIT -> AGPL-3.0 (v4.0.0)" },
-          parent: { name: "font-layout-engine (新增传递)", from: "1.2.0", safeTo: "1.2.0 (未引入)", minorTo: "1.2.0", role: "4.0.0 新增子依赖" },
-          vuln: { name: "CVE-2026-2201 + 新 CVE-2026-3099", from: "1 条原 KEV", safeTo: "通过最小补丁版消除原漏洞且零新危", minorTo: "零新危" },
+          direct: { name: "pdf-render-core (直接依赖)", from: "3.4.1", safeTo: "3.4.9-sec (合规热修版)", minorTo: "3.4.9-sec", license: "MIT（安全候选维持 MIT）" },
+          parent: { name: "font-layout-engine (新增传递)", from: "1.2.0", safeTo: "1.2.0 (未引入新子依赖)", minorTo: "1.2.0", role: "4.0.0 才引入的危险子依赖" },
+          vuln: { name: "CVE-2026-2201 + 新 CVE-2026-3099", from: "1 条原 KEV", safeTo: "0 条（合规热修且零新危）", minorTo: "0 条（合规热修且零新危）" },
         },
         apiDiffTotal: 4,
         apiHitCalls: [],
@@ -94,7 +94,7 @@
       {
         id: "targeted-breaking-dual-touchpoint",
         label: "4. 精准命中破坏点 · PR + Agent MCP 双触点",
-        desc: "升级 auth-token-sdk 至 5.0.0 仅在库内变动 6 个接口，但调用图精准命中本仓库 2 处业务调用点。求解器拒绝自动合并，并同时生成人类 LST 补丁与 Coding Agent MCP 修复计划。",
+        desc: "升级 auth-token-sdk 至 5.0.2 仅在库内变动 6 个接口，但调用图精准命中本仓库 2 处业务调用点。求解器拒绝自动合并，并同时生成人类 LST 补丁与 Coding Agent MCP 修复计划。",
         apply: {
           strategy: "relock-major",
           useCallGraphDiff: true,
@@ -111,7 +111,7 @@
           "src/main/java/com/app/OrderService.java:142 -> JwtParser.parseClaims(String) 已废弃，需迁移 parseSignedClaims(String, Key)",
           "src/main/java/com/app/AuthFilter.java:88 -> TokenOptions.allowLegacyAlg(boolean) 已移除",
         ],
-        clearNote: "精准识别到 2 处受影响调用点，自动生成 OpenRewrite LST 重构配方与 MCP 结构化修改指令，避免盲推破版 PR。",
+        clearNote: "当前策略停留在 4.2.x，未触发 5.0.2 的 API 破坏，但未能修复 Act P0 漏洞。",
         licenseShift: "Apache-2.0 → Apache-2.0（合规通过）",
         newCveCheck: "目标 5.0.2 无新增高危或 KEV 漏洞",
       },
@@ -142,6 +142,104 @@
       return PRESETS.find((p) => p.id === state.presetId) || PRESETS[0];
     }
 
+    // 根据当前策略与开关动态计算实际命中的破坏调用点、节点呈现与违规状态
+    function getActiveImpact(preset) {
+      const s = state.strategy;
+      const isMinorOrInPlace = s === "in-place" || s === "relock-minor";
+      const allowMajorOrOverride = s === "relock-major" || s === "override";
+
+      // 默认节点视图
+      let directTo = isMinorOrInPlace ? preset.nodes.direct.minorTo : preset.nodes.direct.safeTo;
+      let directLicense = preset.nodes.direct.license;
+      let parentTo = isMinorOrInPlace ? preset.nodes.parent.minorTo : preset.nodes.parent.safeTo;
+      let parentNote = preset.nodes.parent.role;
+      let vulnTo = isMinorOrInPlace ? preset.nodes.vuln.minorTo : preset.nodes.vuln.safeTo;
+      let vulnNote = "随依赖图求解收敛";
+
+      let directTone = "is-upgraded";
+      let parentTone = "is-safe";
+      let vulnTone = isMinorOrInPlace ? "is-conflict" : "is-safe";
+
+      let hits = [];
+      let impactNote = preset.clearNote;
+      let licenseDriftDanger = false;
+
+      if (preset.id === "safe-major-ochoa") {
+        hits = [];
+        if (s === "override") {
+          directTo = "3.0.4 (不建议对直连库用 override)";
+          vulnTone = "is-safe";
+        }
+      } else if (preset.id === "maven-override-bomb") {
+        if (s === "override") {
+          hits = preset.apiHitCalls.slice();
+          directTo = "1.58.0 (保持未升)";
+          directTone = "is-upgraded";
+          parentTo = "1.1.12 (未同步升级，ABI 撕裂!)";
+          parentTone = "is-conflict";
+          vulnTo = "4.2.0.Final (强制钉死)";
+          vulnTone = "is-conflict";
+          vulnNote = "强行 override 引发运行期 NoSuchMethodError 风险";
+        } else if (isMinorOrInPlace) {
+          hits = [];
+          parentTone = "is-safe";
+          vulnTone = "is-conflict";
+          vulnNote = "Minor 区间内未拿到修复 KEV 的 4.1.115.Final";
+          impactNote = "仅放宽至 Minor 时中间父包保持 ABI 兼容（0 处破坏），但底层 Netty 仍残留 KEV 漏洞。";
+        } else {
+          // relock-major
+          hits = [];
+          parentTone = "is-safe";
+          vulnTone = "is-safe";
+          vulnNote = "随顶层父包同源升级，彻底拔除 KEV";
+        }
+      } else if (preset.id === "license-and-cve-regression") {
+        hits = [];
+        if (!state.useRegressionBrake && allowMajorOrOverride) {
+          // 刹车关闭：贪心选中危险的 v4.0.0
+          licenseDriftDanger = true;
+          directTo = "4.0.0 (错误选中 AGPL-3.0 候选!)";
+          directLicense = "MIT -> AGPL-3.0 (强传染违约!)";
+          directTone = "is-conflict";
+          parentTo = "1.9.0 (引入高危新传递依赖!)";
+          parentTone = "is-conflict";
+          parentNote = "4.0.0 携带新增高危 CVE-2026-3099";
+          vulnTo = "旧 KEV 消除，但净增高危 CVE-2026-3099!";
+          vulnTone = "is-conflict";
+          vulnNote = "回归刹车已关闭：触发许可证污染与新 CVE 回归";
+          impactNote = "危险警告：关闭双刹车后，虽然无 API 调用破坏，但已误选 AGPL-3.0 且引入新传递高危漏洞！";
+        } else {
+          vulnTone = "is-safe";
+          vulnNote = "双刹车否决 v4.0.0，收敛至合规热修版 3.4.9-sec";
+        }
+      } else if (preset.id === "targeted-breaking-dual-touchpoint") {
+        if (allowMajorOrOverride) {
+          hits = preset.apiHitCalls.slice();
+          vulnTone = "is-safe";
+          vulnNote = "5.0.2 已拔除 JWT 漏洞，须联动重构 2 处调用";
+        } else {
+          hits = [];
+          vulnTone = "is-conflict";
+          vulnNote = "4.x 分支已停止维护，Act P0 漏洞未修复";
+        }
+      }
+
+      return {
+        directTo,
+        directLicense,
+        parentTo,
+        parentNote,
+        vulnTo,
+        vulnNote,
+        directTone,
+        parentTone,
+        vulnTone,
+        hits,
+        impactNote,
+        licenseDriftDanger,
+      };
+    }
+
     function evaluateSolver(preset) {
       const s = state.strategy;
 
@@ -153,7 +251,7 @@
         desc:
           preset.id === "maven-override-bomb"
             ? "直接对底层 netty-codec-http 发单包升级 PR，无法通过或撕裂中间依赖 ABI。"
-            : "机械把最新补丁号塞进 PR 队列，既不聚合顶层依赖，也不区分 18 处破坏变更是否真被业务调用。",
+            : `机械把最新补丁号塞进 PR 队列，既不聚合顶层依赖，也不区分 ${preset.apiDiffTotal} 处破坏变更是否真被业务调用。`,
       };
 
       // 反例 B：纯 SemVer 规则引擎（Major 一刀切禁止）
@@ -181,40 +279,22 @@
         };
       }
 
-      // 推荐：第三代 Guided Remediation 求解器
+      // 推荐：第三代 Guided Remediation 求解器（四个预设各自独立分支，严禁串台）
       let thirdGen;
-      if (preset.id === "maven-override-bomb" && s === "override") {
-        thirdGen = {
-          tone: state.useCallGraphDiff ? "is-bad" : "is-warn",
-          verdict: state.useCallGraphDiff ? "拦截 Override 炸弹！建议改走 Relock" : "危险放行（未开调用图契约检查）",
-          meta: "Override 破坏中间父包 reactor-netty ABI",
-          desc: state.useCallGraphDiff
-            ? "L4 契约检查发现强制 override 会导致中间父包抛出 NoSuchMethodError，求解器拒绝覆写并推荐改用 relock 升级顶层 grpc-netty。"
-            : "当前关闭了调用图 API Diff 检查，强制 override 虽表面改了 pom.xml，线上极易触发运行期方法缺失崩溃！",
-        };
-      } else if (preset.id === "license-and-cve-regression") {
-        if (state.useRegressionBrake) {
-          thirdGen = {
-            tone: "is-ok",
-            verdict: "双刹车生效 · 选出 3.4.9-sec 合规解",
-            meta: "否决 AGPL-3.0 与新 CVE 候选 v4.0.0",
-            desc: "回归护栏在求解阶段直接剔除协议传染与新引入高危路径的 v4.0.0，收敛至 MIT 授权且零新增 CVE 的最小热修方案。",
-          };
-        } else {
-          thirdGen = {
-            tone: "is-bad",
-            verdict: "高危失守！未拦截 AGPL-3.0 漂移",
-            meta: "合规刹车已关闭 · 可能污染闭源/业务仓",
-            desc: "未启用许可证与新 CVE 回归校验，求解器贪心选中了 v4.0.0，把强传染性 AGPL-3.0 依赖带入主干！",
-          };
-        }
-      } else if (preset.id === "safe-major-ochoa") {
+      if (preset.id === "safe-major-ochoa") {
         if (s === "in-place" || s === "relock-minor") {
           thirdGen = {
             tone: "is-warn",
             verdict: "策略过窄 · 仍遗留 2 条可达 CVE",
             meta: `当前策略 ${s} 无法跨出 2.x 分支`,
             desc: "受限于当前策略边界，仅修补了 1 条漏洞；切换至 relock (允许 Major) 并配合调用图交集即可实现零破坏全消。",
+          };
+        } else if (s === "override") {
+          thirdGen = {
+            tone: "is-warn",
+            verdict: "直连依赖不应使用 Override",
+            meta: "请改用 relock (允许 Major)",
+            desc: "jackson-databind 为顶层直接依赖，应直接修改其依赖声明并用调用图交集证明 3.0.4 零破坏。",
           };
         } else {
           thirdGen = {
@@ -224,6 +304,47 @@
             desc: state.useCallGraphDiff
               ? "依托 Ochoa 等人实证规律与字节码 API Diff 交集证明，3.0.4 对本仓库零破坏，直接生成带调用图证明的安全 PR。"
               : "未开启调用图交集检查，研发面对 Major PR 不敢合并，极易被长期搁置。",
+          };
+        }
+      } else if (preset.id === "maven-override-bomb") {
+        if (s === "override") {
+          thirdGen = {
+            tone: state.useCallGraphDiff ? "is-bad" : "is-warn",
+            verdict: state.useCallGraphDiff ? "拦截 Override 炸弹！建议改走 Relock" : "危险放行（未开调用图契约检查）",
+            meta: "Override 破坏中间父包 reactor-netty ABI",
+            desc: state.useCallGraphDiff
+              ? "L4 契约检查发现强制 override 会导致中间父包抛出 NoSuchMethodError，求解器拒绝覆写并推荐改用 relock 升级顶层 grpc-netty。"
+              : "当前关闭了调用图 API Diff 检查，强制 override 虽表面改了 pom.xml，线上极易触发运行期方法缺失崩溃！",
+          };
+        } else if (s === "in-place" || s === "relock-minor") {
+          thirdGen = {
+            tone: "is-warn",
+            verdict: "父包仍卡在旧区间 · KEV 未彻底拔除",
+            meta: `策略 ${s} 无法将父包拉升至 1.66.0`,
+            desc: "虽未撕裂中间父依赖 ABI，但 4.1.108.Final 仍未修复该 KEV；切换至 relock (允许 Major) 可安全同步升级父包。",
+          };
+        } else {
+          thirdGen = {
+            tone: "is-ok",
+            verdict: "Relock 顶层父包成功 · 0 冲突拔除 KEV",
+            meta: "grpc-netty 1.66.0 同源拉起兼容 Netty",
+            desc: "通过升级顶层直连父依赖，中间父包 reactor-netty 与底层 netty-codec-http 保持完全同源一致，零签名撕裂。",
+          };
+        }
+      } else if (preset.id === "license-and-cve-regression") {
+        if (!state.useRegressionBrake && (s === "relock-major" || s === "override")) {
+          thirdGen = {
+            tone: "is-bad",
+            verdict: "高危失守！未拦截 AGPL-3.0 与新 CVE",
+            meta: "合规刹车已关闭 · 误选 v4.0.0",
+            desc: "未启用许可证与新 CVE 回归校验，求解器贪心选中了 v4.0.0，把强传染性 AGPL-3.0 与新传递高危带入主干！",
+          };
+        } else {
+          thirdGen = {
+            tone: "is-ok",
+            verdict: "双刹车生效 · 选出 3.4.9-sec 合规解",
+            meta: "否决 AGPL-3.0 与新 CVE 候选 v4.0.0",
+            desc: "回归护栏在求解阶段直接剔除协议传染与新引入高危路径的 v4.0.0，收敛至 MIT 授权且零新增 CVE 的最小热修方案。",
           };
         }
       } else {
@@ -250,12 +371,24 @@
       return { legacyBot, semverRes, thirdGen };
     }
 
-    function buildPayloadText(preset) {
+    function buildPayloadText(preset, impact) {
+      const s = state.strategy;
+      const isMinorOrInPlace = s === "in-place" || s === "relock-minor";
+
       if (state.payloadMode === "pr") {
         if (preset.id === "safe-major-ochoa") {
+          if (isMinorOrInPlace) {
+            return [
+              `# [SCA Guided Remediation] 保守区间升级（未彻底拔除全部漏洞）`,
+              `strategy: ${s} | target: jackson-databind 2.14.3 -> 2.17.2`,
+              "",
+              "- 当前受限于未放开 Major，仅消除 1 条漏洞，仍遗留 2 条可达高危 CVE！",
+              "- 建议：切换为 `relock (允许 Major)` 并附带 0-Breaking 调用图证明升至 3.0.4。",
+            ].join("\n");
+          }
           return [
             `# [SCA Guided Remediation] Safe Major 升级：${preset.nodes.direct.name} 2.14.3 -> 3.0.4`,
-            `strategy: ${state.strategy} | regression_brake: ${state.useRegressionBrake} | callgraph_intersection: ${state.useCallGraphDiff}`,
+            `strategy: ${s} | regression_brake: ${state.useRegressionBrake} | callgraph_intersection: ${state.useCallGraphDiff}`,
             "",
             "## 1. 安全收益（来自 L3/L4 优先级队列）",
             "- 一次性拔除 3 条可达漏洞：CVE-2025-1042, CVE-2025-1089, CVE-2025-1102",
@@ -268,40 +401,61 @@
               : "- [警告] 未启用调用图 API Diff 交集校验，建议人工核对 3.0.4 Release Notes。",
           ].join("\n");
         }
+
         if (preset.id === "maven-override-bomb") {
+          if (s === "override") {
+            return [
+              `# [pom.xml 风险预警] 策略：OVERRIDE (破坏中间父包 ABI!)`,
+              "--- a/pom.xml  (Danger: 强行 Override 传递依赖破坏中间层契约)",
+              "+++ b/pom.xml",
+              " <dependencyManagement><dependencies>",
+              "+  <dependency>",
+              "+    <groupId>io.netty</groupId><artifactId>netty-codec-http</artifactId>",
+              "+    <version>4.2.0.Final</version> <!-- 冲突：reactor-netty-http 1.1.12 调用的旧构造函数已删除！-->",
+              "+  </dependency>",
+            ].join("\n");
+          }
+          if (isMinorOrInPlace) {
+            return [
+              `# [pom.xml 提示] 策略：${s}（未能升级到修复 KEV 的父包区间）`,
+              "当前版本：grpc-netty-shaded-client 1.58.0 -> 1.61.1",
+              "状态：中间父包无 ABI 冲突，但 netty-codec-http 4.1.108.Final 仍受 KEV 影响。",
+              "建议：切至 relock (允许 Major) 同步升至 1.66.0。",
+            ].join("\n");
+          }
           return [
-            `# [pom.xml 最小修复 Diff] 策略对比：${state.strategy === "override" ? "OVERRIDE (高风险冲突!)" : "RELOCK 顶层父依赖 (推荐)"}`,
-            state.strategy === "override"
-              ? [
-                  "--- a/pom.xml  (Danger: 强行 Override 传递依赖破坏中间层契约)",
-                  "+++ b/pom.xml",
-                  " <dependencyManagement><dependencies>",
-                  "+  <dependency>",
-                  "+    <groupId>io.netty</groupId><artifactId>netty-codec-http</artifactId>",
-                  "+    <version>4.2.0.Final</version> <!-- 冲突：reactor-netty-http 1.1.12 调用的旧构造函数已删除！-->",
-                  "+  </dependency>",
-                ].join("\n")
-              : [
-                  "--- a/pom.xml  (Safe Relock: 同步升级顶层直连父包)",
-                  "+++ b/pom.xml",
-                  " <dependency>",
-                  "   <groupId>io.grpc</groupId><artifactId>grpc-netty-shaded-client</artifactId>",
-                  "-  <version>1.58.0</version>",
-                  "+  <version>1.66.0</version> <!-- 自动同源拉起 reactor-netty 1.2.0 + netty 4.1.115.Final -->",
-                  " </dependency>",
-                ].join("\n"),
+            `# [pom.xml 最小修复 Diff] 策略：RELOCK 顶层父依赖 (推荐安全方案)`,
+            "--- a/pom.xml  (Safe Relock: 同步升级顶层直连父包)",
+            "+++ b/pom.xml",
+            " <dependency>",
+            "   <groupId>io.grpc</groupId><artifactId>grpc-netty-shaded-client</artifactId>",
+            "-  <version>1.58.0</version>",
+            "+  <version>1.66.0</version> <!-- 自动同源拉起 reactor-netty 1.2.0 + netty 4.1.115.Final -->",
+            " </dependency>",
           ].join("\n");
         }
+
         if (preset.id === "license-and-cve-regression") {
           return [
             `# [Solver 决策日志] 双重回归刹车（License Gate + New-CVE Gate）`,
             `候选版本 1: pdf-render-core@4.0.0`,
-            state.useRegressionBrake
-              ? `  [REJECTED] 触发许可证红线：MIT -> AGPL-3.0\n  [REJECTED] 触发新 CVE 回归：引入传递高危 CVE-2026-3099`
-              : `  [ACCEPTED - DANGEROUS!] 刹车已关闭，错误选中 AGPL-3.0 版本！`,
+            impact.licenseDriftDanger
+              ? `  [ACCEPTED - DANGEROUS!] 刹车已关闭且允许 Major，错误选中 AGPL-3.0 + 新 CVE-2026-3099！`
+              : `  [REJECTED] 触发许可证红线：MIT -> AGPL-3.0\n  [REJECTED] 触发新 CVE 回归：引入传递高危 CVE-2026-3099`,
             "",
             `候选版本 2: pdf-render-core@3.4.9-sec`,
-            `  [ELECTED]  消除原 KEV CVE-2026-2201 | 许可维持 MIT | 新增高危 = 0`,
+            impact.licenseDriftDanger
+              ? `  [SKIPPED] 未开启回归刹车，候选 3.4.9-sec 被贪心大版本跳过！`
+              : `  [ELECTED]  消除原 KEV CVE-2026-2201 | 许可维持 MIT | 新增高危 = 0`,
+          ].join("\n");
+        }
+
+        // targeted-breaking-dual-touchpoint
+        if (isMinorOrInPlace) {
+          return [
+            `# [Solver 状态] 策略 ${s}：auth-token-sdk 4.2.0 -> 4.2.9`,
+            "- 4.x 分支已 EOL（未包含 CVE-2026-1844 修复补丁）。",
+            "- 请切换为 relock (允许 Major) 生成 5.0.2 的 OpenRewrite LST 重构配方与 Agent MCP 指令。",
           ].join("\n");
         }
         return [
@@ -317,44 +471,46 @@
           `      methodPattern: com.auth.JwtParser parseClaims(java.lang.String)`,
           `      newMethodName: parseSignedClaims`,
           "",
-          `# 精确调用点命中清单 (L4 Call Graph ∩ API Diff = 2 hits):`,
-          `#   1) src/main/java/com/app/OrderService.java:142`,
-          `#   2) src/main/java/com/app/AuthFilter.java:88`,
+          state.useCallGraphDiff
+            ? `# 精确调用点命中清单 (L4 Call Graph ∩ API Diff = 2 hits):\n#   1) src/main/java/com/app/OrderService.java:142\n#   2) src/main/java/com/app/AuthFilter.java:88`
+            : `# [警告] 调用图交集已关闭，未扫描第一方受影响代码行！`,
         ].join("\n");
       }
 
-      // AI Coding Agent MCP JSON 载荷
+      // AI Coding Agent MCP JSON 载荷（完全与当前状态同步）
       const mcpObj = {
         jsonrpc: "2.0",
         tool: "sca_plan_remediation",
         result: {
           preset: preset.id,
-          selected_strategy: state.strategy,
+          selected_strategy: s,
           target_direct_dependency: preset.nodes.direct.name,
-          recommended_version:
-            state.strategy === "in-place" || state.strategy === "relock-minor"
-              ? preset.nodes.direct.minorTo
-              : preset.nodes.direct.safeTo,
+          recommended_version: impact.directTo,
           regression_gates: {
             license_gate_enabled: state.useRegressionBrake,
-            license_transition: preset.licenseShift,
-            new_cve_check: preset.newCveCheck,
+            license_transition: impact.licenseDriftDanger ? "MIT -> AGPL-3.0 (DANGER!)" : preset.licenseShift,
+            new_cve_check: impact.licenseDriftDanger ? "NEW HIGH CVE-2026-3099 INTRODUCED!" : preset.newCveCheck,
           },
           callgraph_impact: {
             enabled: state.useCallGraphDiff,
             library_breaking_symbols: preset.apiDiffTotal,
-            reachable_breaking_sites: state.useCallGraphDiff ? preset.apiHitCalls : ["未扫描（调用图交集已关闭）"],
+            reachable_breaking_sites: state.useCallGraphDiff ? impact.hits : ["未扫描（调用图交集已关闭）"],
           },
           agent_next_actions:
-            preset.apiHitCalls.length > 0 && state.useCallGraphDiff
-              ? [
-                  "1. 在沙箱工作区应用依赖版本变更并更新 lockfile",
-                  "2. 按 reachable_breaking_sites 精准重构受影响调用行",
-                  "3. 运行受影响模块单元测试通过后，再向人类提交绿灯 PR",
-                ]
+            impact.hits.length > 0 && state.useCallGraphDiff
+              ? preset.id === "maven-override-bomb"
+                ? [
+                    "1. 驳回 override 方案（检测到中间父包 NoSuchMethodError）",
+                    "2. 改为调用 relock 升级顶层直接父依赖 grpc-netty-shaded-client 至 1.66.0",
+                  ]
+                : [
+                    "1. 在沙箱工作区应用依赖版本变更并更新 lockfile",
+                    "2. 按 reachable_breaking_sites 精准重构受影响调用行",
+                    "3. 运行受影响模块单元测试通过后，再向人类提交绿灯 PR",
+                  ]
               : [
                   "1. 更新 manifest/lockfile 并验证哈希一致性",
-                  "2. 附上 0-breaking 调用图证明签发自动化 PR",
+                  "2. 附上调用图影响证明与回归刹车检查结果签发 PR",
                 ],
         },
       };
@@ -363,11 +519,9 @@
 
     function renderSolverTab() {
       const preset = getCurrentPreset();
+      const impact = getActiveImpact(preset);
       const res = evaluateSolver(preset);
-      const payload = buildPayloadText(preset);
-
-      const useMinorOnly = state.strategy === "in-place" || state.strategy === "relock-minor";
-      const overrideDanger = preset.id === "maven-override-bomb" && state.strategy === "override";
+      const payload = buildPayloadText(preset, impact);
 
       return `
         <div class="grl-preset-bar">
@@ -458,25 +612,25 @@
             </div>
 
             <div class="grl-graph-grid">
-              <div class="grl-dep-node ${overrideDanger ? "is-conflict" : "is-upgraded"}">
+              <div class="grl-dep-node ${impact.directTone}">
                 <div class="grl-dep-role">1. 顶层直接依赖 (Direct)</div>
                 <div class="grl-dep-name">${escapeHtml(preset.nodes.direct.name)}</div>
-                <div class="grl-dep-ver">${escapeHtml(preset.nodes.direct.from)} &rarr; <strong>${escapeHtml(useMinorOnly ? preset.nodes.direct.minorTo : preset.nodes.direct.safeTo)}</strong></div>
-                <div class="grl-dep-note">License: ${escapeHtml(preset.nodes.direct.license)}</div>
+                <div class="grl-dep-ver">${escapeHtml(preset.nodes.direct.from)} &rarr; <strong>${escapeHtml(impact.directTo)}</strong></div>
+                <div class="grl-dep-note">License: ${escapeHtml(impact.directLicense)}</div>
               </div>
 
-              <div class="grl-dep-node ${overrideDanger ? "is-conflict" : "is-safe"}">
+              <div class="grl-dep-node ${impact.parentTone}">
                 <div class="grl-dep-role">2. 中间父依赖 (Transitive Parent)</div>
                 <div class="grl-dep-name">${escapeHtml(preset.nodes.parent.name)}</div>
-                <div class="grl-dep-ver">${escapeHtml(preset.nodes.parent.from)} &rarr; <strong>${escapeHtml(overrideDanger ? "未同步升级（ABI 撕裂!）" : useMinorOnly ? preset.nodes.parent.minorTo : preset.nodes.parent.safeTo)}</strong></div>
-                <div class="grl-dep-note">${escapeHtml(preset.nodes.parent.role)}</div>
+                <div class="grl-dep-ver">${escapeHtml(preset.nodes.parent.from)} &rarr; <strong>${escapeHtml(impact.parentTo)}</strong></div>
+                <div class="grl-dep-note">${escapeHtml(impact.parentNote)}</div>
               </div>
 
-              <div class="grl-dep-node ${useMinorOnly && preset.id !== "license-and-cve-regression" ? "is-conflict" : "is-safe"}">
+              <div class="grl-dep-node ${impact.vulnTone}">
                 <div class="grl-dep-role">3. 目标漏洞状态 (CVE Target)</div>
                 <div class="grl-dep-name">${escapeHtml(preset.nodes.vuln.name)}</div>
-                <div class="grl-dep-ver">${escapeHtml(preset.nodes.vuln.from)} &rarr; <strong>${escapeHtml(useMinorOnly ? preset.nodes.vuln.minorTo : preset.nodes.vuln.safeTo)}</strong></div>
-                <div class="grl-dep-note">${overrideDanger ? "强行 override 引发运行期方法缺失风险" : "随依赖图求解收敛"}</div>
+                <div class="grl-dep-ver">${escapeHtml(preset.nodes.vuln.from)} &rarr; <strong>${escapeHtml(impact.vulnTo)}</strong></div>
+                <div class="grl-dep-note">${escapeHtml(impact.vulnNote)}</div>
               </div>
             </div>
 
@@ -486,16 +640,20 @@
                 <span class="badge ${
                   !state.useCallGraphDiff
                     ? "badge-warn"
-                    : preset.apiHitCalls.length > 0
+                    : impact.hits.length > 0
+                    ? "badge-danger"
+                    : impact.licenseDriftDanger
                     ? "badge-danger"
                     : "badge-ok"
                 }">
                   ${
                     !state.useCallGraphDiff
                       ? "调用图交集未开启（盲升风险）"
-                      : preset.apiHitCalls.length > 0
-                      ? `精准命中 ${preset.apiHitCalls.length} 处真实破坏点`
-                      : "0 处业务调用命中（Safe Upgrade）"
+                      : impact.hits.length > 0
+                      ? `精准命中 ${impact.hits.length} 处真实破坏点`
+                      : impact.licenseDriftDanger
+                      ? "0 处调用破坏（但触发 AGPL/新 CVE 违规!）"
+                      : "0 处业务调用命中（ABI 兼容）"
                   }
                 </span>
               </div>
@@ -503,11 +661,11 @@
                 ${
                   !state.useCallGraphDiff
                     ? `<div class="grl-impact-item">未开启调用图交集：只能看到库级存在 ${preset.apiDiffTotal} 处 Breaking Changes，无法判断本仓库是否真调用到这些符号。</div>`
-                    : preset.apiHitCalls.length > 0
-                    ? preset.apiHitCalls
+                    : impact.hits.length > 0
+                    ? impact.hits
                         .map((hit) => `<div class="grl-impact-item is-hit">HIT: ${escapeHtml(hit)}</div>`)
                         .join("")
-                    : `<div class="grl-impact-item is-clear">CLEAR: ${escapeHtml(preset.clearNote)}</div>`
+                    : `<div class="grl-impact-item ${impact.licenseDriftDanger ? "is-hit" : "is-clear"}">${impact.licenseDriftDanger ? "ALERT" : "CLEAR"}: ${escapeHtml(impact.impactNote)}</div>`
                 }
               </div>
             </div>
@@ -690,6 +848,8 @@
     }
 
     function renderParetoTab() {
+      const isMajorSpan = state.maxSpan === "major";
+
       return `
         <div class="grl-controls" style="margin-bottom:0.9rem;">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0.85rem;">
@@ -720,9 +880,9 @@
           </div>
 
           <div style="padding-top:0.45rem;border-top:1px dashed var(--rule);">
-            <label class="grl-toggle">
-              <input type="checkbox" data-toggle="safemajor" ${state.allowSafeMajor ? "checked" : ""} />
-              <span>启用 <strong>0-Breaking Safe Major 自动放行</strong>（当 Major 升级与第一方调用图交集为 0 时降低破坏率并提高研发合并意愿）</span>
+            <label class="grl-toggle" style="${isMajorSpan ? "" : "opacity:0.65;"}">
+              <input type="checkbox" data-toggle="safemajor" ${state.allowSafeMajor ? "checked" : ""} ${isMajorSpan ? "" : "disabled"} />
+              <span>启用 <strong>0-Breaking Safe Major 自动放行</strong>（当 Major 升级与第一方调用图交集为 0 时降低破坏率并提高研发合并意愿${isMajorSpan ? "" : " · <em>当前未选「允许 Major」，切换至允许 Major 后生效</em>"}）</span>
             </label>
           </div>
         </div>
