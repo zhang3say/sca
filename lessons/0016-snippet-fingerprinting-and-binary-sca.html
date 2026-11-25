@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0016：开源代码片段同源检测与无源码二进制 SCA 底层原理</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html">Lesson 0015 · 恶意包投毒引擎</a>
+        <a href="./0016-snippet-fingerprinting-and-binary-sca.html" class="active">Lesson 0016 · 代码同源与二进制 SCA</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0016</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 05 第二课（无清单代码同源与黑盒二进制检测）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>开源代码片段同源检测与无源码二进制 SCA 底层原理</h1>
+      <p class="subtitle">此前 15 课的架构依赖一个隐含前提：目标软件至少存在包管理器清单（<code>package.json</code> / <code>pom.xml</code> / <code>go.mod</code>）或编译内嵌元信息（<code>.go.buildinfo</code> / OS <code>dpkg</code> 库）。但在真实商业场景中，客户往往把 <strong>C/C++ 源码直接 Copy-Paste（Vendoring）</strong>、<strong>静态链接进 <code>strip -s</code> 剥离符号的可执行文件</strong>，或者交付一个没有任何源码的黑盒路由器固件与商用 <code>.so</code>/<code>.dll</code>。本课带你设计<strong>Zero-Source-Upload 代码同源指纹与三层二进制特征金字塔</strong>，并严防 SCANOSS（<code>GPL-2.0</code>）与 <code>cve-bin-tool</code>（<code>GPL-3.0</code>）商用红线。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 Type-1~4 代码克隆与 Winnowing（<code>t = w+k-1</code>）数学保证；落地 CENTRIS 嵌套冗余消除与最早提交溯源；掌握 Layer A/B/C 三层二进制特征金字塔（OSSPolice / B2SFinder / Gemini ACFG）；严格切分 LIEF/Binwalk v3/TLSH/Capstone/Ghidra 纯宽松商用栈与 GPL 雷区</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a> · <a href="./0010-oss-license-compliance-and-copyleft-reasoning.html">Lesson 0010</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md）</div>
+      <p>在我们的 <code>MISSION.md</code> 中，C/C++ 无源码二进制逆向与代码片段同源曾被列为统一底座稳定后的专项拓展。进入 Phase 2 后，汽车电子、IoT 固件、基础软件及金融黑盒采购审计客户往往直接卡死在这一关：<strong>“没有 <code>package.json</code>，只有 <code>firmware.bin</code> 和外包给的 <code>libalgo.so</code>，或者研发直接把开源函数复制进业务 C 文件里改了变量名，你们的 SCA 能不能抓出 GPL 传染和老版本 CVE？”</strong> 破解之道在于：不破坏原有 Layer 2 统一 IR，而是为 Layer 1 新增「Snippet Fingerprinter」与「Binary Feature Extractor」，输出带 <code>confidence</code> 置信度的 CycloneDX 1.7 组件证据。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么传统清单与精确哈希对 C/C++ 和 Copy-Paste 完全失明？</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 无清单软件供应链的三大真实盲区</h3>
+      <p>与 npm、Maven、PyPI、Go Modules 等现代生态不同，C/C++ 与嵌入式软件长期处于“碎片化构建 + 手工移植”状态。在商业客户现场，以下三类场景会让纯 Manifest/Lockfile SCA 交出白卷：</p>
+      <ul>
+        <li><strong>① 源码片段级 Copy-Paste（Vendoring / 摘抄复用）：</strong>开发者从 GitHub 复制了一个 120 行的 CRC32 或 JSON 解析函数放进 <code>src/utils/</code>，顺手删掉了顶部版权头，并把变量名全改了一遍——里面可能潜藏 <code>GPL-3.0</code> 传染风险或早已修复的缓冲区溢出漏洞。</li>
+        <li><strong>② 静态链接 + <code>strip -s</code> 剥离符号：</strong>嵌入式或商用 C/C++ 程序习惯将 <code>zlib</code>、<code>libpng</code>、<code>OpenSSL</code> 编译成静态库 <code>.a</code> 合入最终 ELF 可执行文件，再执行 <code>strip --strip-all</code> 抹除 <code>.symtab</code> 与调试符号，连文件边界都被打平。</li>
+        <li><strong>③ 黑盒商用 SDK 与固件镜像：</strong>甲方从外部供应商采购闭源驱动 <code>.so</code> / <code>.dll</code> 或整包嵌入式固件（SquashFS / U-Boot / CramFS），源码根本不可见，必须在不反编译出可读明文的前提下识别其夹带的过期开源组件。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">客户隐私红线：Zero-Source-Upload（源码零上传）</span>
+        商业客户极度抗拒把核心闭源 C/C++ 源码明文上传到你的云端 SaaS 做同源比对。因此现代商业 SCA（参照 Black Duck Protex 与 SCANOSS <code>.wfp</code> 模式）必须采用<strong>「客户端本地单向提取局部哈希指纹 &rarr; 仅上传稀疏哈希集合至云端倒排索引匹配」</strong>架构：指纹不可逆推回原代码，既打消客户保密顾虑，又把网络传输压缩到百 KB 级。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 四级代码克隆光谱（Type-1 ~ Type-4）与检测技术选型</h3>
+      <p>学术界与工业界普遍采用 Roy &amp; Cordy 提出的四级代码克隆模型来衡量同源检测引擎的抗修改能力。架构设计时必须明确每一级克隆应由哪种哈希或图算法承接，切忌企图用单一精确 MD5/SHA256 包打天下：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:26%" />
+          <col style="width:28%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>克隆级别</th>
+            <th>代码修改特征</th>
+            <th>典型工程现身场景</th>
+            <th>对应指纹算法与失效边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Type-1（完全克隆）</strong></td>
+            <td>除空白、缩进与注释外，代码完全相同。</td>
+            <td>直接复制整个文件或未改写的代码块（Vendoring）。</td>
+            <td>去除空白/注释后的 <strong>Winnowing 字符级指纹</strong>即可近 100% 召回。</td>
+          </tr>
+          <tr>
+            <td><strong>Type-2（重命名克隆）</strong></td>
+            <td>结构一致，但修改了变量名、函数名、类型名或常量字面量。</td>
+            <td>外包或研发“洗白式”抄袭开源工具函数，全局替换标识符。</td>
+            <td><strong>Token 归一化（折叠标识符为 <code>ID</code>）+ Winnowing</strong>；纯字符/字节级哈希在此处 0 命中！</td>
+          </tr>
+          <tr>
+            <td><strong>Type-3（增删改克隆）</strong></td>
+            <td>在函数内增删、重排了若干语句（通常改动 10%–30%）。</td>
+            <td>从开源库摘出模块后，裁剪多余分支并补充业务错误处理逻辑。</td>
+            <td><strong>函数级分段 + TLSH 局部敏感哈希</strong>或 <strong>AST 子树特征</strong>；整文件哈希全面失效。</td>
+          </tr>
+          <tr>
+            <td><strong>Type-4（语义克隆）</strong></td>
+            <td>语法与结构完全不同，仅实现等价计算逻辑（如递归改迭代）。</td>
+            <td>手写重新实现或经过编译器高度内联优化后的二进制跨架构函数。</td>
+            <td>源码层极难低误报检索；二进制层依赖 <strong>控制流图嵌入（ACFG / Gemini）</strong> 召回。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>源码片段同源检测：Winnowing、TLSH 与 CENTRIS 嵌套溯源</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 Winnowing 算法：用 $t = w + k - 1$ 数学下界击穿片段漏报</h3>
+      <p>如果把全网开源仓所有文件的每个 <code>k-gram</code> 哈希都存进索引，索引体积会膨胀几十倍。Saul Schleimer、Daniel Wilkerson 与 Alexander Aiken 在 ACM SIGMOD 2003 经典论文 <a href="https://doi.org/10.1145/872757.872770" target="_blank" rel="noopener"><em>Winnowing: Local Algorithms for Document Fingerprinting</em></a>（驱动了著名查重系统 MOSS）中给出了优雅的局部指纹挑选定理：</p>
+      <ol>
+        <li><strong>词法预处理与 k-gram 切片：</strong>先剔除注释和多余空白（若抗 Type-2 则利用 <a href="https://github.com/tree-sitter/tree-sitter" target="_blank" rel="noopener"><code>Tree-sitter</code></a>（<code>MIT</code>）将标识符统一折叠为占位符 <code>ID</code>），再以滑动步长 1 切分长度为 <code>k</code> 的序列并计算滚动哈希（如 CRC32C / FNV-1a）。</li>
+        <li><strong>窗口最右最小值挑选：</strong>设保证检测下界为 <code>t</code> 个字符/Token，定义滑动窗口大小 <code>w = t - k + 1</code>。窗口依次滑过哈希序列，在每个窗口中仅记录<strong>最小哈希值（若并列最小，必选最靠右的那一个）</strong>，且相同位置不重复入库。</li>
+      </ol>
+      <p><strong>核心数学保障：</strong>只要两段代码共享任何长度 $\ge t = w + k - 1$ 的连续片段，该算法在数学上<strong>100% 保证</strong>两者至少选中一个相同的指纹哈希；同时平均每 <code>(w + 1) / 2</code> 个位置才输出一个指纹，将索引存储与查询开销压低一个数量级。工程上 SCANOSS <code>.wfp</code> 协议选用 <code>gram = 30 字节</code>、<code>CRC32C</code> 与 <code>window = 64</code> 作为默认参数，即是对索引体积与片段灵敏度的经典权衡。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">警惕“全网克隆污染”与归属倒置（CENTRIS 核心洞察）</span>
+        建一个全网开源指纹库后，新手立刻会遇到灾难性现象：当客户源码里包含了一段 <code>zlib</code> 函数，扫描器竟然一次性报出 <strong>400 个不同开源项目</strong>（因为这些项目当年都拷过 <code>zlib</code>）！更糟的是，如果某个热门框架（2019 年）也拷过 <code>zlib</code>（1995 年），扫描器往往把源头误归属成热门框架，或者把 A 和 B 同时报成嵌套重复依赖。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.2 攻克 Type-3 魔改与嵌套拷贝：TLSH 局部敏感哈希 + CENTRIS 架构</h3>
+      <p>为了既容忍 10%–30% 的代码改写，又解决上述“400 个仓同时误报与归属倒置”，我们借鉴 <a href="https://doi.org/10.1109/ICSE43902.2021.00083" target="_blank" rel="noopener"><strong>CENTRIS（ICSE 2021）</strong></a>（<a href="https://github.com/WOOSEUNGHOON/Centris-public" target="_blank" rel="noopener"><code>Centris-public</code></a>）与 Trend Micro 开源的 <a href="https://github.com/trendmicro/tlsh" target="_blank" rel="noopener"><strong>TLSH</strong></a>（<code>Apache-2.0 OR BSD-3-Clause</code> 双宽松许可）设计三步精准溯源引擎：</p>
+      <ul>
+        <li><strong>① 函数级分段 + TLSH 模糊哈希：</strong>传统加密哈希（SHA256）对 1 个字节改动也会雪崩失效；而 <strong>TLSH（Trend Micro Locality Sensitive Hash）</strong> 会生成固定长度的局部敏感指纹，允许直接计算两个函数体之间的<strong>距离分（Distance Score &le; 30–50 判定为高度同源）</strong>，天然抵抗 Type-3 删改与少量插入。</li>
+        <li><strong>② 跨仓库冗余消除（Redundancy Elimination）：</strong>在构建云端索引库前，按开源组件间的历史复用图剥离每个项目内部“拷贝自上游”的共享函数指纹，仅保留该组件<strong>独有特征函数（Unique Functions）</strong>用于主索引匹配。</li>
+        <li><strong>③ 最早诞生时间溯源（Birth-Time Attribution）：</strong>当多仓共享同一函数时，按 Git Commit 最早首次出现时间戳确立<strong>唯一源头组件（Original Owner）</strong>，彻底杜绝把“下游拷贝者”错认成“上游原作者”，从而正确判定 CVE 与 GPL 许可证归属。</li>
+      </ul>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>无源码二进制 SCA：三层特征金字塔与商用许可排雷</h2>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 无源码二进制与嵌入式固件 SCA 三层特征金字塔管线</strong>
+        <span>按算力代价由低到高逐层收敛（毫秒符号 &rarr; 秒级字符串 TF-IDF &rarr; 按需 Tier 3 ACFG 控制流向量），统一投影至 Layer 2 IR</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">制品解析与固件递归解包入口（Artifact &amp; Firmware Unpacker）</span>
+            <span class="orch-stage-kicker">LIEF (Apache-2.0) · Binwalk v3 (MIT) · Go debug/elf / pe / macho (BSD-3)</span>
+          </div>
+          <p class="orch-stage-desc">
+            处理独立 ELF / PE / Mach-O、静态链接可执行文件及嵌入式固件镜像（SquashFS/JFFS2/CramFS），自动提取各架构节区（<code>.rodata</code> / <code>.dynsym</code> / <code>.text</code>）与元数据。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 三层特征金字塔逐级过滤（前两层满足 90%+ 常规与 stripped 二进制高速收敛） &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Layer A（毫秒级）&amp; Layer B（秒级）：符号、字符串 IDF 与常量</span>
+              <span class="badge badge-ok">零反编译 · 极速主力</span>
+            </div>
+            <ul>
+              <li><strong>Layer A（未剥离/元数据）：</strong>读取 <code>.dynsym</code> 导出函数、版本横幅正则（如 <code>OpenSSL 1.1.1k</code>）、Go <code>.go.buildinfo</code> 与 Rust <code>.dep-v0</code>。</li>
+              <li><strong>Layer B（穿透 <code>strip -s</code>）：</strong>借鉴 <strong>OSSPolice (CCS 2017)</strong> 与 <strong>B2SFinder (ASE 2019)</strong>，从 <code>.rodata</code> 提取高 IDF 唯一报错字符串（过滤 <code>"error"</code> 等停用串）与密码/压缩魔数常量表（AES S-Box / CRC32 多项式），直接锁定静态编入库及近似版本。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Layer C（异步 Tier 3）：跨架构控制流图嵌入（ACFG）</span>
+              <span class="badge badge-warn">按需触发 · 沙箱隔离</span>
+            </div>
+            <ul>
+              <li><strong>触发条件：</strong>仅当制品被 <code>strip</code> 且字符串遭裁剪/XOR 混淆、同时 Layer A/B 置信度低于阈值时按需启动。</li>
+              <li><strong>技术栈：</strong>使用 <strong>Capstone（<code>BSD-3</code>）</strong> 与 <strong>Ghidra Headless（<code>Apache-2.0</code>）</strong> 抬升为架构无关 P-Code，构建属性控制流图（ACFG，参考 <strong>Gemini, CCS 2017</strong>），在 x86/ARM/MIPS 间召回已知脆弱函数。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 附带置信度投影至统一组件图谱（Layer 2 IR &amp; CycloneDX 1.7） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Layer 2 统一 IR 投影与 CycloneDX 1.7 证据声明（Confidence Evidence）</span>
+            <span class="orch-stage-kicker">evidence.identity.confidence · evidence.occurrences · 联动 L3 CVE/许可匹配</span>
+          </div>
+          <p class="orch-stage-desc">
+            二进制与同源匹配存在天然不确定性（例如字符串区间无法区分相邻 Patch 版本），<strong>严禁假装 100% 精确！</strong>必须在 IR 与 CycloneDX 1.7 <code>evidence.identity</code> 中显式写入 <code>confidence</code>（如 <code>0.86</code>）、<code>technique</code> 及候选版本区间，供 Layer 3/4 与人类审计员做风险权重折算。
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 Go 核心原语：Winnowing 局部指纹与二进制高 IDF 字符串评分器</h3>
+      <p>无论是源码片段的 <code>Zero-Source-Upload</code> 本地指纹提取，还是穿透 <code>strip -s</code> 的字符串 TF-IDF 加权匹配，核心算法都极其干净，完全适合用 <strong>Pure Go 自研落地</strong>（无需引入任何 GPL C/Python 扫描器依赖）：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">字符串指纹库为什么必须用 IDF 加权？</span>
+        假设你在某个静态链接的 ELF 里提取出字符串 <code>"failed"</code> 或 <code>"out of memory"</code>，它在全网 50,000 个开源库里都出现过（文档频率 DF 极高，<strong>逆文档频率 IDF &approx; 0</strong>），匹配它只会制造海量误报；而像 zlib 独有的报错串 <code>"invalid literal/lengths set"</code> 只在极少数版本家族中出现（<strong>IDF 极高</strong>），一旦在 <code>.rodata</code> 中同时命中 5–8 个高 IDF 特征串，即可实现 94%+ 置信度的精确组件定位。
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：Winnowing 本地指纹提取与二进制字符串 TF-IDF 归属评分</strong>
+        <span>Pure Go 自研 L1 特征提取核心（Zero-Source-Upload &amp; 穿透 strip -s）</span>
+      </div>
+      <pre><code><span class="tok-cmt">// 1. Schleimer Winnowing：在每个滑动窗口 w 中取最右最小哈希，保证检出任意 >= (w+k-1) 共享切片</span>
+<span class="tok-kw">func</span> WinnowingFingerprints(tokens []<span class="tok-kw">string</span>, k, w <span class="tok-kw">int</span>) []<span class="tok-kw">uint32</span> {
+    <span class="tok-kw">if</span> k &lt;= <span class="tok-num">0</span> || w &lt;= <span class="tok-num">0</span> || <span class="tok-kw">len</span>(tokens) &lt; k {
+        <span class="tok-kw">return</span> <span class="tok-kw">nil</span>
+    }
+    hashes := <span class="tok-kw">make</span>([]<span class="tok-kw">uint32</span>, <span class="tok-num">0</span>, <span class="tok-kw">len</span>(tokens)-k+<span class="tok-num">1</span>)
+    <span class="tok-kw">for</span> i := <span class="tok-num">0</span>; i &lt;= <span class="tok-kw">len</span>(tokens)-k; i++ {
+        h := fnv32a(strings.Join(tokens[i:i+k], <span class="tok-str">" "</span>))
+        hashes = <span class="tok-kw">append</span>(hashes, h)
+    }
+    <span class="tok-kw">if</span> <span class="tok-kw">len</span>(hashes) &lt;= w {
+        minIdx := <span class="tok-num">0</span>
+        <span class="tok-kw">for</span> i := <span class="tok-num">1</span>; i &lt; <span class="tok-kw">len</span>(hashes); i++ {
+            <span class="tok-kw">if</span> hashes[i] &lt;= hashes[minIdx] { minIdx = i }
+        }
+        <span class="tok-kw">return</span> []<span class="tok-kw">uint32</span>{hashes[minIdx]}
+    }
+
+    <span class="tok-kw">var</span> out []<span class="tok-kw">uint32</span>
+    lastPos := -<span class="tok-num">1</span>
+    <span class="tok-kw">for</span> start := <span class="tok-num">0</span>; start &lt;= <span class="tok-kw">len</span>(hashes)-w; start++ {
+        minIdx := start
+        <span class="tok-kw">for</span> j := start + <span class="tok-num">1</span>; j &lt; start+w; j++ {
+            <span class="tok-kw">if</span> hashes[j] &lt;= hashes[minIdx] { <span class="tok-cmt">// 并列最小时选最右，保证局部性</span>
+                minIdx = j
+            }
+        }
+        <span class="tok-kw">if</span> minIdx != lastPos {
+            lastPos = minIdx
+            out = <span class="tok-kw">append</span>(out, hashes[minIdx])
+        }
+    }
+    <span class="tok-kw">return</span> out
+}
+
+<span class="tok-cmt">// 2. 二进制 .rodata 字符串 IDF 倒排索引加权匹配（对齐 OSSPolice / B2SFinder）</span>
+<span class="tok-kw">type</span> BinaryMatchCandidate <span class="tok-kw">struct</span> {
+    ComponentPURL <span class="tok-kw">string</span>
+    WeightedScore <span class="tok-kw">float64</span>
+    MatchedCount  <span class="tok-kw">int</span>
+    Confidence    <span class="tok-kw">float64</span>
+}
+
+<span class="tok-kw">func</span> ScoreBinaryStrings(extracted []<span class="tok-kw">string</span>, idfTable <span class="tok-kw">map</span>[<span class="tok-kw">string</span>]<span class="tok-kw">float64</span>, inverted <span class="tok-kw">map</span>[<span class="tok-kw">string</span>][]<span class="tok-kw">string</span>, libTotalIDF <span class="tok-kw">map</span>[<span class="tok-kw">string</span>]<span class="tok-kw">float64</span>) []BinaryMatchCandidate {
+    scores := <span class="tok-kw">make</span>(<span class="tok-kw">map</span>[<span class="tok-kw">string</span>]<span class="tok-kw">float64</span>)
+    hits := <span class="tok-kw">make</span>(<span class="tok-kw">map</span>[<span class="tok-kw">string</span>]<span class="tok-kw">int</span>)
+    <span class="tok-kw">for</span> _, s := <span class="tok-kw">range</span> dedup(extracted) {
+        idf := idfTable[s]
+        <span class="tok-kw">if</span> idf &lt; <span class="tok-num">4.5</span> { <span class="tok-cmt">// 过滤掉 "error" / "success" 等全网低区分度停用字符串</span>
+            <span class="tok-kw">continue</span>
+        }
+        <span class="tok-kw">for</span> _, purl := <span class="tok-kw">range</span> inverted[s] {
+            scores[purl] += idf
+            hits[purl]++
+        }
+    }
+
+    <span class="tok-kw">var</span> results []BinaryMatchCandidate
+    <span class="tok-kw">for</span> purl, sc := <span class="tok-kw">range</span> scores {
+        conf := math.Min(<span class="tok-num">0.98</span>, sc/math.Max(<span class="tok-num">1.0</span>, libTotalIDF[purl]))
+        <span class="tok-kw">if</span> hits[purl] &gt;= <span class="tok-num">3</span> &amp;&amp; conf &gt;= <span class="tok-num">0.45</span> {
+            results = <span class="tok-kw">append</span>(results, BinaryMatchCandidate{ComponentPURL: purl, WeightedScore: sc, MatchedCount: hits[purl], Confidence: conf})
+        }
+    }
+    <span class="tok-kw">return</span> results
+}</code></pre>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 同源与二进制 SCA 开源底座排雷矩阵（严守商用闭源 GPL 红线！）</h3>
+      <p>代码同源与二进制逆向领域聚集了大量历史悠久的开源项目，但其中不少知名工具恰恰采用 <strong><code>GPL-2.0</code> / <code>GPL-3.0</code> / <code>LGPL-3.0</code></strong> 强传染性协议！选型时必须用手术刀级精度划分“可嵌入底座”与“严禁嵌入黑名单”：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:23%" />
+          <col style="width:18%" />
+          <col style="width:29%" />
+          <col style="width:30%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源项目 / 底座</th>
+            <th>精确许可证</th>
+            <th>核心工程能力</th>
+            <th>商业闭源架构边界与选型建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/lief-project/LIEF" target="_blank" rel="noopener"><code>lief-project/LIEF</code></a> &amp; Go <code>debug/elf</code></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span> / <code>BSD-3</code></td>
+            <td>跨平台统一解析 ELF / PE / Mach-O 节区、导出/导入表、动态依赖与 <code>.rodata</code> 段。</td>
+            <td><strong>二进制 Layer A/B 首选底座</strong>：Go 原生服务先用标准库 <code>debug/*</code>，跨格式高级特性走 LIEF 隔离 Worker。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/ReFirmLabs/binwalk" target="_blank" rel="noopener"><code>ReFirmLabs/binwalk</code></a> (v3 Rust 重写)</strong></td>
+            <td><span class="badge badge-ok">MIT</span></td>
+            <td>高速嵌入式固件熵分析与文件签名递归解包（SquashFS、U-Boot、LZMA 等）。</td>
+            <td><strong>固件解包首选</strong>：v3 已全面重授权并重写为纯 Rust <code>MIT</code>，须跑在无特权沙箱内防止畸形固件 Zip/SquashFS 炸弹。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/trendmicro/tlsh" target="_blank" rel="noopener"><code>trendmicro/tlsh</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0 OR BSD-3-Clause</span></td>
+            <td>高鲁棒性局部敏感哈希（LSH），函数体删改 10%–30% 仍可通过距离阈值高效召回。</td>
+            <td><strong>Type-3 函数同源核心组件</strong>：双宽松许可，可安心嵌入客户端指纹提取器与云端指纹库。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/capstone-engine/capstone" target="_blank" rel="noopener"><code>capstone</code></a> &amp; <a href="https://github.com/NationalSecurityAgency/ghidra" target="_blank" rel="noopener"><code>ghidra</code></a></strong></td>
+            <td><code>BSD-3-Clause</code> / <span class="badge badge-ok">Apache-2.0</span></td>
+            <td>多架构反汇编框架（x86/ARM/MIPS/RISC-V）与企业级 Headless 反编译/P-Code CFG 提取。</td>
+            <td><strong>Layer C 控制流图首选</strong>：纯宽松商用许可；Ghidra Headless 重资源，严禁进前端热路径，必须进异步 Tier 3 队列。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/scanoss/engine" target="_blank" rel="noopener"><code>scanoss/wfp</code></a> &amp; <a href="https://github.com/scanoss/engine" target="_blank" rel="noopener"><code>scanoss/engine</code></a></strong></td>
+            <td><span class="badge badge-danger">GPL-2.0</span></td>
+            <td>基于 Winnowing（30-byte CRC32C）的知名开源代码片段指纹提取器与匹配服务引擎。</td>
+            <td><strong>严禁直接嵌入或打包分发！</strong><code>GPL-2.0</code> 强传染；仅可学习其 Winnowing 算法与 <code>.wfp</code> 协议思想，用自研 Pure Go + <code>Tree-sitter (MIT)</code> 独立实现。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/ossf/cve-bin-tool" target="_blank" rel="noopener"><code>ossf/cve-bin-tool</code></a>（原 Intel）&amp; <a href="https://github.com/radareorg/radare2" target="_blank" rel="noopener"><code>radare2</code></a></strong></td>
+            <td><span class="badge badge-danger">GPL-3.0-or-later</span> / <span class="badge badge-warn">LGPL-3.0</span></td>
+            <td><code>cve-bin-tool</code> 内置大量二进制版本签名匹配器；<code>radare2</code> 为逆向分析框架。</td>
+            <td><strong>严禁嵌入闭源内核！</strong><code>cve-bin-tool</code> 采用强传染 <code>GPL-3.0</code>；二进制逆向请选用纯 <code>Apache-2.0 / BSD-3</code> 的 <code>LIEF + Capstone + Ghidra</code> 组合替代 <code>radare2</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大实战场景（未剥离 <code>libcrypto.so</code>、<code>strip -s</code> 静态链接 <code>zlib</code>、嵌套魔改 CENTRIS 场景、MIPS 混淆固件），实时开关 Layer B（TF-IDF 字符串）、CENTRIS 嵌套剪枝与 Layer C（ACFG 控制流），观察检测结果与 CycloneDX 1.7 <code>confidence</code> 证据联动变化；在<strong>模式二</strong>中编辑 C 代码并调节 <code>k</code>/<code>w</code> 与 Type-2 Token 折叠开关，亲眼验证 Winnowing 对重命名和部分修改的抵抗力。</p>
+    </div>
+
+    <!-- INTERACTIVE SNIPPET & BINARY SCA LAB -->
+    <section class="widget-panel full-width" data-widget="snippet-binary-sca-lab">
+      <script type="application/json" class="snippet-binary-sca-lab-data">
+        {
+          "title": "交互实验台：三层二进制特征金字塔与 Winnowing 同源指纹模拟器",
+          "intro": "对比传统清单扫描、简单符号匹配与三层特征金字塔 + CENTRIS 架构，并实时演练 Winnowing 局部指纹算法。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 1/3 代码同源与无源码二进制 SCA 架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为商业闭源 SCA 平台扩展 C/C++ 代码片段同源检测与黑盒固件/二进制检测模块，需同时满足客户源码保密要求、精度 SLA 与商业许可零红线。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐现代化商业同源与二进制 SCA 架构！你已构建起「Zero-Source-Upload 本地指纹 + CENTRIS 嵌套溯源 + 三层二进制特征金字塔 + 纯宽松商用栈」的硬核闭环。",
+            "warning": "方案可用，但在 {warning} 项上存在全网嵌套误报、Type-2 重命名漏报或算力调度失衡隐患（标黄项），建议按 CENTRIS 剪枝与分层金字塔继续打磨。",
+            "critical": "当前方案踩中 {critical} 处致命雷坑（标红项）：可能触发 GPL-2.0/GPL-3.0 强传染违约、引发客户拒用源码上传、或让 strip -s 二进制全面漏报！"
+          },
+          "modules": [
+            {
+              "name": "客户闭源源码同源检测与隐私交付架构",
+              "layer": "L1 客户端 · 保密与精度",
+              "context": "金融与车企客户严禁明文源码离开内网，但希望检测研发是否 Copy-Paste 了高危或 GPL 开源代码片段。",
+              "options": [
+                {
+                  "label": "客户端 CLI 本地做 Tree-sitter (MIT) Token 折叠 + Winnowing & TLSH 不可逆指纹提取，仅上传单向哈希至云端比对",
+                  "status": "optimal",
+                  "verdictTitle": "Zero-Source-Upload 兼顾绝对源码保密与 Type-1/2/3 抗修改召回",
+                  "feedback": "单向哈希不可逆推回原业务代码，且传输量仅百 KB 级，完美适配 SaaS 与私有化。"
+                },
+                {
+                  "label": "强制客户端把整个 C/C++ 源码仓库打包 ZIP 上传至云端 SaaS 服务器后做全文正则比对",
+                  "status": "critical",
+                  "verdictTitle": "触发大客户安全保密一票否决，且纯明文对比无法抵抗变量重命名与删改",
+                  "feedback": "闭源代码客户几乎不可能允许全量源码出域，必须将指纹化前置到本地执行。"
+                },
+                {
+                  "label": "仅在本地对每个 .c/.cpp 文件计算整文件 SHA256 后与 GitHub 开源仓精确比对",
+                  "status": "warning",
+                  "verdictTitle": "漏报率极高！只要研发复制一段函数、删掉版权头或改一个变量名，SHA256 立刻归零",
+                  "feedback": "片段级 Copy-Paste 必须依靠 Winnowing 与函数级 TLSH。"
+                }
+              ]
+            },
+            {
+              "name": "全网指纹库嵌套复用与源头归属冲突治理",
+              "layer": "L3 指纹库 · 抑制误报",
+              "context": "业务代码复用了一段 zlib 函数，由于全网几百个开源项目也曾拷贝过 zlib，云端直接匹配会一次性报出数百个伪组件。",
+              "options": [
+                {
+                  "label": "采用 CENTRIS 范式：建库阶段剥离嵌套公共函数指纹做冗余消除，并按历史最早 Commit 时间戳归属唯一源头",
+                  "status": "optimal",
+                  "verdictTitle": "彻底根治“一处拷贝引爆几百个假依赖”与“拷贝者反客为主”的业界通病",
+                  "feedback": "准确锁定真正原作者（zlib）及实际发生过修改的宿主（如 libmedia），消除误报风暴。"
+                },
+                {
+                  "label": "按 GitHub Star 数排序，哪个仓库 Star 最多就把这段拷贝代码归属给哪个项目",
+                  "status": "warning",
+                  "verdictTitle": "典型的归属倒置！会把底层的 zlib/libpng 错算成某个高 Star 顶层大框架，导致 CVE 与许可完全错配",
+                  "feedback": "源头归属必须基于时间演化先后（Birth-Time）而非仓库热度。"
+                },
+                {
+                  "label": "不做任何去重与溯源，把索引库命中的所有 400 个仓库名称原封不动全部报给用户",
+                  "status": "critical",
+                  "verdictTitle": "扫描报告彻底不可用，400 倍假阳性噪音会瞬间摧毁用户对平台的信任",
+                  "feedback": "全网代码指纹库的核心壁垒不在爬取源码，而在跨仓库去重与嵌套溯源算法。"
+                }
+              ]
+            },
+            {
+              "name": "剥离符号（strip -s）的静态链接二进制提取策略",
+              "layer": "L1 二进制 · 穿透 strip",
+              "context": "交付物为一个 x86_64 ELF 可执行文件，静态编入了 zlib 与 OpenSSL 并执行过 strip --strip-all 剥离符号表。",
+              "options": [
+                {
+                  "label": "先用 Binwalk v3/LIEF 拆解，再以 .rodata 高 IDF 唯一字符串池 + 魔数常量表（Layer B）穿透定位组件与版本范围",
+                  "status": "optimal",
+                  "verdictTitle": "以极低算力穿透 strip -s 剥离盲区，同时靠高 IDF 阈值避开通用字符串噪音",
+                  "feedback": "即使没有符号表和版本横幅，唯一错误日志串与 CRC32/AES 常量表依然会完整留存在二进制只读段中。"
+                },
+                {
+                  "label": "只解析 ELF 的 .symtab 和 .dynsym 符号表，若表为空则直接判定无第三方开源组件",
+                  "status": "critical",
+                  "verdictTitle": "几乎所有生产级发布版静态 C/C++ 二进制均经 strip 处理，此策略等同于 100% 漏报",
+                  "feedback": "必须把 Layer B 字符串 IDF 与常量匹配作为无符号二进制的主力引擎。"
+                },
+                {
+                  "label": "把二进制中长度 >= 4 的全部 ASCII 字符串提取出来做无加权精确子串匹配",
+                  "status": "warning",
+                  "verdictTitle": "缺少 IDF 过滤会把 error/open/init 等通用词汇匹配到上万个库，误报率失控",
+                  "feedback": "必须离线计算全网词频并设置高 IDF 下限与命中数门限。"
+                }
+              ]
+            },
+            {
+              "name": "跨架构混淆固件（Layer C ACFG）的算力调度",
+              "layer": "分层金字塔 · SLA 控制",
+              "context": "企业网关与路由器固件常混合 ARM/MIPS 架构且偶尔带有字符串裁剪混淆，但同时需要保障日常扫描吞吐 SLA。",
+              "options": [
+                {
+                  "label": "90% 常规任务由 Layer A/B 毫秒至秒级收敛；仅当 A/B 低置信度且疑似混淆时异步进入 Tier 3 Ghidra ACFG 队列",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾高并发吞吐、成本可控与极端混淆/跨架构固件的兜底召回率",
+                  "feedback": "避免所有二进制无差别跑全量 Ghidra 反编译导致集群算力崩溃，同时标明 IR 置信度。"
+                },
+                {
+                  "label": "不管二进制是否包含明文符号，一律全量先跑 Ghidra Headless 反编译与图神经网络向量检索",
+                  "status": "warning",
+                  "verdictTitle": "单包扫描耗时从百毫秒暴涨至数分钟，集群 CPU/内存成本飙升十倍以上",
+                  "feedback": "三层金字塔的精髓就是让便宜的 Layer A/B 挡掉绝大多数常规任务。"
+                },
+                {
+                  "label": "完全放弃跨架构控制流分析，遇到字符串被混淆的 MIPS 固件直接丢弃跳过",
+                  "status": "warning",
+                  "verdictTitle": "面对高安全等级固件与商业黑盒审计存在明显召回盲区",
+                  "feedback": "按需触发的 Tier 3 ACFG 是商业高级版的重要差异化壁垒。"
+                }
+              ]
+            },
+            {
+              "name": "同源检测与二进制逆向开源底座商业许可选型",
+              "layer": "L1/L3 底座 · 商用红线",
+              "context": "需要为商业闭源 SCA 产品采购/整合二进制解析、固件解包、LSH 与代码同源底层工具。",
+              "options": [
+                {
+                  "label": "Pure Go 自研 Winnowing/TF-IDF 核心 + Tree-sitter (MIT) + TLSH (Apache/BSD) + LIEF/Ghidra (Apache-2.0) + Binwalk v3 (MIT)",
+                  "status": "optimal",
+                  "verdictTitle": "100% 宽松商用许可闭环，牢牢掌控全网指纹库与匹配算法知识产权",
+                  "feedback": "每一层均严守 Apache-2.0 / MIT / BSD-3-Clause 红线，毫无强传染风险。"
+                },
+                {
+                  "label": "直接将 GPL-2.0 的 scanoss/engine 与 GPL-3.0 的 cve-bin-tool 源码合入商业闭源平台后端打包交付",
+                  "status": "critical",
+                  "verdictTitle": "致命 GPL 强传染违约！将导致商业闭源产品核心代码面临强制开源法律风险",
+                  "feedback": "SCANOSS 与 cve-bin-tool 虽优秀但均为强 GPL 协议，商业闭源平台只能借鉴算法思想自研。"
+                },
+                {
+                  "label": "以 LGPL-3.0 的 radare2 作为商业主进程静态依赖库打包进单文件 CLI",
+                  "status": "warning",
+                  "verdictTitle": "触发 LGPL-3.0 静态链接传染义务，需额外履行可重链接目标文件交付等繁琐合规要求",
+                  "feedback": "已有完全宽松许可的 LIEF + Capstone + Ghidra 可选，没必要自找 LGPL 合规负担。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道硬核考题覆盖 <strong>Winnowing 数学边界与 Type-2 归一化、CENTRIS 嵌套溯源、无符号二进制特征金字塔与商用 GPL 排雷</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0016 · 开源代码片段同源检测与无源码二进制 SCA 回忆测验",
+          "intro": "重点检验 Winnowing 阈值定理、CENTRIS 归属规则、穿透 strip -s 特征层及商用 GPL 边界。",
+          "questions": [
+            {
+              "prompt": "根据 Schleimer 等人 (SIGMOD 2003) 提出的 Winnowing 局部指纹算法，当采用词法归一化 Token 流并设定 k-gram 长度 k 与滑动窗口大小 w 时，算法在数学上能 100% 保证检出多长的共享连续片段？如果遇到 Type-2 克隆该如何应对？",
+              "options": [
+                "仅保证检出超过全文件半数大小的片段，改变量名只能依赖全量重新编译。",
+                "保证检出长度不低于窗口加切片减一的片段，改变量名须前置标识符折叠。",
+                "对任意单行注释改动都会发生哈希雪崩失效，无法压缩云端倒排索引体积。",
+                "窗口内并列最小哈希必须全部同时保留，才能确保不遗漏复制粘贴的代码。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Winnowing 定理证明：只要共享连续子串长度 >= t = w + k - 1，每个长度为 w 的窗口取最右最小哈希即可 100% 保证至少选中一个共同指纹；面对仅修改变量/函数名的 Type-2 克隆，则需前置词法归一化将用户标识符统一折叠为占位符 ID（B 正确）。"
+            },
+            {
+              "prompt": "在构建云端全网开源函数指纹库时，为何需要引入 CENTRIS (ICSE 2021) 提出的“冗余消除 + 最早诞生时间溯源”，而不能直接用函数指纹做全库一对多匹配？",
+              "options": [
+                "因为局部敏感哈希在函数体内只要微调一行语句就会彻底失效无法识别。",
+                "因为开源仓历史提交时间通常被完全抹除，只能依照仓库星标数决定源头。",
+                "因为本地指纹提取算法必须把闭源业务代码明文上传云端才能够完成比对。",
+                "因为下游仓普遍拷贝上游库会导致嵌套误报爆炸，甚至把拷贝者错认源头。"
+              ],
+              "answerIndex": 3,
+              "explanation": "全网大量开源仓库都曾经直接拷贝过 zlib/openssl 等基础库函数。若不做跨仓冗余消除与按最早 commit 时间戳确立唯一源头（Birth-Time Attribution），扫描一段复用代码会同时报出数百个嵌套项目甚至发生“拷贝者反客为主”的归属倒置（D 正确）。"
+            },
+            {
+              "prompt": "当目标制品是一个静态链接了第三方 C 库且经过 strip -s 彻底抹除符号表（.symtab / .strtab）与版本横幅的 x86_64 ELF 文件时，哪一层特征能以低算力代价穿透剥离盲区实现高置信度识别？",
+              "options": [
+                "提取只读段高逆文档频率唯一报错字符串及魔数常量池做加权倒排匹配。",
+                "重新扫描二进制动态导出表与包管理器锁文件以还原精确语义版本号。",
+                "提取所有长度超过三字符的普通英文单词，按字面总出现次数直接排序。",
+                "直接跳过全部分析并将所有剥离过符号的可执行文件标记为高危未知风险。"
+              ],
+              "answerIndex": 0,
+              "explanation": "strip -s 仅剥离符号与调试表，无法抹去硬编码在 .rodata 段中的报错提示字符串与加密/压缩魔数常量（如 CRC32 多项式、AES S-Box）。依据 OSSPolice 与 B2SFinder 范式，过滤通用停用串并用高 IDF 字符串与常量加权匹配即可穿透 strip -s（A 正确）。"
+            },
+            {
+              "prompt": "为商业闭源 SaaS SCA 平台整合代码同源与二进制固件分析能力，以下哪项底层开源组件选型完全遵守商用合规红线（无 GPL/LGPL 强传染义务）？",
+              "options": [
+                "直接把遵循通用公共协议的片段指纹提取器与匹配引擎源码打入闭源后端。",
+                "集成开源组织维护的二进制漏洞扫描工具源码，连同后端闭源引擎一起分发。",
+                "自研指纹核心，搭配宽松许可固件解包器、解析器、模糊哈希与反汇编器。",
+                "把遵循弱传染协议的逆向分析框架静态链接进商业主扫描进程内打包售卖。"
+              ],
+              "answerIndex": 2,
+              "explanation": "LIEF (Apache-2.0)、Binwalk v3 (MIT)、TLSH (Apache-2.0 OR BSD-3)、Tree-sitter (MIT)、Capstone (BSD-3) 与 Ghidra (Apache-2.0) 均属纯宽松商用友好底座；而 SCANOSS (GPL-2.0)、cve-bin-tool (GPL-3.0-or-later) 属于强传染协议，radare2 为 LGPL-3.0，商业闭源产品须严加规避（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计同源片段指纹索引库与二进制三层特征管线时，推荐精读以下里程碑论文与纯宽松开源底座：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://doi.org/10.1145/872757.872770" target="_blank" rel="noopener"><strong>Schleimer et al. (SIGMOD 2003), <em>Winnowing</em></strong></a> &amp; <a href="https://doi.org/10.1109/ICSE43902.2021.00083" target="_blank" rel="noopener"><strong>Kim, Woo &amp; Lee (ICSE 2021), <em>CENTRIS</em></strong></a>（<a href="https://github.com/WOOSEUNGHOON/Centris-public" target="_blank" rel="noopener"><code>Centris-public</code></a>）：片段指纹下界保证、嵌套冗余消除与最早提交归属基石。</li>
+          <li><a href="https://doi.org/10.1145/3133956.3134048" target="_blank" rel="noopener"><strong>Duan et al. (CCS 2017), <em>OSSPolice</em></strong></a> · <a href="https://doi.org/10.1109/ASE.2019.00100" target="_blank" rel="noopener"><strong>Feng et al. (ASE 2019), <em>B2SFinder</em></strong></a> · <a href="https://doi.org/10.1145/3133956.3134018" target="_blank" rel="noopener"><strong>Xu et al. (CCS 2017), <em>Gemini</em></strong></a>（<a href="https://arxiv.org/abs/1708.06525" target="_blank" rel="noopener"><code>arXiv:1708.06525</code></a>）：二进制字符串 IDF、多特征加权与跨架构 ACFG 控制流向量。</li>
+          <li><a href="https://github.com/lief-project/LIEF" target="_blank" rel="noopener"><code>lief-project/LIEF</code> (<code>Apache-2.0</code>)</a> · <a href="https://github.com/ReFirmLabs/binwalk" target="_blank" rel="noopener"><code>binwalk</code> v3 (<code>MIT</code>)</a> · <a href="https://github.com/trendmicro/tlsh" target="_blank" rel="noopener"><code>trendmicro/tlsh</code> (<code>Apache-2.0/BSD-3</code>)</a> · <a href="https://github.com/capstone-engine/capstone" target="_blank" rel="noopener"><code>capstone</code> (<code>BSD-3</code>)</a> · <a href="https://github.com/NationalSecurityAgency/ghidra" target="_blank" rel="noopener"><code>ghidra</code> (<code>Apache-2.0</code>)</a>。</li>
+          <li><strong>商用红线避坑对照：</strong><a href="https://github.com/scanoss/engine" target="_blank" rel="noopener"><code>scanoss/engine</code> (<code>GPL-2.0</code>)</a> · <a href="https://github.com/ossf/cve-bin-tool" target="_blank" rel="noopener"><code>ossf/cve-bin-tool</code> (<code>GPL-3.0-or-later</code>)</a> · <a href="https://github.com/radareorg/radare2" target="_blank" rel="noopener"><code>radare2</code> (<code>LGPL-3.0</code>)</a>。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>至此我们彻底补齐了传统 SCA 在“无清单 Copy-Paste 代码”与“无源码静态链接/固件二进制”上的检测盲区！接下来第 0017–0019 课将正式进入 <strong>AI 时代供应链安全三连击（AI-BOM &rarr; 模型反序列化 RCE &rarr; MCP/Agent 治理）</strong>：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在云端构建全网千万级开源函数指纹与 <code>.rodata</code> 字符串倒排索引时，如何控制内存与磁盘爆炸、避免每次扫描遍历上亿个低区分度字符串？”</li>
+          <li>“面对从 Hugging Face 拉取的基座模型、LoRA 微调权重、训练数据集与推理引擎，CycloneDX ML-BOM 与 SPDX 3.0 AI Profile 怎么无缝融进现有 Layer 2 IR？”</li>
+          <li>“准备就绪！请为我开启 <strong>Lesson 0017（AI-BOM 统一建模：模型权重、数据集与推理框架血缘）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html">&larr; 上一课：Lesson 0015 · 恶意包投毒引擎</a>
+      <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">配套速查卡：Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Lesson 0017（AI-BOM 统一建模） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/snippet-binary-sca-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
