@@ -134,6 +134,16 @@
 - [Ecosystem API Diff Engines: `siom79/japicmp` (`Apache-2.0`) · `revapi/revapi` (`Apache-2.0`) · `golang.org/x/exp/apidiff` (`BSD-3-Clause`) · `mkdocstrings/griffe` (`ISC`) · `obi1kenobi/cargo-semver-checks` (`MIT OR Apache-2.0`)](https://pkg.go.dev/golang.org/x/exp/apidiff)
   五大语言生态二进制/AST 破坏性变更检测底座；特别警惕**不要**把 `golang.org/x/exp/apidiff`（BSD-3-Clause）与 OpenJDK 同名 `apidiff`（`GPL-2.0 + Classpath Exception`）混淆。
 
+### 恶意包、供应链投毒检测与发布防火墙（Ch 05 · Lesson 0015）
+- [Taxonomies & Empirical Studies: Ohm et al. (DIMVA 2020, *Backstabber's Knife Collection*, `arXiv:2005.09535`) · Ladisa et al. (IEEE S&P 2023, *SoK*, `arXiv:2204.04008`) · Spracklen et al. (USENIX Security, `arXiv:2406.10279`)](https://arxiv.org/abs/2005.09535)
+  实证确认 **56%** 恶意包在安装期（`preinstall`/`postinstall`/`setup.py`）触发且无 CVE 编号；系统分类 Typosquatting/Combosquatting、Slopsquatting（LLM 幻觉 19.7%）、Dependency Confusion、Account Takeover 与构建产物夹带五大载体。
+- [OpenSSF Supply Chain Malware Infrastructure: `ossf/malicious-packages` (`Apache-2.0`) · `ossf/package-analysis` (`Apache-2.0`) · `ossf/package-feeds` (`Apache-2.0`)](https://github.com/ossf/malicious-packages)
+  `ossf/malicious-packages` 以 OSV `MAL-*` 格式汇聚已确认恶意包情报（冷启动必接底座）；`package-feeds` 归一化多生态实时更新流；`package-analysis` 示范基于 **gVisor** 用户态内核的 `strace`/`pcap` 隔离引爆沙箱架构。
+- [Realtime Registry Feeds (2025 Breaking Change): npm `replicate.npmjs.com/registry/_changes` (2025-05-29 Deprecation) · PyPI `changelog_since_serial` & PEP 691](https://github.blog/changelog/2025-05-29-changes-to-npm-registry-changes-feed/)
+  npm 自 2025-05-29 起正式废弃 CouchDB `feed=continuous`、`include_docs=true` 与 `heartbeat` 参数（`skimdb` 301 跳转），须改用轻量化 `GET /registry/_changes?since=<seq>&limit=<n>` 增量拉取序列并异步下载元数据与 Tarball。
+- [Static Engines, Cooldowns & Commercial License Minefields: `VirusTotal/yara-x` (`BSD-3-Clause`) · `oxc-project/oxc` (`MIT`) vs `DataDog/guarddog` (`Apache-2.0` + Semgrep `LGPL-2.1`/Rules v1.0) · `chainguard-dev/malcontent` (`Apache-2.0` + `ELv2`/`DRL 1.1`)]
+  纯商用 AST/特征底座首选 `oxc` + `Tree-sitter`（`MIT`）+ `yara-x`（`BSD-3-Clause`）；跨生态冷却期规范涵盖 `pnpm` (`minimumReleaseAge` 分钟)、`npm` (`min-release-age` 天)、`uv` (`exclude-newer`)、`pip` (`--uploaded-prior-to`)。**商用排雷**：严禁将 GuardDog 底层 Semgrep 规则或 Malcontent 打包的 Elastic `ELv2` / Nextron `DRL 1.1` 第三方规则直接塞入商业闭源 SaaS，必须剥离替换为自有 Capability Diff 规则；交付侧参考 Socket Firewall (`sfw`) 与 `sca_check_package` MCP 实现安装前零落盘阻断。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -150,7 +160,7 @@
   PURL 与 VERS 版本规范的核心维护社区。用于：解决跨生态冷门包管理器命名规范与版本区间边界争议。
 
 ## Gaps
-- **AI 供应链（MCP / Agent Skills / Model Serialization）威胁分类学与实证数据**：尚缺系统性的开源威胁基准库与标准检测范式（将在 AI-BOM 阶段深入调研补齐）。
+- **代码同源/二进制 SCA 与 AI 供应链（Ch 05 · Lesson 0016–0019）**：`Lesson 0015` 及 `Ref 06` 已补齐恶意包实时流（含 npm 2025-05-29 废弃变更）、四级漏斗/Capability Diff、跨生态冷却期及 GuardDog/Malcontent 商业许可边界；后续将在 0016–0019 陆续补齐 Winnowing/二进制指纹、AI-BOM、Pickle RCE 与 MCP/ASI04 治理实证资料。
 - **静态、运行时可达性与优先级/VEX/自动修复协同闭环（Ch 04 · Lessons 0011–0014 已全面收口）**：第 11–13 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）、运行时融合/容器裁剪与 EPSS/KEV/SSVC/VEX 协同降噪；第 14 课及 Ref 05 第 05 节已补齐 OSV-Scanner v2 Guided Remediation（`in-place/relock/override`）、`deps.dev/util/resolve`、PubGrub（`MPL-2.0`）、Ochoa et al. (EMSE 2022) `API Diff ∩ Call Graph` 实证与五大生态 Diff 底座、OpenRewrite LST（`Apache-2.0`）、`dependabot-core`（`MIT`）vs `Renovate`（`AGPL-3.0`）红线及双触点防 PR 风暴闭环。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。

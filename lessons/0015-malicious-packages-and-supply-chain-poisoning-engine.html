@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0015：恶意包与供应链投毒检测引擎（对标 Socket.dev）</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0014-guided-remediation-and-upgrade-path-solver.html">Lesson 0014 · 无破坏性自动修复</a>
+        <a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html" class="active">Lesson 0015 · 恶意包投毒引擎</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0015</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 05 首课（无 CVE 威胁与供应链主动防御）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>恶意包与供应链投毒检测引擎（对标 Socket.dev）</h1>
+      <p class="subtitle">在 Chapter 04 我们彻底解决了「已知 CVE 降噪与零破坏修复」；但真实世界中还有另一类更具破坏力的威胁——<strong>主动投毒的恶意包（Malicious Packages）</strong>。它们没有 CVE 编号、往往在开发者敲下 <code>npm install</code> 或 AI Agent 幻觉安装的一瞬间通过安装脚本直接窃走宿主机密钥，生命周期甚至不到 12 小时。本课带你从 0 设计<strong>实时发布流摄入、四级漏斗检测、跨版本能力差分（Capability Diff）、发布冷却期闸门与包防火墙/MCP 双触点拦截</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 56% 安装期触发实证与 5 大投毒载体；掌握 npm 2025 <code>_changes</code> 变更后的实时流接入与四级漏斗；落地 Go 跨版本 Capability Diff + 冷却期矩阵；严防 GuardDog（Semgrep <code>LGPL-2.1</code>）与 Malcontent（<code>ELv2/DRL</code>）混合许可陷阱</span>
+        <span><strong>先修底座：</strong><a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> · <a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">Lesson 0007</a> · <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md）</div>
+      <p>第一代与第二代 SCA 甚至包括纯调用图 SCA，面对恶意包存在三重失明：<strong>① 无 CVE</strong>（攻击者自己发包不走 NVD 披露流程）；<strong>② 不进主程序调用图</strong>（安装期钩子或模块顶层导入副作用直接执行）；<strong>③ 事后 CI 太晚</strong>（本地 <code>pip/npm install</code> 时开发机凭证已经外泄）。对标 Socket.dev 的第三代商业防御壁垒，核心在于用<strong>「跨版本能力差分（压低误报）+ 元数据异常乘子 + 72h 发布冷却窗 + 包防火墙/Agent MCP 安装前秒拦」</strong>构筑事前主动免疫。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么传统 CVE + 调用图对恶意包完全失明？—— 攻击树与 0-Day 窗口</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 来自实证数据集的残酷事实：56% 攻击在“安装瞬间”引爆</h3>
+      <p>软件供应链漏洞（Vulnerability）是“好人写错了代码”，而供应链投毒（Malicious Package）是“坏人主动把攻击载荷放进了依赖生态”。Marc Ohm 等人在 DIMVA 2020 发表的经典实证研究 <a href="https://arxiv.org/abs/2005.09535" target="_blank" rel="noopener"><em>Backstabber's Knife Collection</em></a> 剖析了跨 npm、PyPI 与 RubyGems 的真实恶意包数据集，揭示了一个直接击穿传统扫描器的数字：<strong>高达 56% 的恶意包在安装阶段（Install-time）即触发恶意代码执行</strong>，其余分布于运行期与测试期。</p>
+      <p>这意味着当开发者或构建沙箱执行 <code>npm install</code>（<code>preinstall</code> / <code>postinstall</code>）或 <code>pip install</code> 源码包（<code>setup.py</code> 覆写 <code>install</code> 命令）时，业务代码一行都还没运行，你的“第一方函数级调用图（Call Graph）”尚未开始构图，宿主机上的 <code>~/.ssh</code>、<code>~/.aws/credentials</code>、<code>.env</code> 与 GitHub Token 已经被外传。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">冷启动必接 vs 0-Day 空白窗</span>
+        <strong>冷启动零成本底座：</strong>Google 与 OpenSSF 联合维护的 <a href="https://github.com/ossf/malicious-packages" target="_blank" rel="noopener"><code>ossf/malicious-packages</code></a>（<strong><code>Apache-2.0</code></strong>）采用标准 OSV Schema（前缀 <strong><code>MAL-YYYY-XXXX</code></strong>，按 <code>osv/malicious/&lt;ecosystem&gt;/</code> 目录组织）汇聚社区确认的恶意包情报，必须作为 Layer 3 默认源第一时间接入。<br/>
+        <strong>为什么远远不够？</strong><code>MAL-*</code> 属于<strong>事后披露情报</strong>。真实恶意包平均存活时间仅数小时至 1 天就会被仓库下架（yank），在 <code>MAL-*</code> 收录前的 <strong>0–24 小时空白窗</strong>才是企业真正中招的高发区！
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 五大供应链投毒载体全景（对齐 Ladisa et al. IEEE S&amp;P 2023）</h3>
+      <p>结合 Piergiorgio Ladisa 等人在 <a href="https://arxiv.org/abs/2204.04008" target="_blank" rel="noopener"><em>SoK: Taxonomy of Attacks on Open-Source Software Supply Chains</em>（IEEE S&amp;P 2023）</a> 的攻击树分类，以及 Spracklen 等人关于 AI 幻觉包名（<a href="https://arxiv.org/abs/2406.10279" target="_blank" rel="noopener"><code>arXiv:2406.10279</code></a>）的实证，商业 SCA 引擎必须同时覆盖以下五条投毒路径：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:26%" />
+          <col style="width:26%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>投毒攻击载体</th>
+            <th>攻击机理与触发方式</th>
+            <th>传统 CVE / 调用图为何失明</th>
+            <th>第三代检测引擎必须捕获的核心信号</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Typosquatting &amp; Combosquatting</strong><br/><span class="badge badge-warn">拼写 / 词缀抢注</span></td>
+            <td>注册极似热门库的包名（如 <code>reqests</code>、<code>lodash-js</code>、<code>py-requests</code>），利用手误或复制错误诱导安装。</td>
+            <td>包本身没有漏洞记录；往往通过 <code>postinstall</code> 或顶层 <code>__init__.py</code> 立即窃密。</td>
+            <td>Damerau-Levenshtein 距离 + PEP 503 分隔符折叠 + 词缀命中 + 低下载/新注册账号异常。</td>
+          </tr>
+          <tr>
+            <td><strong>2. Slopsquatting</strong><br/><span class="badge badge-danger">AI 幻觉包名抢注</span></td>
+            <td>利用 Coding Agent / LLM <strong>19.7%</strong> 的幻觉推荐包名（43% 可稳定复现），攻击者提前在公网注册该虚构包名。</td>
+            <td>开发者与 Agent 往往未核验包是否存在；本地一运行安装命令即被 <code>setup.py</code> 穿透。</td>
+            <td>对齐 <a href="../learning-records/0002-agentic-shift-left-replaces-lsp-only.md">LR-0002</a>：MCP <code>sca_check_package</code> 事前阻断 + 注册时间/下载量门槛。</td>
+          </tr>
+          <tr>
+            <td><strong>3. Dependency Confusion</strong><br/><span class="badge badge-danger">私有包名公网劫持</span></td>
+            <td>在公网 npm/PyPI 抢注企业内部私有包同名包并发布超大版本号（如 <code>99.9.9</code>），诱使默认优先拉取高版本的客户端中招。</td>
+            <td>内部包根本不在公网漏洞库中，外网抢注包一经发布即刻拥有最高优先级。</td>
+            <td>作用域强绑定（<code>@org/pkg</code>）、私有仓拦截公网回源 + 私有命名空间词典防逃逸。</td>
+          </tr>
+          <tr>
+            <td><strong>4. Account Takeover</strong><br/><span class="badge badge-danger">维护者接管投毒</span></td>
+            <td>窃取老牌热门库维护者 Token 或收购弃坑项目，发布看似无害的 Patch 版（如 <code>1.4.2 &rarr; 1.4.3</code>）塞入窃密钩子。</td>
+            <td>包名完全合法、历史下载量极高、旧版安全可靠，名称与声誉白名单全面失效。</td>
+            <td><strong>跨版本能力差分（AddedCaps）</strong> + 维护者列表变更 + 72h 冷却窗 + Tarball 与 Git Tag 源码漂移。</td>
+          </tr>
+          <tr>
+            <td><strong>5. Build / Artifact Poisoning</strong><br/><span class="badge badge-warn">构建产物夹带暗桩</span></td>
+            <td>源码仓表面干净，仅在发包 Tarball 的打包/混淆产物或测试夹具（如 <code>xz-utils</code>）注入载荷。</td>
+            <td>只扫 GitHub 仓库源码完全看不到恶意代码，静态分析 Git 仓零命中。</td>
+            <td>必须直接解包制品库 Tarball/Wheel 并与对应 Git Tag 源码树执行 AST/文件树一致性漂移校验。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>对标 Socket.dev：实时发布流、四级漏斗与“跨版本能力差分”引擎</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 实时发布流接入：踩准 npm 2025-05-29 废弃变更与 PyPI 序列增量</h3>
+      <p>要抢在 0-day 窗口期内封杀恶意包，引擎不能等用户扫描时才现拉慢速计算，必须像 Socket.dev 一样对主流公共仓做<strong>7&times;24 小时近实时发布流摄入（In-flight Ingestion）</strong>。但工程落地必须紧盯上游协议的最新变更：</p>
+      <ul>
+        <li><strong>npm 生态（注意 2025-05-29 接口大改）：</strong>过去开源教程常写用 CouchDB 连续流 <code>?feed=continuous&amp;include_docs=true&amp;heartbeat=30000</code> 订阅 <code>skimdb.npmjs.com</code>。但 GitHub / npm 已于 <strong>2025 年 5 月 29 日</strong>正式废弃上述全部参数（返回 <code>404</code>，且 <code>skimdb</code> 301 重定向至 <code>replicate.npmjs.com</code>）。新架构必须轮询轻量化端点 <code>GET https://replicate.npmjs.com/registry/_changes?since=&lt;seq&gt;&amp;limit=1000</code>，拿到变更包名与序列号后再异步并发拉取新版本元数据与 Tarball。</li>
+        <li><strong>PyPI 生态：</strong>PyPI 无 CouchDB 复制流，工程上应基于 <code>changelog_since_serial</code> 增量序列接口与 PEP 691 JSON Simple API 轮询捕获 <code>add_package</code> / <code>add_file</code> 事件；可参考 OpenSSF <a href="https://github.com/ossf/package-feeds" target="_blank" rel="noopener"><code>ossf/package-feeds</code></a>（<code>Apache-2.0</code>）将 npm、PyPI、Crates.io、GoProxy 与 RubyGems 统一规范化为事件总线。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">架构警示：为什么纯静态单版规则必然误报爆炸？</span>
+        假设你写了一条规则：“只要包含 <code>fetch()</code> 外联且读取 <code>process.env</code> 就判为恶意包”。上线当天就会把 <code>axios</code>、<code>@aws-sdk/client-s3</code> 和 <code>dotenv</code> 全部拉黑！<br/>
+        <strong>Socket.dev 的破局钥匙是「相对变化」与「意图组合」：</strong>一个 HTTP 客户端本来就需要网络能力；真正致命的是一个纯日期格式化库在 <code>1.4.2 &rarr; 1.4.3</code> <strong>突然新增（AddedCaps）</strong>了 <code>postinstall + 读凭证 + 外联</code>。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 第三代恶意包与投毒检测四级漏斗及事前双触点拦截架构</strong>
+        <span>上游实时流摄入 &rarr; Tier 0 秒级门禁 &rarr; Tier 1 跨版本能力差分 &rarr; Tier 2 LLM/gVisor 深度研判 &rarr; 防火墙与 Agent MCP 事前阻断</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">上游近实时生态流（In-Flight Registry Ingestion）</span>
+            <span class="orch-stage-kicker">npm /registry/_changes (2025 新契约) · PyPI Serial · ossf/package-feeds</span>
+          </div>
+          <p class="orch-stage-desc">
+            新版本发布后 <strong>10–60 秒内</strong> 拉取 Tarball / Wheel 进隔离对象存储并抽取包元数据（发布时间、维护者历史、仓库 Git Tag URL）。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 进入四级分层检测漏斗（99% 良性包在前两层毫秒级快速收敛） &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Tier 0 &amp; Tier 1：零成本门禁与亚秒静态引擎</span>
+              <span class="badge badge-ok">低成本 · 全量覆盖</span>
+            </div>
+            <ul>
+              <li><strong>Tier 0 瞬时闸门：</strong><code>ossf/malicious-packages</code>（<code>MAL-*</code>）内存命中 + <strong>发布冷却期</strong>（如 &lt; 72h 且非 KEV 补丁豁免）+ <strong>包名抢注计算</strong>（Damerau-Levenshtein &le; 2 / PEP 503 折叠 / Combo 词缀）。</li>
+              <li><strong>Tier 1 静态能力差分：</strong>基于 <code>MIT/BSD</code> 极速解析器（<code>oxc</code> / <code>Tree-sitter</code> / <code>yara-x</code>）提取 12 类能力位图，计算 <strong><code>AddedCaps = NewCaps \ PrevCaps</code></strong>，叠加<strong>高熵混淆</strong>与 <strong>Tarball vs Git Tag 源码漂移</strong>。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Tier 2：异步高对抗研判（仅限 Top 0.5% 可疑包）</span>
+              <span class="badge badge-warn">LLM + gVisor 沙箱</span>
+            </div>
+            <ul>
+              <li><strong>LLM 语义意图判别：</strong>针对静态红旗与跨版本跃变高分包，切片送入代码审查 LLM 区分“合法遥测/代理配置”与“隐蔽凭证外泄”（对标 Socket AI Malware Scanner）。</li>
+              <li><strong>gVisor 沙箱动态引爆：</strong>参考 <a href="https://github.com/ossf/package-analysis" target="_blank" rel="noopener"><code>ossf/package-analysis</code></a>（<code>Apache-2.0</code>），在用户态内核拦截 syscall/DNS/文件读取，捕获动态拼装的二阶段下载载荷。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 事前双触点强制阻断（Zero-Disk-Write Before Install） &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-ir">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">安装前双触点拦截网关（Package Firewall + AI Coding Agent MCP）</span>
+            <span class="orch-stage-kicker">对标 Socket Firewall (sfw) / 私有仓代理 + sca_check_package MCP</span>
+          </div>
+          <p class="orch-stage-desc">
+            <strong>① 人类终端与 CI：</strong>通过轻量包装器（类似 <code>sfw</code>）或企业私有仓（Nexus/Artifactory）前置代理，在包管理器写盘与跑 <code>postinstall</code> 前拦截恶意/未满冷却期版本（HTTP 403）。<br/>
+            <strong>② 对话式 AI Coding Agent（对齐 LR-0002）：</strong>Hook/MCP 工具 <code>sca_check_package</code> 在 Agent 决定推荐或安装库前返回 <code>DENY + 官方正确包名</code>，彻底封杀 Slopsquatting！
+          </p>
+        </div>
+      </div>
+    </figure>
+
+    <div class="prose-col">
+      <h3>2.2 为什么绝不能对全量包跑动态沙箱？—— 静动态混合的分工铁律</h3>
+      <p>新手架构师常误以为“把每个新发布的包丢进沙箱 `npm install` 跑一遍看它连不连外网就行了”。真实对抗中，纯动态沙箱存在三大死穴：<strong>① 成本爆炸</strong>（npm/PyPI 日均新增数万版本，全量容器引爆算力极贵）；<strong>② 反沙箱逻辑炸弹</strong>（攻击者检测 <code>process.env.CI</code>、<code>os.uptime() &lt; 600</code>、MAC 地址或延迟 48 小时才外连）；<strong>③ 环境触发条件缺失</strong>（某些载荷仅在发现特定内网域名或 AWS Metadata 接口时才运行）。因此必须确立<strong>「Tier 1 静态 AST 能力差分 + 混淆/源码漂移全量兜底，Tier 2 LLM + gVisor 仅对前 0.5% 高疑包做深化验证」</strong>的混合漏斗。</p>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>Go 核心原语、发布冷却期矩阵与商业闭源底座排雷</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 Go 核心原语：跨版本能力位图差分（AddedCaps）与元数据异常乘子</h3>
+      <p>在我们的统一架构中，<strong>AST 信号提取（底层调 MIT/BSD 解析器）与能力差分策略引擎</strong>属于自研核心壁垒。下面用一段紧凑的 Pure Go 原语展示如何将“基线版本能力”与“元数据异常乘子”结合，一举压低误报并抓出维护者接管与 Slopsquatting：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">包名抢注（Typosquatting）算法组合拳</span>
+        纯看字符编辑距离不够用，商业引擎必须串联四级流水线：<br/>
+        1. <strong>分隔符归一化</strong>：按 PEP 503 将 <code>- _ .</code> 统一折叠（防 <code>urllib_3</code> 冒充 <code>urllib3</code>）；<br/>
+        2. <strong>Damerau-Levenshtein &le; 2</strong>：同时捕获增删改与相邻换位（如 <code>reqests</code>）；<br/>
+        3. <strong>同形字与 Combosquatting</strong>：检测 <code>py-</code> / <code>-js</code> / <code>-helper</code> 等前后缀组合（精准打击 LLM 幻觉包名）；<br/>
+        4. <strong>热度非对称门限</strong>：仅把高热度 Top 10k 目标库设为“被保护锚点”，新包下载极低则直接抬升风险分。
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：Capability Bitmask 跨版本差分 + 冷却期闸门 + 元数据异常评分</strong>
+        <span>Pure Go 自研 L3/L4 投毒防御裁决内核（对接 MAL 索引 · sfw/Proxy · MCP）</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> CapabilityMask <span class="tok-kw">uint32</span>
+<span class="tok-kw">const</span> (
+    CapInstallScript CapabilityMask = <span class="tok-num">1</span> &lt;&lt; <span class="tok-kw">iota</span> <span class="tok-cmt">// preinstall / postinstall / setup.py cmdclass</span>
+    CapNetEgress                                <span class="tok-cmt">// HTTP / raw socket / DNS 隧道外联</span>
+    CapReadCreds                                <span class="tok-cmt">// 读写 .env / ~/.ssh / ~/.aws / kubeconfig</span>
+    CapShellExec                                <span class="tok-cmt">// child_process / subprocess / os.system</span>
+    CapObfuscatedEval                           <span class="tok-cmt">// 高熵 Base64/Hex 解码后动态 eval/exec</span>
+    CapSandboxEvasion                           <span class="tok-cmt">// 检测 CI=true / uptime / VM 指纹逃逸</span>
+)
+
+<span class="tok-kw">type</span> PackageSignalInput <span class="tok-kw">struct</span> {
+    PURL              <span class="tok-kw">string</span>
+    KnownMalwareID    <span class="tok-kw">string</span>         <span class="tok-cmt">// 命中 ossf/malicious-packages (MAL-*)</span>
+    AgeHours          <span class="tok-kw">float64</span>
+    IsKEVHotfix       <span class="tok-kw">bool</span>           <span class="tok-cmt">// 紧急 KEV 修复且通过 Trusted Publisher 验签</span>
+    PrevCaps          CapabilityMask <span class="tok-cmt">// 上一版本能力基线（新注册包为 0）</span>
+    NewCaps           CapabilityMask
+    MaintainerChanged <span class="tok-kw">bool</span>           <span class="tok-cmt">// 新接入或长期失活后突变发布账户</span>
+    TarballSourceDrift <span class="tok-kw">bool</span>          <span class="tok-cmt">// 发包压缩包与 Git Tag 源码 AST 不一致</span>
+    TyposquatDistance <span class="tok-kw">int</span>            <span class="tok-cmt">// 与 Top 热门库最小 Damerau-Levenshtein 距离（-1 表示无近似）</span>
+}
+
+<span class="tok-kw">type</span> GateDecision <span class="tok-kw">string</span>
+<span class="tok-kw">const</span> (
+    DecisionAllow     GateDecision = <span class="tok-str">"ALLOW"</span>
+    DecisionCooldown  GateDecision = <span class="tok-str">"COOLDOWN_HOLD"</span>
+    DecisionLLMTriage GateDecision = <span class="tok-str">"QUARANTINE_LLM_SANDBOX"</span>
+    DecisionBlock     GateDecision = <span class="tok-str">"BLOCK_IMMEDIATE"</span>
+)
+
+<span class="tok-kw">func</span> EvaluatePackageRisk(in PackageSignalInput, cooldownHours <span class="tok-kw">float64</span>) (GateDecision, <span class="tok-kw">int</span>, []<span class="tok-kw">string</span>) {
+    <span class="tok-kw">if</span> in.KnownMalwareID != <span class="tok-str">""</span> {
+        <span class="tok-kw">return</span> DecisionBlock, <span class="tok-num">100</span>, []<span class="tok-kw">string</span>{<span class="tok-str">"hit_known_mal_db:"</span> + in.KnownMalwareID}
+    }
+
+    <span class="tok-cmt">// 核心降噪算子：仅重点惩罚相对于上一版本“突然新增”的越权能力</span>
+    added := in.NewCaps &amp;^ in.PrevCaps
+    score := <span class="tok-num">0</span>
+    <span class="tok-kw">var</span> reasons []<span class="tok-kw">string</span>
+
+    <span class="tok-kw">if</span> added&amp;CapInstallScript != <span class="tok-num">0</span> &amp;&amp; (added&amp;(CapReadCreds|CapNetEgress|CapShellExec) != <span class="tok-num">0</span>) {
+        score += <span class="tok-num">65</span>
+        reasons = <span class="tok-kw">append</span>(reasons, <span class="tok-str">"added_install_script_with_creds_or_egress"</span>)
+    }
+    <span class="tok-kw">if</span> added&amp;(CapObfuscatedEval|CapSandboxEvasion) != <span class="tok-num">0</span> {
+        score += <span class="tok-num">40</span>
+        reasons = <span class="tok-kw">append</span>(reasons, <span class="tok-str">"added_obfuscation_or_anti_sandbox"</span>)
+    }
+
+    <span class="tok-cmt">// 元数据异常乘子：维护者突变 / 源码漂移 / 抢注距离</span>
+    <span class="tok-kw">if</span> in.MaintainerChanged &amp;&amp; added != <span class="tok-num">0</span> {
+        score += <span class="tok-num">25</span>
+        reasons = <span class="tok-kw">append</span>(reasons, <span class="tok-str">"maintainer_takeover_with_cap_jump"</span>)
+    }
+    <span class="tok-kw">if</span> in.TarballSourceDrift {
+        score += <span class="tok-num">30</span>
+        reasons = <span class="tok-kw">append</span>(reasons, <span class="tok-str">"tarball_git_tag_source_drift"</span>)
+    }
+    <span class="tok-kw">if</span> in.TyposquatDistance &gt;= <span class="tok-num">1</span> &amp;&amp; in.TyposquatDistance &lt;= <span class="tok-num">2</span> &amp;&amp; in.AgeHours &lt; <span class="tok-num">168</span> {
+        score += <span class="tok-num">45</span>
+        reasons = <span class="tok-kw">append</span>(reasons, <span class="tok-str">"fresh_typosquatting_candidate"</span>)
+    }
+
+    <span class="tok-kw">if</span> score &gt;= <span class="tok-num">85</span> {
+        <span class="tok-kw">return</span> DecisionBlock, score, reasons
+    }
+    <span class="tok-kw">if</span> score &gt;= <span class="tok-num">45</span> {
+        <span class="tok-kw">return</span> DecisionLLMTriage, score, reasons
+    }
+    <span class="tok-comment">// 发布冷却期闸门：挡住未过前 72h 窗口的新包（紧急 KEV + 可信发布者白名单豁免）</span>
+    <span class="tok-kw">if</span> in.AgeHours &lt; cooldownHours &amp;&amp; !in.IsKEVHotfix {
+        <span class="tok-kw">return</span> DecisionCooldown, score, <span class="tok-kw">append</span>(reasons, <span class="tok-str">"below_release_cooldown_window"</span>)
+    }
+    <span class="tok-kw">return</span> DecisionAllow, score, reasons
+}</code></pre>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 最低成本的 0-Day 保险丝：跨生态发布冷却期（Dependency Cooldown）配置规范</h3>
+      <p>绝大多数投毒包在发布后数小时至 2–3 天内会被社区举报下架。因此，2025–2026 年现代包管理器已普遍原生内置<strong>最小发布年龄（Minimum Release Age / Cooldown）</strong>选项。作为商业 SCA 平台，既应建议客户在开发侧开启本地冷却门，更应在企业包代理网关统一配置 <strong>72 小时默认冷却期 + CISA KEV 紧急补丁白名单豁免</strong>：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:24%" />
+          <col style="width:24%" />
+          <col style="width:34%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>包管理器 / 生态</th>
+            <th>原生冷却配置字段</th>
+            <th>配置文件 / CLI 位置</th>
+            <th>时间单位与 7 天（或 72h）标准配置示范</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>pnpm (Node.js)</strong></td>
+            <td><code>minimumReleaseAge</code> &amp; <code>minimumReleaseAgeExclude</code></td>
+            <td><code>pnpm-workspace.yaml</code> / <code>config.yaml</code></td>
+            <td><strong>分钟</strong>：<code>minimumReleaseAge: 10080</code>（7 天）或 <code>4320</code>（72h），配合 <code>minimumReleaseAgeStrict: true</code></td>
+          </tr>
+          <tr>
+            <td><strong>npm (Node.js)</strong></td>
+            <td><code>min-release-age</code></td>
+            <td><code>.npmrc</code></td>
+            <td><strong>天</strong>：<code>min-release-age=7</code>（或 <code>3</code>）</td>
+          </tr>
+          <tr>
+            <td><strong>Yarn Berry / Bun</strong></td>
+            <td><code>npmMinimalAgeGate</code> / <code>minimumReleaseAge</code></td>
+            <td><code>.yarnrc.yml</code> / <code>bunfig.toml</code></td>
+            <td>Yarn 支持 <code>10080</code> 分钟或 <code>"7d"</code>；Bun 使用<strong>秒</strong>：<code>minimumReleaseAge = 604800</code></td>
+          </tr>
+          <tr>
+            <td><strong>uv (Python)</strong></td>
+            <td><code>exclude-newer</code></td>
+            <td><code>pyproject.toml</code> / <code>uv.toml</code></td>
+            <td>相对时长或 RFC 3339 时间戳：<code>exclude-newer = "7 days"</code> 或 <code>uv lock --exclude-newer "72 hours"</code></td>
+          </tr>
+          <tr>
+            <td><strong>pip (Python)</strong></td>
+            <td><code>--uploaded-prior-to</code></td>
+            <td>CLI 参数 / 环境变量</td>
+            <td>支持 ISO-8601 时长或日期：<code>pip install --uploaded-prior-to P3D &lt;pkg&gt;</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.3 开源底座与商业闭源许可排雷（警惕“代码 Apache、规则限制商用”双重陷阱！）</h3>
+      <p>投毒检测领域最隐蔽的商业坑在于：<strong>不少开源工具的代码主体挂着 <code>Apache-2.0</code>，但它强依赖的底层引擎或默认打包的规则库却带有 <code>LGPL-2.1</code>、<code>ELv2</code> 或 <code>DRL</code> 商业限制！</strong>选型时必须逐层剥离核验：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:23%" />
+          <col style="width:20%" />
+          <col style="width:27%" />
+          <col style="width:30%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源项目 / 引擎</th>
+            <th>代码与规则/依赖双层许可</th>
+            <th>技术定位与核心优势</th>
+            <th>商业闭源架构边界（严守红线）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://github.com/ossf/malicious-packages" target="_blank" rel="noopener"><code>ossf/malicious-packages</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>标准 OSV <code>MAL-*</code> 跨生态已知恶意包情报聚合库。</td>
+            <td><strong>直接冷启动接入</strong>：同步进 Layer 3 内存索引，做 Tier 0 秒级已知恶意包拦截。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/ossf/package-analysis" target="_blank" rel="noopener"><code>ossf/package-analysis</code></a> &amp; <a href="https://github.com/ossf/package-feeds" target="_blank" rel="noopener"><code>package-feeds</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>全套多生态实时发布流归一化与 <strong>gVisor</strong> 动态沙箱引爆（<code>strace</code>/<code>pcap</code>）参考流水线。</td>
+            <td><strong>可直接借鉴/部署</strong>：作后台 Tier 2 异步沙箱 Worker 运行，避免前端热路径同步引爆。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/VirusTotal/yara-x" target="_blank" rel="noopener"><code>VirusTotal/yara-x</code></a> + <a href="https://github.com/oxc-project/oxc" target="_blank" rel="noopener"><code>oxc</code></a> + <a href="https://github.com/tree-sitter/tree-sitter" target="_blank" rel="noopener"><code>Tree-sitter</code></a></strong></td>
+            <td><code>BSD-3-Clause</code> / <code>MIT</code> / <code>MIT</code><br/><span class="badge badge-ok">纯商用友好</span></td>
+            <td>VirusTotal 官方 Rust 重写的高速特征引擎（<code>yara-x</code>）、极速 JS/TS 解析器（<code>oxc</code>）与多语言 CST 解析（<code>Tree-sitter</code>）。</td>
+            <td><strong>Tier 1 静态自研首选底座</strong>：彻底无任何传染与竞品限制，用自研 Capability 规则完全掌控核心检测壁垒。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/DataDog/guarddog" target="_blank" rel="noopener"><code>DataDog/guarddog</code></a></strong></td>
+            <td>代码 <code>Apache-2.0</code><br/><span class="badge badge-warn">底层强依赖 Semgrep (LGPL-2.1) + 受限规则</span></td>
+            <td>优秀的 PyPI/npm/Go 恶意包启发性检测框架（AST 规则 + 元数据启发式）。</td>
+            <td><strong>切勿直接内嵌分发</strong>：GuardDog 底层调 Semgrep CE（<code>LGPL-2.1</code>，且 Semgrep 官方规则库为禁止竞品 SaaS 的 <code>Semgrep Rules License v1.0</code>；分支 <a href="https://github.com/opengrep/opengrep" target="_blank" rel="noopener">Opengrep</a> 亦为 <code>LGPL-2.1</code>）。商业产品应<strong>借鉴其启发式清单，改用自有 <code>oxc/Tree-sitter</code> AST 引擎重写规则</strong>。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://github.com/chainguard-dev/malcontent" target="_blank" rel="noopener"><code>chainguard-dev/malcontent</code></a></strong></td>
+            <td>Go 代码 <code>Apache-2.0</code><br/><span class="badge badge-danger">内置三方 YARA 含 ELv2 / DRL 1.1</span></td>
+            <td>首创文件/镜像/包版本间 <strong>Capability Diff（<code>mal diff</code>）</strong> 风险delta评估架构。</td>
+            <td><strong>必须清洗规则库！</strong>Malcontent 默认打包的 14,500+ YARA 规则混入 Elastic（<strong><code>ELv2</code></strong>，禁提供竞品托管服务）与 Nextron（<strong><code>DRL 1.1</code></strong>，限制商业再分发）。商业 SaaS 必须剥离受限第三方规则，仅嵌入自有规则 + <code>yara-x</code>！</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大典型对抗场景（维护者接管 <code>postinstall</code>、合法库 <code>axios</code> 误报压测、AI Slopsquatting 幻觉包名、反沙箱逻辑炸弹与源码漂移），亲自开关“跨版本 Capability Diff”“72h 冷却期”与“防火墙/MCP 事前拦截”，验证降噪与毫秒级阻断效果；在<strong>模式二</strong>中输入任意包名实测真实 <strong>Damerau-Levenshtein 编辑距离</strong>与 PEP 503 归一化碰撞，并拖动冷却期滑块权衡 0-day 覆盖率与紧急补丁摩擦。</p>
+    </div>
+
+    <!-- INTERACTIVE MALWARE DETECTION LAB -->
+    <section class="widget-panel full-width" data-widget="malware-detection-lab">
+      <script type="application/json" class="malware-detection-lab-data">
+        {
+          "title": "交互实验台：恶意包四级漏斗、跨版本能力差分与抢注/冷却期模拟器",
+          "intro": "对比传统 CVE 扫描、纯单版规则与第三代能力差分引擎的裁决差异，并实测 Damerau-Levenshtein 抢注算法与冷却期 ROI。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 3/4 恶意包与投毒防御引擎架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为商业闭源 SCA 平台构建对标 Socket.dev 的投毒防御内核，需同时覆盖人类 CLI/CI 与 AI Coding Agent，且严守商用许可证红线。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐现代第三代投毒防御体系！你已构建起「实时流 + MAL 冷启动 + 能力差分 + 冷却窗 + 防火墙/MCP 事前阻断」的纯商用合规闭环。",
+            "warning": "方案基本可行，但在 {warning} 项上存在较高误报噪音、事后拦截太晚或冷却期误伤紧急热修的体验风险（标黄项），建议按能力差分与双触点进一步收口。",
+            "critical": "当前方案踩中 {critical} 处严重雷坑（标红项）：可能触发 ELv2/DRL/LGPL 商业违约、被 npm 2025 接口废弃打断同步、或让反沙箱与安装脚本直接击穿开发机！"
+          },
+          "modules": [
+            {
+              "name": "上游实时发布流接入架构（npm & PyPI）",
+              "layer": "实时流摄入 · 协议合规",
+              "context": "需要秒级/分钟级捕获公共仓库新发布包，抢在社区 MAL-* 收录前的 0-day 窗口做分析。",
+              "options": [
+                {
+                  "label": "npm 轮询 replicate.npmjs.com/registry/_changes（since+limit）异步拉包；PyPI 走 changelog_since_serial + package-feeds 规范化",
+                  "status": "optimal",
+                  "verdictTitle": "契合 npm 2025-05-29 废弃变更后的生产标准架构",
+                  "feedback": "规避了已下线的 include_docs/continuous 参数，以轻量变更索引驱动异步并发拉包解析。"
+                },
+                {
+                  "label": "沿用旧脚本向 skimdb.npmjs.com 发 ?feed=continuous&include_docs=true&heartbeat=30000 长连接拉全量文档",
+                  "status": "critical",
+                  "verdictTitle": "接口已废弃失效！自 2025-05-29 起不支持的参数将直接返回 404 错误",
+                  "feedback": "必须立即迁移至轻量化 /registry/_changes 增量序列并分离文档拉取。"
+                },
+                {
+                  "label": "放弃公共仓实时流，仅在每天凌晨 2 点全量同步一次 ossf/malicious-packages Git 仓库",
+                  "status": "warning",
+                  "verdictTitle": "对已曝光旧毒包有效，但无法覆盖投毒黄金前 24 小时的 0-day 攻击窗口",
+                  "feedback": "多数恶意包存活不到 1 天就被下架并已窃取凭据，必须辅以实时流与冷却期。"
+                }
+              ]
+            },
+            {
+              "name": "静态行为检测与误报抑制核心算法",
+              "layer": "Tier 1 静态壁垒 · 压低误报",
+              "context": "需要检出 postinstall 窃密与维护者接管投毒，同时绝不能把 axios、aws-sdk 等合法网络库误报拉黑。",
+              "options": [
+                {
+                  "label": "基于 MIT/BSD 解析器提取 12 类能力位图，计算跨版本 Capability Diff（AddedCaps）并叠加维护者/源码漂移乘子",
+                  "status": "optimal",
+                  "verdictTitle": "对标 Socket.dev 的核心护城河：精准捕捉版本跃变，压低老牌库噪音",
+                  "feedback": "以相对增量能力而非绝对敏感 API 触发拦截，同时靠 Tarball vs Git Tag 漂移抓出源码未提交暗桩。"
+                },
+                {
+                  "label": "只要包内出现 HTTP 请求、读取 process.env 或 child_process 即直接判为恶意包硬阻断",
+                  "status": "warning",
+                  "verdictTitle": "误报率灾难性飙升，一周内就会因大量阻断正常 SDK 被研发团队要求关闭",
+                  "feedback": "没有历史版本能力基线与意图组合规则，单版敏感 API 匹配在生产环境不可用。"
+                },
+                {
+                  "label": "复用原有静态函数级调用图（Call Graph）扫描工程，未进入主程序调用链的包一律忽略",
+                  "status": "critical",
+                  "verdictTitle": "56% 安装期投毒直接漏放！安装钩子执行时主程序调用图根本尚未启动",
+                  "feedback": "必须明确区分「漏洞可达性（Call Graph）」与「主动投毒安装/导入期自执行」两套检测模型。"
+                }
+              ]
+            },
+            {
+              "name": "商用开源引擎与检测规则许可证边界",
+              "layer": "L3/L4 核心 · 商用红线",
+              "context": "希望加快研发进度，拟参考 GuardDog、Malcontent、yara-x 与 oxc 构建商业闭源恶意包引擎。",
+              "options": [
+                {
+                  "label": "自研 Go 裁决内核 + MIT/BSD（oxc / Tree-sitter / yara-x）+ Apache-2.0（ossf/malicious-packages & package-analysis）+ 自有规则",
+                  "status": "optimal",
+                  "verdictTitle": "100% 商用安全且牢牢掌握核心恶意判定规则知识产权",
+                  "feedback": "完全绕开 LGPL 依赖、Semgrep 规则禁止竞品条款以及 ELv2/DRL 第三方 YARA 雷区。"
+                },
+                {
+                  "label": "直接把 chainguard-dev/malcontent 默认自带的全部 14,500+ YARA 规则打进商业 SaaS 服务售卖",
+                  "status": "critical",
+                  "verdictTitle": "踩中 ELv2 与 DRL 1.1 商用禁区！第三方规则库严禁直接打包提供竞品商业托管服务",
+                  "feedback": "Malcontent 代码虽是 Apache-2.0，但其聚合的 Elastic/Nextron 规则有严格商业竞品限制，必须剥离清洗。"
+                },
+                {
+                  "label": "以容器调用 GuardDog CLI 并依赖 Semgrep 官方社区规则集直接输出商业报告",
+                  "status": "warning",
+                  "verdictTitle": "存在 Semgrep Rules License v1.0 竞品商用禁止条款与 LGPL-2.1 隔离审计风险",
+                  "feedback": "可参考 GuardDog 启发式思路，但商业化核心规则必须用自有 AST 引擎实现。"
+                }
+              ]
+            },
+            {
+              "name": "静动态混合分析与反沙箱对抗分工",
+              "layer": "Tier 1 vs Tier 2 分工",
+              "context": "如何设计静态分析、LLM 语义研判与 gVisor 动态沙箱的协同管线？",
+              "options": [
+                {
+                  "label": "Tier 1 静态 Capability Diff + 高熵/源码漂移全量覆盖；仅 Top 0.5% 可疑包异步进 LLM + gVisor 沙箱深度验证",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾算力经济性、全量覆盖度与高对抗反沙箱逻辑炸弹检出率",
+                  "feedback": "即使恶意包检测 CI=true 逃过 gVisor 休眠，Tier 1 的高熵混淆与源码漂移依然能将其送入 LLM 审阅。"
+                },
+                {
+                  "label": "完全取消静态 AST 分析，所有新发布包一律放进 Docker 跑 npm install 10 秒看有没有外联",
+                  "status": "critical",
+                  "verdictTitle": "极易被延迟执行/检测 CI=true 的逻辑炸弹绕过，且日均数万包动态沙箱算力成本失控",
+                  "feedback": "动态沙箱只能作为漏斗顶端的精检验证，不可取代静态全量分析。"
+                },
+                {
+                  "label": "只做静态 YARA 字符串正则匹配，不建 LLM 与 gVisor 沙箱",
+                  "status": "warning",
+                  "verdictTitle": "面对 Base64/XOR/动态拼接域名或新型多阶段下载载荷极易失效",
+                  "feedback": "高对抗混淆与二阶段远程载荷需要 LLM 语义理解与 gVisor syscall 遥测协同。"
+                }
+              ]
+            },
+            {
+              "name": "发布冷却期与安装前双触点拦截落地",
+              "layer": "事前免疫 · 对齐 LR-0002",
+              "context": "如何保证人类工程师用 npm/uv 以及 AI Coding Agent 写代码时都不会误装 0-day 恶意包或 Slopsquatting？",
+              "options": [
+                {
+                  "label": "私有仓/sfw 防火墙前置拦（默认 72h 冷却 + KEV/Trusted Publisher 豁免）+ Agent MCP sca_check_package 事前阻断",
+                  "status": "optimal",
+                  "verdictTitle": "未落盘即拦截：兼顾 0-day 免疫、紧急补丁通路与 AI Agent 幻觉包免疫",
+                  "feedback": "完美落盘在写入 lockfile 和运行 postinstall 之前，且不阻塞紧急 KEV 热修。"
+                },
+                {
+                  "label": "强制所有包一律硬锁 14 天冷却期且不设任何白名单豁免",
+                  "status": "warning",
+                  "verdictTitle": "当核心框架爆发 CISA KEV 0-day 需要立刻升级热修版时，会把全公司 CI 死锁两周",
+                  "feedback": "冷却期必须与 KEV 热修豁免及可信发布者验签联动。"
+                },
+                {
+                  "label": "只在每周五晚上的定期全量扫描任务中检测恶意包并发送邮件周报",
+                  "status": "critical",
+                  "verdictTitle": "彻底形同虚设！周报发出时恶意脚本早在周一开发机安装瞬间盗走全部密钥",
+                  "feedback": "恶意包防御的核心价值在于“安装前事前拦截”，而非事后盘点。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道实战考题检验 <strong>安装期投毒机理、跨版本能力差分与冷却期、npm 2025 实时流变更、以及 GuardDog/Malcontent 商业许可陷阱</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0015 · 恶意包与供应链投毒检测引擎回忆测验",
+          "intro": "重点检验安装期攻击统计、Capability Diff 降噪、实时流变更与规则库混合许可红线。",
+          "questions": [
+            {
+              "prompt": "为何我们在 Chapter 04 构建的静态函数级调用图（Call Graph）与传统 CVE 库对主流供应链恶意包几乎失效？根据 Ohm 等人 (2020) 的实证，最大诱因是什么？",
+              "options": [
+                "恶意包均采用汇编编写且能绕过全部静态字节码扫描引擎，无法提取导出符号。",
+                "恶意包作者会主动向标准漏洞库提交加密公告，导致商业匹配算法无法索引。",
+                "超半数恶意包在安装钩子即触发且无漏洞编号，此时业务调用图尚未开始构图。",
+                "开源仓库只允许删除已发布的恶意版本记录，因而历史快照完全无法留存证据。"
+              ],
+              "answerIndex": 2,
+              "explanation": "Ohm 等人 (DIMVA 2020, Backstabber's Knife Collection) 实证表明，高达 56% 的恶意包在安装阶段（npm preinstall/postinstall 或 PyPI setup.py）即执行恶意载荷；且主动投毒通常没有 CVE 编号，等到进 MAL-* 情报库时宿主机密钥早已外泄（C 正确）。"
+            },
+            {
+              "prompt": "在设计对标 Socket.dev 的静态行为检测引擎时，如何既抓住老牌库的维护者接管投毒（如 1.4.2 → 1.4.3 塞入窃密钩子），又不把 axios 等合法网络库误报拉黑？",
+              "options": [
+                "计算跨版本能力差分集合，叠加维护者突变与压缩包源码漂移乘子联合裁决。",
+                "凡是源码内出现外网连接或读取环境变量语句的组件，一律直接硬拦截拉黑。",
+                "废弃全量静态分析管线，把所有版本放进容器运行十秒观察是否发起外网请求。",
+                "仅对历史总下载量低于一万次的新包运行行为扫描，老牌热门库直接默认豁免。"
+              ],
+              "answerIndex": 0,
+              "explanation": "纯单版敏感 API 匹配会对合法网络库产生海量误报；而盲信老牌热门库则会放过维护者账号接管投毒；纯动态沙箱易被延迟执行或 CI=true 逻辑炸弹绕过。计算跨版本 AddedCaps = NewCaps \\ PrevCaps 并结合维护者突变与 Tarball/Git Tag 源码漂移乘子，才能低误报抓出异常跃变（A 正确）。"
+            },
+            {
+              "prompt": "架构团队拟基于开源生态自建商业闭源 SaaS 投毒检测服务，以下哪项选型暗藏致命商业许可违约或协议合规红线？",
+              "options": [
+                "接入宽松许可恶意包库冷启动，并用自研规则驱动开源高速解析引擎。",
+                "借鉴开源多生态流归一化流水线，在后台隔离沙箱运行动态采样收集。",
+                "遵循最小发布年龄规范配置代理网关，为可信发布者紧急补丁开白名单。",
+                "直接打包分发开源二进制分析器自带的第三方商业限用检测规则库。"
+              ],
+              "answerIndex": 3,
+              "explanation": "ossf/malicious-packages、ossf/package-analysis 与 package-feeds 为 Apache-2.0，oxc/Tree-sitter 为 MIT，yara-x 为 BSD-3-Clause，均可安全商用。但 chainguard-dev/malcontent 自带的 14,500+ 第三方 YARA 规则混杂了 Elastic ELv2（禁提供竞品托管服务）与 Nextron DRL 1.1；同样 GuardDog 依赖的 Semgrep 官方规则库也有竞品限制且引擎为 LGPL-2.1，商业 SaaS 必须剥离替换（D 正确）。"
+            },
+            {
+              "prompt": "关于 2025 年 5 月 29 日生效的 npm 注册表实时变更流重构，以及面向 AI Coding Agent 的 Slopsquatting 防御，以下哪项工程实践正确？",
+              "options": [
+                "继续向旧域名的连续流接口传递内联文档参数，一次性同步全部历史压缩包源码。",
+                "改用轻量化变更接口按序列拉取增量并异步取包，同时联动智能体接口事前拦截。",
+                "只需在每周五夜间扫描代码仓锁文件即可彻底阻止幻觉包名在开发机上的安装。",
+                "对所有新发布包一律强制锁死十四天且禁止任何紧急漏洞豁免，无需运行静态规则。"
+              ],
+              "answerIndex": 1,
+              "explanation": "npm 已于 2025-05-29 废弃 feed=continuous、include_docs 与 heartbeat 参数（skimdb 301 跳转），必须改用 /registry/_changes?since=...&limit=... 拉取变更标识符再异步取包；同时针对 Coding Agent 19.7% 的包名幻觉风险（Slopsquatting），必须通过 MCP/Hook 在安装前实现亚秒级事前阻断（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计恶意包实时流监控、能力差分规则与商业合规沙箱时，推荐精读以下一手实证论文与 Apache-2.0/MIT 仓库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/ossf/malicious-packages" target="_blank" rel="noopener"><strong>OpenSSF Malicious Packages</strong></a> · <a href="https://github.com/ossf/package-analysis" target="_blank" rel="noopener"><strong>Package Analysis (gVisor)</strong></a> · <a href="https://github.com/ossf/package-feeds" target="_blank" rel="noopener"><strong>Package Feeds</strong></a>（均 <code>Apache-2.0</code>）：标准 <code>MAL-*</code> 格式、实时流与动态引爆原典。</li>
+          <li><a href="https://arxiv.org/abs/2005.09535" target="_blank" rel="noopener"><strong>Ohm et al. (DIMVA 2020), <em>Backstabber's Knife Collection</em></strong></a> &amp; <a href="https://arxiv.org/abs/2204.04008" target="_blank" rel="noopener"><strong>Ladisa et al. (IEEE S&amp;P 2023), <em>SoK: Taxonomy of Attacks on OSS Supply Chains</em></strong></a>：56% 安装期触发实证与攻击树分类。</li>
+          <li><a href="https://github.blog/changelog/2025-05-29-changes-to-npm-registry-changes-feed/" target="_blank" rel="noopener"><strong>GitHub Changelog: npm Registry Changes Feed (2025-05-29)</strong></a> &amp; <a href="https://arxiv.org/abs/2406.10279" target="_blank" rel="noopener"><strong>Spracklen et al. (USENIX Security), <em>Slopsquatting</em></strong></a>：npm 增量流新契约与 LLM 幻觉包名实证。</li>
+          <li><a href="https://github.com/VirusTotal/yara-x" target="_blank" rel="noopener"><code>VirusTotal/yara-x</code> (<code>BSD-3</code>)</a> · <a href="https://github.com/oxc-project/oxc" target="_blank" rel="noopener"><code>oxc-project/oxc</code> (<code>MIT</code>)</a> · <a href="https://github.com/chainguard-dev/malcontent" target="_blank" rel="noopener"><code>chainguard-dev/malcontent</code></a>（借鉴 <code>diff</code>，剥离 <code>ELv2/DRL</code> 规则）· <a href="https://github.com/DataDog/guarddog" target="_blank" rel="noopener"><code>DataDog/guarddog</code></a>（借鉴启发式，勿内嵌 Semgrep 商业限用规则）。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>我们已开启 <strong>Chapter 05（无 CVE 投毒防御、同源检测与 AI 供应链安全）</strong> 首战！你可以把思考带回对话继续深化，或准备进入下一课：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在企业私有制品库（JFrog Artifactory / Sonatype Nexus）中，如何以零侵入 Webhook + Remote Repository Proxy 落地 72h 冷却期和 KEV 紧急豁免？”</li>
+          <li>“如果客户同时有大量外包或闭源 C/C++ 二进制组件、甚至直接复制粘贴开源代码片段（Copy-Paste），连 Manifest 和 PURL 都没有，Layer 1/3 怎么抓出来？”</li>
+          <li>“准备好了！请为我开启 <strong>Lesson 0016（开源代码片段同源检测与无源码二进制 SCA 底层原理）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0014-guided-remediation-and-upgrade-path-solver.html">&larr; 上一课：Lesson 0014 · 无破坏性自动修复</a>
+      <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">配套速查卡：Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Lesson 0016（代码同源与二进制 SCA） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/malware-detection-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
