@@ -89,7 +89,7 @@
             <td><strong>2. Slopsquatting</strong><br/><span class="badge badge-danger">AI 幻觉包名抢注</span></td>
             <td>利用 Coding Agent / LLM <strong>19.7%</strong> 的幻觉推荐包名（43% 可稳定复现），攻击者提前在公网注册该虚构包名。</td>
             <td>开发者与 Agent 往往未核验包是否存在；本地一运行安装命令即被 <code>setup.py</code> 穿透。</td>
-            <td>对齐 <a href="../learning-records/0002-agentic-shift-left-replaces-lsp-only.md">LR-0002</a>：MCP <code>sca_check_package</code> 事前阻断 + 注册时间/下载量门槛。</td>
+            <td>对齐 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006 / LR-0002</a>：MCP <code>sca_check_package</code> 事前阻断 + 注册时间/下载量门槛。</td>
           </tr>
           <tr>
             <td><strong>3. Dependency Confusion</strong><br/><span class="badge badge-danger">私有包名公网劫持</span></td>
@@ -190,7 +190,7 @@
 
     <div class="prose-col">
       <h3>2.2 为什么绝不能对全量包跑动态沙箱？—— 静动态混合的分工铁律</h3>
-      <p>新手架构师常误以为“把每个新发布的包丢进沙箱 `npm install` 跑一遍看它连不连外网就行了”。真实对抗中，纯动态沙箱存在三大死穴：<strong>① 成本爆炸</strong>（npm/PyPI 日均新增数万版本，全量容器引爆算力极贵）；<strong>② 反沙箱逻辑炸弹</strong>（攻击者检测 <code>process.env.CI</code>、<code>os.uptime() &lt; 600</code>、MAC 地址或延迟 48 小时才外连）；<strong>③ 环境触发条件缺失</strong>（某些载荷仅在发现特定内网域名或 AWS Metadata 接口时才运行）。因此必须确立<strong>「Tier 1 静态 AST 能力差分 + 混淆/源码漂移全量兜底，Tier 2 LLM + gVisor 仅对前 0.5% 高疑包做深化验证」</strong>的混合漏斗。</p>
+      <p>新手架构师常误以为“把每个新发布的包丢进沙箱 <code>npm install</code> 跑一遍看它连不连外网就行了”。真实对抗中，纯动态沙箱存在三大死穴：<strong>① 成本爆炸</strong>（npm/PyPI 日均新增数万版本，全量容器引爆算力极贵）；<strong>② 反沙箱逻辑炸弹</strong>（攻击者检测 <code>process.env.CI</code>、<code>os.uptime() &lt; 600</code>、MAC 地址或延迟 48 小时才外连）；<strong>③ 环境触发条件缺失</strong>（某些载荷仅在发现特定内网域名或 AWS Metadata 接口时才运行）。因此必须确立<strong>「Tier 1 静态 AST 能力差分 + 混淆/源码漂移全量兜底，Tier 2 LLM + gVisor 仅对前 0.5% 高疑包做深化验证」</strong>的混合漏斗。</p>
     </div>
 
     <!-- SECTION 3 -->
@@ -283,7 +283,7 @@
     <span class="tok-kw">if</span> score &gt;= <span class="tok-num">45</span> {
         <span class="tok-kw">return</span> DecisionLLMTriage, score, reasons
     }
-    <span class="tok-comment">// 发布冷却期闸门：挡住未过前 72h 窗口的新包（紧急 KEV + 可信发布者白名单豁免）</span>
+    <span class="tok-cmt">// 发布冷却期闸门：挡住未过前 72h 窗口的新包（紧急 KEV + 可信发布者白名单豁免）</span>
     <span class="tok-kw">if</span> in.AgeHours &lt; cooldownHours &amp;&amp; !in.IsKEVHotfix {
         <span class="tok-kw">return</span> DecisionCooldown, score, <span class="tok-kw">append</span>(reasons, <span class="tok-str">"below_release_cooldown_window"</span>)
     }
@@ -320,7 +320,7 @@
             <td><strong>分钟</strong>：<code>minimumReleaseAge: 10080</code>（7 天）或 <code>4320</code>（72h），配合 <code>minimumReleaseAgeStrict: true</code></td>
           </tr>
           <tr>
-            <td><strong>npm (Node.js)</strong></td>
+            <td><strong>npm v11.10+ (Node.js)</strong></td>
             <td><code>min-release-age</code></td>
             <td><code>.npmrc</code></td>
             <td><strong>天</strong>：<code>min-release-age=7</code>（或 <code>3</code>）</td>
@@ -338,7 +338,7 @@
             <td>相对时长或 RFC 3339 时间戳：<code>exclude-newer = "7 days"</code> 或 <code>uv lock --exclude-newer "72 hours"</code></td>
           </tr>
           <tr>
-            <td><strong>pip (Python)</strong></td>
+            <td><strong>pip 26.0+ (Python)</strong></td>
             <td><code>--uploaded-prior-to</code></td>
             <td>CLI 参数 / 环境变量</td>
             <td>支持 ISO-8601 时长或日期：<code>pip install --uploaded-prior-to P3D &lt;pkg&gt;</code></td>
@@ -396,7 +396,7 @@
           <tr>
             <td><strong><a href="https://github.com/chainguard-dev/malcontent" target="_blank" rel="noopener"><code>chainguard-dev/malcontent</code></a></strong></td>
             <td>Go 代码 <code>Apache-2.0</code><br/><span class="badge badge-danger">内置三方 YARA 含 ELv2 / DRL 1.1</span></td>
-            <td>首创文件/镜像/包版本间 <strong>Capability Diff（<code>mal diff</code>）</strong> 风险delta评估架构。</td>
+            <td>首创文件/镜像/包版本间 <strong>Capability Diff（<code>mal diff</code>）</strong> 风险增量（Delta）评估架构。</td>
             <td><strong>必须清洗规则库！</strong>Malcontent 默认打包的 14,500+ YARA 规则混入 Elastic（<strong><code>ELv2</code></strong>，禁提供竞品托管服务）与 Nextron（<strong><code>DRL 1.1</code></strong>，限制商业再分发）。商业 SaaS 必须剥离受限第三方规则，仅嵌入自有规则 + <code>yara-x</code>！</td>
           </tr>
         </tbody>
@@ -541,7 +541,7 @@
                   "label": "私有仓/sfw 防火墙前置拦（默认 72h 冷却 + KEV/Trusted Publisher 豁免）+ Agent MCP sca_check_package 事前阻断",
                   "status": "optimal",
                   "verdictTitle": "未落盘即拦截：兼顾 0-day 免疫、紧急补丁通路与 AI Agent 幻觉包免疫",
-                  "feedback": "完美落盘在写入 lockfile 和运行 postinstall 之前，且不阻塞紧急 KEV 热修。"
+                  "feedback": "完美拦截在写入 lockfile 和运行 postinstall 之前，且不阻塞紧急 KEV 热修。"
                 },
                 {
                   "label": "强制所有包一律硬锁 14 天冷却期且不设任何白名单豁免",
@@ -632,7 +632,7 @@
         <ul style="margin-bottom:0.5rem;">
           <li><a href="https://github.com/ossf/malicious-packages" target="_blank" rel="noopener"><strong>OpenSSF Malicious Packages</strong></a> · <a href="https://github.com/ossf/package-analysis" target="_blank" rel="noopener"><strong>Package Analysis (gVisor)</strong></a> · <a href="https://github.com/ossf/package-feeds" target="_blank" rel="noopener"><strong>Package Feeds</strong></a>（均 <code>Apache-2.0</code>）：标准 <code>MAL-*</code> 格式、实时流与动态引爆原典。</li>
           <li><a href="https://arxiv.org/abs/2005.09535" target="_blank" rel="noopener"><strong>Ohm et al. (DIMVA 2020), <em>Backstabber's Knife Collection</em></strong></a> &amp; <a href="https://arxiv.org/abs/2204.04008" target="_blank" rel="noopener"><strong>Ladisa et al. (IEEE S&amp;P 2023), <em>SoK: Taxonomy of Attacks on OSS Supply Chains</em></strong></a>：56% 安装期触发实证与攻击树分类。</li>
-          <li><a href="https://github.blog/changelog/2025-05-29-changes-to-npm-registry-changes-feed/" target="_blank" rel="noopener"><strong>GitHub Changelog: npm Registry Changes Feed (2025-05-29)</strong></a> &amp; <a href="https://arxiv.org/abs/2406.10279" target="_blank" rel="noopener"><strong>Spracklen et al. (USENIX Security), <em>Slopsquatting</em></strong></a>：npm 增量流新契约与 LLM 幻觉包名实证。</li>
+          <li><a href="https://github.blog/changelog/2025-02-27-changes-and-deprecation-notice-for-npm-replication-apis/" target="_blank" rel="noopener"><strong>GitHub Changelog: npm Replication APIs Deprecation (2025-02-27 公告 · 2025-05-29 生效)</strong></a> &amp; <a href="https://arxiv.org/abs/2406.10279" target="_blank" rel="noopener"><strong>Spracklen et al. (USENIX Security), <em>Slopsquatting</em></strong></a>：npm 增量流新契约与 LLM 幻觉包名实证。</li>
           <li><a href="https://github.com/VirusTotal/yara-x" target="_blank" rel="noopener"><code>VirusTotal/yara-x</code> (<code>BSD-3</code>)</a> · <a href="https://github.com/oxc-project/oxc" target="_blank" rel="noopener"><code>oxc-project/oxc</code> (<code>MIT</code>)</a> · <a href="https://github.com/chainguard-dev/malcontent" target="_blank" rel="noopener"><code>chainguard-dev/malcontent</code></a>（借鉴 <code>diff</code>，剥离 <code>ELv2/DRL</code> 规则）· <a href="https://github.com/DataDog/guarddog" target="_blank" rel="noopener"><code>DataDog/guarddog</code></a>（借鉴启发式，勿内嵌 Semgrep 商业限用规则）。</li>
         </ul>
       </div>

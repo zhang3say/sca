@@ -139,9 +139,9 @@
   实证确认 **56%** 恶意包在安装期（`preinstall`/`postinstall`/`setup.py`）触发且无 CVE 编号；系统分类 Typosquatting/Combosquatting、Slopsquatting（LLM 幻觉 19.7%）、Dependency Confusion、Account Takeover 与构建产物夹带五大载体。
 - [OpenSSF Supply Chain Malware Infrastructure: `ossf/malicious-packages` (`Apache-2.0`) · `ossf/package-analysis` (`Apache-2.0`) · `ossf/package-feeds` (`Apache-2.0`)](https://github.com/ossf/malicious-packages)
   `ossf/malicious-packages` 以 OSV `MAL-*` 格式汇聚已确认恶意包情报（冷启动必接底座）；`package-feeds` 归一化多生态实时更新流；`package-analysis` 示范基于 **gVisor** 用户态内核的 `strace`/`pcap` 隔离引爆沙箱架构。
-- [Realtime Registry Feeds (2025 Breaking Change): npm `replicate.npmjs.com/registry/_changes` (2025-05-29 Deprecation) · PyPI `changelog_since_serial` & PEP 691](https://github.blog/changelog/2025-05-29-changes-to-npm-registry-changes-feed/)
+- [Realtime Registry Feeds (2025 Breaking Change): npm `replicate.npmjs.com/registry/_changes` (2025-05-29 Deprecation) · PyPI `changelog_since_serial` & PEP 691](https://github.blog/changelog/2025-02-27-changes-and-deprecation-notice-for-npm-replication-apis/)
   npm 自 2025-05-29 起正式废弃 CouchDB `feed=continuous`、`include_docs=true` 与 `heartbeat` 参数（`skimdb` 301 跳转），须改用轻量化 `GET /registry/_changes?since=<seq>&limit=<n>` 增量拉取序列并异步下载元数据与 Tarball。
-- [Static Engines, Cooldowns & Commercial License Minefields: `VirusTotal/yara-x` (`BSD-3-Clause`) · `oxc-project/oxc` (`MIT`) vs `DataDog/guarddog` (`Apache-2.0` + Semgrep `LGPL-2.1`/Rules v1.0) · `chainguard-dev/malcontent` (`Apache-2.0` + `ELv2`/`DRL 1.1`)]
+- [Static Engines, Cooldowns & Commercial License Minefields: `VirusTotal/yara-x` (`BSD-3-Clause`) · `oxc-project/oxc` (`MIT`) vs `DataDog/guarddog` (`Apache-2.0` + Semgrep `LGPL-2.1`/Rules v1.0) · `chainguard-dev/malcontent` (`Apache-2.0` + `ELv2`/`DRL 1.1`)](https://github.com/VirusTotal/yara-x)
   纯商用 AST/特征底座首选 `oxc` + `Tree-sitter`（`MIT`）+ `yara-x`（`BSD-3-Clause`）；跨生态冷却期规范涵盖 `pnpm` (`minimumReleaseAge` 分钟)、`npm` (`min-release-age` 天)、`uv` (`exclude-newer`)、`pip` (`--uploaded-prior-to`)。**商用排雷**：严禁将 GuardDog 底层 Semgrep 规则或 Malcontent 打包的 Elastic `ELv2` / Nextron `DRL 1.1` 第三方规则直接塞入商业闭源 SaaS，必须剥离替换为自有 Capability Diff 规则；交付侧参考 Socket Firewall (`sfw`) 与 `sca_check_package` MCP 实现安装前零落盘阻断。
 
 ### 商用协议排雷与商业标杆技术剖析
