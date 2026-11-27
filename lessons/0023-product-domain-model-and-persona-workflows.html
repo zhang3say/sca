@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0023：全场景 SCA 产品域模型、五类角色旅程与核心闭环编排</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">Lesson 0022 · 商业矩阵与总装</a>
+        <a href="./0023-product-domain-model-and-persona-workflows.html" class="active">Lesson 0023 · 产品域模型与闭环</a>
+        <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">Ref 08 · 产品架构与双模工程矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0023 · PHASE 4</span>
+        <span class="sep">/</span>
+        <span>CH 07 第 1 课 · 产品架构与域模型</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>全场景 SCA 产品域模型、五类角色旅程与核心闭环编排</h1>
+      <p class="subtitle">学完前 22 课，你已经拥有 L1–L4 全栈引擎原理与「一核三阶」商业分层蓝图；但真正打开 IDE 建表写代码前，80% 的绿地 SCA 项目会栽在同一个坑里——<strong>直接把“单次 SBOM 扫描结果”当成数据库主业务模型</strong>。本课为「1 人 + AI Agent」双模产品立下第一块工程基石：<strong>8 层产品域对象契约、五类角色 4 条端到端闭环，以及一套代码同时跑通 SaaS 订阅与离线私有化开关的 <code>OpenFeature</code> Entitlement 网关</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>划清 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Layer 2 IR</a>（技术事实层）与产品域台账（业务治理层）的边界；拍板 <code>Snapshot × LogicalFinding × ReleaseBundle</code> 三分离结构；掌握用 CNCF <a href="https://openfeature.dev/" target="_blank" rel="noopener"><code>OpenFeature</code></a>（<code>Apache-2.0</code>）统一双模商业能力开关</span>
+        <span><strong>前置关联：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002 (Layer 2 IR)</a> · <a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">Lesson 0013 (VEX)</a> · <a href="./0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">Lesson 0022 (一核三阶 SKU)</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">Solo + AI Agent 研发第一铁律：先锁死域模型，再让 AI 写代码</div>
+      <p>AI Coding Agent 最擅长在清晰的实体关系与接口契约内高速生成 Go/Python 代码，但也最容易在“领域边界模糊”时造出两套打架的表结构——比如把人工豁免直接塞进每次扫描生成的 JSON 里。把 8 个核心业务实体的主键、不可变性与生命周期写进第一天的数据模型，后续无论是加 AI-BOM、做 0-day 夜间重算，还是导出欧盟 CRA 封板证据，都不必推倒重来。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么不能把「扫描结果表」直接当产品？—— 8 层统一产品域模型</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 技术事实（L2 IR）与业务治理（Product Domain）的本质分离</h3>
+      <p>在 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> 中我们确立了平台底层的 <strong>Layer 2 统一 IR</strong>（记录组件 PURL、SHA256 与依赖边）。但在真实产品里，企业买的不是“每一次 CLI 吐出来的 JSON 文件”，而是持续可控的资产风险台账。参考 <a href="https://dependencytrack.org/" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5</strong></a>（<code>Apache-2.0</code>）的实体拆分经验并进一步适配现代化多触点/AI 供应链场景，我们的产品域必须由内向外划分为 <strong>8 个职责正交的核心对象</strong>：</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">最常见的致命反模式：Finding 强绑定 Snapshot</span>
+        一旦把漏洞记录（<code>Finding</code>）直接作为 <code>Snapshot</code> 的子行且不建逻辑定位键，只要研发改了一行注释触发新扫描，昨天的全部 <code>VEX NOT_AFFECTED</code> 豁免和负责人指派就会“原地失忆”，次日 PR 再次全红炸群。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:24%" />
+          <col style="width:28%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>域对象实体</th>
+            <th>核心主键与定位粒度</th>
+            <th>可变性 &amp; 生命周期契约</th>
+            <th>为什么不能与上下层合并？</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Tenant</strong><br/>租户 / 组织根</td>
+            <td><code>tenant_id (UUIDv7)</code><br/>私有化单租户固定默认 UUID</td>
+            <td>全局隔离边界；挂载商业 SKU 档位、SSO/SCIM 身份源与数据保留策略。</td>
+            <td>即使第一批只交付单机私有化，表结构里保留 <code>tenant_id</code> 也是零成本实现双模同构的前提。</td>
+          </tr>
+          <tr>
+            <td><strong>2. Workspace</strong><br/>事业部 / 业务域</td>
+            <td><code>workspace_id</code><br/><code>(tenant_id, slug)</code></td>
+            <td>承载组织权限树（RBAC/ABAC 作用域）与按业务线的合规基线策略。</td>
+            <td>避免把上万个微服务平铺在一个全局列表里，支撑集团型客户按团队分权分域治理。</td>
+          </tr>
+          <tr>
+            <td><strong>3. Project (App)</strong><br/>逻辑应用 / 仓库组</td>
+            <td><code>project_id</code><br/>绑定 Backstage <code>spec.owner</code></td>
+            <td>承载业务归属团队、重要等级（Tier-0/生产/测试）与统一 MTTR 考核指标。</td>
+            <td>Monorepo 中一个代码仓常产出多个后端服务、AI 模型与镜像，<code>Project</code> 负责把多形态资产聚回业务主视角。</td>
+          </tr>
+          <tr>
+            <td><strong>4. Asset (Target)</strong><br/>具体扫描目标</td>
+            <td><code>asset_id</code><br/><code>(project_id, kind, locator)</code></td>
+            <td>区分 <code>SOURCE_MANIFEST</code>、<code>OCI_IMAGE</code>、<code>AI_MODEL_DIR</code>、<code>MCP_CONFIG</code> 与 <code>BINARY</code>。</td>
+            <td>源码仓根目录与最终上线容器镜像的组件构成、OS 层漏洞及豁免粒度完全不同，必须拆成独立 Target。</td>
+          </tr>
+          <tr>
+            <td><strong>5. Snapshot</strong><br/>不可变扫描快照</td>
+            <td><code>snapshot_id</code><br/>绑定 Commit SHA / Image Digest + <code>cas_hash</code></td>
+            <td><strong>只追加、永不修改（Immutable）</strong>：固化某一时刻采集到的 L2 IR 成分图与工具指纹。</td>
+            <td>保留时间点真实历史，用于 PR 增量 Diff、历史版本回溯与 <a href="./0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">EU CRA</a> 合规审计还原。</td>
+          </tr>
+          <tr>
+            <td><strong>6. LogicalFinding</strong><br/>活体风险与漏洞台账</td>
+            <td><code>finding_id</code><br/>稳定指纹（<code>asset_id + branch + purl_key + rule_or_vuln_id + symbol</code>）</td>
+            <td><strong>跨 Snapshot 持续演化状态机</strong>（<code>OPEN / FIXED / REOPENED / SUPPRESSED / VEX_NOT_AFFECTED</code>）。</td>
+            <td>实现“新扫描仅刷新 <code>last_seen_snapshot</code>，0-day 夜间爆发不重跑 CI 也可由后台直接生成或更新 Finding”。</td>
+          </tr>
+          <tr>
+            <td><strong>7. Policy &amp; Waiver</strong><br/>策略决策与人工豁免</td>
+            <td><code>waiver_id</code> + <code>vex_statement_id</code><br/>绑定 <code>finding_id</code> 或全局策略作用域</td>
+            <td>带有效期（<code>expires_at</code>）、审批人、Justification（遵循 <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a>）与自动到期重激活。</td>
+            <td>人工审计心血属于独立审计资产，绝不可随某次构建日志过期清理而销毁。</td>
+          </tr>
+          <tr>
+            <td><strong>8. RemediationTask</strong><br/>聚合修复与触达工单</td>
+            <td><code>task_id</code><br/>按「同一 Project + 同一修复升级动作」聚类</td>
+            <td>把多条同源 CVE（如升级 <code>log4j-core</code> 一次性解决 6 个漏洞）聚合成 1 个 PR / 1 条 Agent 修复指令。</td>
+            <td>彻底把“漏洞数据库记录”与“打扰研发的工作流动作”解耦，防止 PR 风暴与工单轰炸。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 发版封板模型：如何解决“活体台账”与“历史不可变审计”的矛盾？</h3>
+      <p>EU CRA 与金融/车企合规审计常要求回答：“<em>半年前发布的 v3.2.0 版本，当时为什么允许带某高危组件上线？</em>”如果只保留活体 <code>LogicalFinding</code>，半年后该漏洞可能已被修复或豁免已过期，历史现场随之丢失。工程解法是在 <code>Snapshot</code> 与 <code>Policy/Waiver</code> 之上增加一个轻量 <strong><code>ReleaseBundle</code>（发版封板视图）</strong>：仅在发版打 Tag 时，将对应 <code>snapshot_id</code>、生成好的 CycloneDX SBOM/NOTICE 对象指针、以及当时生效的 <code>Waiver/VEX</code> 审批列表做一次不可变签名冻结，日常分支扫描与发版审计各行其道。</p>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>五类角色旅程与 4 条端到端产品闭环（拒绝“漏洞堆积表”）</h2>
+
+    <div class="prose-col">
+      <p>传统第一代 SCA 只服务安全工程师看报表，最终沦为“安全部自娱自乐的万条红字表格”。参考 <a href="https://owaspsamm.org/" target="_blank" rel="noopener"><strong>OWASP SAMM</strong></a> 的安全左移与治理度量思路，现代全场景 SCA 必须让五类关键干系人各自在自己顺手的界面里走通闭环，同时共享同一份底层真值：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:24%" />
+          <col style="width:30%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>产品干系人角色</th>
+            <th>核心痛点与工作面</th>
+            <th>端到端闭环动作（Input &rarr; Verdict &rarr; Action）</th>
+            <th>产品域核心状态流转</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. 研发 / AI Agent</strong><br/>（写码与提 PR）</td>
+            <td>痛恨万条存量告警与打断节奏；工作面在 CLI / MCP / Hook 与 Git PR。</td>
+            <td>Agent 装包前调 MCP 拦截幻觉/投毒包；PR 仅对净新增且可达（Reachable）的组件触发单条聚合修复建议。</td>
+            <td><code>Snapshot(PR Diff)</code> &rarr; <code>RemediationTask(PR_BOT / MCP_JSON)</code></td>
+          </tr>
+          <tr>
+            <td><strong>2. AppSec 工程师</strong><br/>（研判与规则运营）</td>
+            <td>每天被无效告警和跨团队扯皮淹没；需要快速证明“为什么不用修”。</td>
+            <td>核验静动态调用链证据，一键签发带过期时间的 VEX <code>NOT_AFFECTED</code>；0-day 突发时 10 秒定损并批量派发聚合工单。</td>
+            <td><code>LogicalFinding</code> &rarr; <code>Waiver / OpenVEX</code> &rarr; 同步刷新工单</td>
+          </tr>
+          <tr>
+            <td><strong>3. DevOps / SRE</strong><br/>（流水线与集群）</td>
+            <td>担心扫描拖慢 CI、源码出内网或 K8s 准入单点宕机。</td>
+            <td>配置快/慢双路径门槛；部署 Hybrid Runner 出站同步；集群网关仅做毫秒级 SLSA VSA/CEL 验签准入。</td>
+            <td><code>Asset(CI/Registry)</code> &rarr; <code>Snapshot</code> &rarr; <code>ReleaseBundle</code> / VSA</td>
+          </tr>
+          <tr>
+            <td><strong>4. 法务 / OSPO</strong><br/>（开源合规审查）</td>
+            <td>手工核对 <code>NOTICE</code>、担心静态链接强传染及 AI 训练数据版权。</td>
+            <td>基于 Declared/Observed 冲突队列做一次 Curation 覆写（全项目继承），发版自动生成可审计合规归档包。</td>
+            <td><code>Snapshot</code> + <code>License Curation</code> &rarr; <code>ReleaseBundle</code></td>
+          </tr>
+          <tr>
+            <td><strong>5. CISO / 管理层</strong><br/>（度量与监管汇报）</td>
+            <td>需要向董事会证明降噪成效、MTTR 下降与满足法规死线。</td>
+            <td>只看经过可达性与 VEX 过滤后的真实风险水位、各团队 SLA 达标率以及 EU CRA / SSDF 导出报告。</td>
+            <td>基于 <code>Workspace / Project</code> 聚合只读 OLAP 趋势指标</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>「一核三阶」Feature Entitlement 与双模一致体验契约</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 切忌在业务代码里写 <code>if isOnPrem || tier == "pro"</code></h3>
+      <p>你的产品第一天就要兼容「公有云 SaaS（按组织动态计费升级）」与「Air-Gapped 私有化（按离线 License 文件解锁）」，同时还要承载 <a href="./0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">Lesson 0022</a> 定下的 <strong>Tier 1 Starter / Tier 2 Pro / Tier 3 Sovereign</strong> 三阶 SKU。对于 1 人 + AI Agent 团队，最灾难的做法是维护两套分支代码或在几百个 handler 里硬编码 <code>if tenant.DeploymentMode == "onprem"</code>。</p>
+      <p>正确解法是采用 CNCF <a href="https://openfeature.dev/" target="_blank" rel="noopener"><strong>OpenFeature</strong></a>（<code>Apache-2.0</code>）建立一层薄而稳定的 <strong>Capability &amp; Entitlement Gateway</strong>：业务与 API 层永远只询问语义化能力键（例如 <code>reachability.static.enabled</code>、<code>ai_bom.scanner.enabled</code>、<code>deploy.hybrid_runner.max_seats</code>），而具体数值从哪里算出来，由启动时注入的 Provider 决定：</p>
+      <ul>
+        <li><strong>SaaS 模式 Provider</strong>：读取中心化 Entitlement 表（带短 TTL 本地内存缓存），支持租户在线增购、7 天试用解锁或针对特定大客户的灰度开关。</li>
+        <li><strong>私有化 / 离线模式 Provider</strong>：启动时使用内置公钥校验离线签名 License 文件（我们将在 <strong>Lesson 0026</strong> 详解 Ed25519 签发机制），直接把离线证书里的权限矩阵映射成一模一样的 OpenFeature Evaluation Context。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">双模一致体验（Parity by Design）铁律</span>
+        私有化客户同样有权限升级模块、也会碰到“未购买 Pro 模块时点击可达性 Tab”的场景。通过统一 Entitlement 接口返回明确的 <code>FEATURE_NOT_ENTITLED</code> 状态码，前后端逻辑 100% 复用，1 个人也能稳稳驾驭双线交付。
+      </aside>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB -->
+    <h2><span class="sec-num">04</span>交互实验台：产品域解耦推演 &amp; 五角色双模 Entitlement 路由</h2>
+
+    <section class="widget-panel full-width" data-widget="product-domain-lab">
+      <script type="application/json" class="product-domain-lab-data">
+        {
+          "title": "交互实验台：产品域对象解耦与五角色 Entitlement 路由模拟器",
+          "intro": "模式一对比「Snapshot 与 LogicalFinding 分离」在 4 个高压场景下的真实差异；模式二演练五类角色在 Tier 1–3 与 SaaS/离线双模下的统一能力开关路由。"
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验域边界与产品闭环决策）</h2>
+
+    <div class="prose-col">
+      <p>先凭记忆回答下面 4 道核心设计题，检验你对域实体拆分、封板审计、聚合修复与双模 Entitlement 的掌握程度。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0023 · 产品域模型与端到端闭环主动回忆测验",
+          "intro": "重点检验 Snapshot/Finding 解耦、Release 封板、Remediation 聚合与 OpenFeature 双模抽象。",
+          "questions": [
+            {
+              "prompt": "在全场景 SCA 产品域模型中，为何必须将 LogicalFinding 从单次扫描生成的 Snapshot 主键中剥离出来？",
+              "options": [
+                "因为不可变快照无法持久化存储组件的开源许可证名称与校验哈希。",
+                "为了跨提交保留人工豁免与状态演化，并支撑零扫描情况下的夜间重算。",
+                "因为只有剥离后才能迫使研发每次提交代码都重新手工审批全部漏洞。",
+                "为了彻底放弃内容寻址去重机制，把每次构建的全部结果复制保存一遍。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Snapshot 固化的是不可变的时间点成分事实；而 LogicalFinding 绑定在逻辑资产位置（Asset + Branch + 稳定指纹），既能跨提交继承既有 Waiver/VEX 状态，也能在夜间爆发 0-day 时由后台情报重算直接刷新（B 正确）。"
+            },
+            {
+              "prompt": "为什么在存在「活体 LogicalFinding 台账」的同时，企业级产品仍需要设计不可变的 ReleaseBundle 封板对象？",
+              "options": [
+                "为了替代 Git 标签管理，直接接管研发团队的所有源码版本控制权限。",
+                "为了把所有测试环境的临时扫描日志永久保留在主库热表内不清理。",
+                "为了在每次日常分支小修改提交时都自动阻断全部线上集群流量运行。",
+                "为了固化发版时刻的组件清单与生效审批证据，防止日后状态变更覆盖。"
+              ],
+              "answerIndex": 3,
+              "explanation": "日常开发态的 Finding 会随修复或豁免过期持续演化；只有发版打 Tag 时通过 ReleaseBundle 冻结当时的 Snapshot、SBOM/NOTICE 指针与有效 Waiver/VEX 审批记录，才能满足 EU CRA 等监管回溯审计要求（D 正确）。"
+            },
+            {
+              "prompt": "针对「1 个组件存在 6 个高危 CVE，升级一次版本即可全部消除」的场景，域模型应如何避免引发工单轰炸？",
+              "options": [
+                "引入独立聚合修复任务实体，按同项目与同升级动作将多条漏洞合一派单。",
+                "把六条高危漏洞拆成六张独立高优工单，分别指派给六个不同的开发者。",
+                "直接删除其中五条高危漏洞的台账记录，只保留评分最高的一条作为存根。",
+                "暂停全部实时通知与修复建议推送，改为每季度末统一发送一份压缩包。"
+              ],
+              "answerIndex": 0,
+              "explanation": "将 RemediationTask 从 LogicalFinding 解耦，按「同一 Project + 同一可执行修复升级动作」聚合派单（给研发提 1 个 PR 或返回 1 条 Agent 建议），可在不丢失任何漏洞台账的前提下彻底消除刷屏（A 正确）。"
+            },
+            {
+              "prompt": "在 1 人 + AI Agent 同时维护 SaaS 与离线私有化双模产品的约束下，如何最优雅地落地「一核三阶」SKU 开关？",
+              "options": [
+                "将后端仓库硬分叉成公有云与私有化两套独立分支，各自手工删减业务接口。",
+                "取消一切商业版本功能分级，所有客户不论付费与否均默认解锁全量能力。",
+                "基于开放开关规范抽象能力评估接口，按部署模式注入云端或离线许可证实现。",
+                "在全部前端组件和后端逻辑里散落写死环境判断分支，靠人工检索来维护。"
+              ],
+              "answerIndex": 2,
+              "explanation": "采用 OpenFeature（Apache-2.0）等中立接口层统一查询语义化能力开关，SaaS 接入多租户实时 Entitlement Provider，离线私有化接入 Ed25519 本地签名 License Provider，做到一套代码零分叉兼容双模与 SKU 分级（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://dependencytrack.org/" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5</strong></a>（<code>Apache-2.0</code>）：参考其 <code>Project / Component / Vulnerability / Finding / Analysis</code> 域分离设计。</li>
+          <li><a href="https://openfeature.dev/" target="_blank" rel="noopener"><strong>CNCF OpenFeature Specification</strong></a>（<code>Apache-2.0</code>）：厂商中立、可插拔 Provider 的功能开关与 Entitlement 抽象标准。</li>
+          <li><a href="https://github.com/openvex/spec" target="_blank" rel="noopener"><strong>OpenVEX Spec</strong></a>（<code>Apache-2.0</code>）· <a href="https://owaspsamm.org/" target="_blank" rel="noopener"><strong>OWASP SAMM</strong></a>（<code>Apache-2.0</code>）：标准化豁免状态词表与研发安全闭环度量锚点。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>下一步与导师实时答疑</h3>
+        <p>下一课 <strong>Lesson 0024</strong> 将从域模型下沉到系统架构与代码进程边界：用「1 人 + AI Agent」视角拍板 <strong>Go 模块化单体 + Python 专项 Worker 契约</strong> 与快慢双路径任务编排。有任何疑问可随时追问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“如果客户的同一个镜像先后在 <code>dev</code>、<code>staging</code>、<code>prod</code> 三个环境出现，<code>Asset</code> 和 <code>LogicalFinding</code> 该怎么建索引才不会翻三倍？”</li>
+          <li>“在私有化环境里，<code>OpenFeature</code> 的本地 License Provider 如果遇到临时扩容/POC 延期，状态该如何优雅降级？”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">&larr; 上一课：Lesson 0022 · 商业矩阵与总装</a>
+      <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">速查参考卡：Ref 08 · 产品架构与双模工程矩阵</a>
+      <a href="../index.html">返回课程总览（下一课 0024 即将上线）&rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/product-domain-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

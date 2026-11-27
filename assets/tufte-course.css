@@ -1196,6 +1196,7 @@ tbody tr:hover {
 
 .phase-divider.phase-2 { border-left-color: var(--accent-blue); }
 .phase-divider.phase-3 { border-left-color: var(--ok); }
+.phase-divider.phase-4 { border-left-color: #6b3fa0; }
 
 .phase-divider-title {
   font-family: var(--font-serif);
@@ -1351,6 +1352,9 @@ tbody tr:hover {
 }
 
 @media (max-width: 720px) {
+  .course-nav {
+    position: static;
+  }
   .lesson-row {
     grid-template-columns: 1fr;
     gap: 0.45rem;

@@ -206,6 +206,14 @@
 - [Technical Architecture: Endor Labs Reachability Analysis](https://www.endorlabs.com/) / [Socket.dev Behavioral Supply Chain Analysis](https://socket.dev/) / [Snyk Vulnerability Database & Contextual SCA](https://snyk.io/) / [Wiz Code](https://www.wiz.io/) / [Black Duck](https://www.blackduck.com/)
   全球五大商业标杆的护城河分布：函数级调用图可达性降噪（Endor Labs）、基于 AST 行为信号的主动投毒拦截（Socket）、人工研判+语义版本区间+修复图谱（Snyk）、云运行时图谱关联（Wiz Code，2026-03 并入 Google Cloud）与 C/C++ 二进制及法务合规审计（Black Duck）。用于：校准自研高价值壁垒方向（注意甄别官网内容中的营销表述，聚焦底层架构原理）。
 
+### 产品架构、多租户工程与双模交付（Phase 4 · CH 07 · Lesson 0023+）
+- [Domain Model Reference: OWASP Dependency-Track v5 (`DependencyTrack/dependency-track`, `Apache-2.0`)](https://dependencytrack.org/)
+  示范企业级 SCA 平台最核心的域对象分离模型：**Portfolio / Project → Component (PURL/CPE) × Vulnerability (CVE/OSV/KEV/EPSS) → Finding → Analysis (VEX Triage)**，并在 v5 中统一收敛至 PostgreSQL 状态真值与 CEL 策略自动化，避免将“原始扫描 JSON”或“瞬时快照”直接等价为长期漏洞审计状态。
+- [Feature Flag & Entitlement Spec: OpenFeature (`open-feature/spec`, `openfeature.dev`, `Apache-2.0`)](https://openfeature.dev/)
+  CNCF 孵化的厂商中立 Feature Flag 开放标准（`Apache-2.0`），将业务代码里的能力开关评估与底层配置源解耦——公有云 SaaS 可对接远端多租户 Entitlement 评估器，离线私有化无缝切换至 Ed25519 本地签名 License 文件 Provider，实现一套代码控制 Tier 1–3 功能门控与灰度发布。
+- [AppSec Maturity & BOM/VEX Interop: OWASP SAMM (`Apache-2.0`) · CycloneDX 1.7 (`ECMA-424`) · OpenVEX (`Apache-2.0`)](https://owaspsamm.org/)
+  为五类用户旅程（研发/Agent、AppSec、DevOps/SRE、合规法务、CISO）建立可衡量的度量闭环，并通过标准化的 CycloneDX VDR/SBOM 与 OpenVEX 将产品内部 `Finding` / `Waiver` 状态对外投影为标准交付件。
+
 ## Wisdom (Communities)
 
 - [OpenSSF Working Groups & Slack](https://openssf.org/working-groups/)（重点关注 [Securing Software Repositories WG](https://github.com/ossf/wg-securing-software-repos) 与 Vulnerability Disclosures WG）

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查参考 08：产品域模型、双模架构与工程落地速查矩阵</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023 · 产品域模型与闭环</a>
+        <a href="./ch7-product-arch-and-tech-design-matrix.html" class="active">Ref 08 · 产品架构与双模工程矩阵</a>
+        <a href="./ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>REFERENCE CARD 08</span>
+        <span class="sep">/</span>
+        <span>PRINT-READY CHAPTER 07 CHEAT SHEET</span>
+      </div>
+      <h1>产品域模型、双模架构与工程落地速查矩阵</h1>
+      <p class="subtitle">Chapter 07 &amp; Phase 4（<strong>1 人 + AI Agent · Go+Python · 双模兼容</strong>）架构师与系统工程落地速查卡（<strong>已覆盖 Lesson 0023 精华</strong>；后续将随 <code>0024–0027</code> 逐课增量扩展至服务编排、PG RLS、双模基础设施许可与 AI Benchmark 门禁）。</p>
+      <div class="meta-strip">
+        <span><strong>依据标准与参考底座：</strong><a href="https://dependencytrack.org/" target="_blank" rel="noopener">OWASP Dependency-Track v5</a> (<code>Apache-2.0</code>) · <a href="https://openfeature.dev/" target="_blank" rel="noopener">CNCF OpenFeature</a> (<code>Apache-2.0</code>) · <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> (<code>Apache-2.0</code>) · <a href="https://owaspsamm.org/" target="_blank" rel="noopener">OWASP SAMM</a> (<code>Apache-2.0</code>)</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023</a>（<code>0024–0027</code> 待扩展）</span>
+      </div>
+    </header>
+
+    <!-- SECTION 1: 8-ENTITY PRODUCT DOMAIN DICTIONARY -->
+    <section class="full-width">
+      <h2 style="margin-top:0;"><span class="sec-num">01</span>8 层产品域核心实体与不可变性字典（Lesson 0023）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:18%" />
+            <col style="width:24%" />
+            <col style="width:30%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>实体对象</th>
+              <th>核心主键 / 唯一定位</th>
+              <th>生命周期与不可变规则</th>
+              <th>关键隔离与反模式红线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Tenant / Workspace</strong></td>
+              <td><code>tenant_id (UUIDv7)</code><br/><code>workspace_id</code></td>
+              <td>SaaS 多租户根与业务域边界；私有化单租户固定默认 <code>tenant_id</code>。</td>
+              <td>全表从第一天保留 <code>tenant_id</code>，禁止为私有化删字段分叉 Schema。</td>
+            </tr>
+            <tr>
+              <td><strong>Project &amp; Asset</strong></td>
+              <td><code>project_id</code>（业务组）<br/><code>asset_id (kind, locator)</code></td>
+              <td><code>Project</code> 挂 Backstage Owner 与 KPI；<code>Asset</code> 区分源码/镜像/AI 模型/MCP。</td>
+              <td>禁止把整个 Monorepo 当作唯一扫描粒度，必须拆出异构 Target。</td>
+            </tr>
+            <tr>
+              <td><strong>Snapshot</strong></td>
+              <td><code>snapshot_id</code> + <code>cas_hash</code></td>
+              <td><strong>严格不可变（Immutable）</strong>：固化时间点成分图、Commit/Digest。</td>
+              <td>严禁将人工豁免/审计状态直接写死在 <code>Snapshot</code> 行内。</td>
+            </tr>
+            <tr>
+              <td><strong>LogicalFinding</strong></td>
+              <td><code>finding_id</code> + 稳定位置指纹</td>
+              <td>活体状态机（<code>OPEN/FIXED/REOPENED/SUPPRESSED/VEX_NOT_AFFECTED</code>）。</td>
+              <td>新扫描仅刷新 <code>last_seen_snapshot_id</code>，夜间 0-day 可无扫描直接生成。</td>
+            </tr>
+            <tr>
+              <td><strong>Waiver &amp; ReleaseBundle</strong></td>
+              <td><code>waiver_id</code> (OpenVEX)<br/><code>release_bundle_id</code> (Tag)</td>
+              <td><code>Waiver</code> 随逻辑位置继承并带到期提醒；<code>ReleaseBundle</code> 发版封板冻结。</td>
+              <td>发版证据包必须独立签名固化，不得随日后豁免过期或漏洞修复被覆写。</td>
+            </tr>
+            <tr>
+              <td><strong>RemediationTask</strong></td>
+              <td><code>task_id</code>（按 Project+升级动作聚合）</td>
+              <td>把同组件多条 CVE 合并为 1 个 PR 或 1 条 Agent 修复动作。</td>
+              <td>严禁按“1 CVE = 1 工单/1 PR”向研发刷屏。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 2: 5 PERSONAS & OPENFEATURE DUAL-MODE ENTITLEMENT -->
+    <section class="full-width">
+      <h2><span class="sec-num">02</span>五类角色闭环与 OpenFeature 双模 Entitlement 契约（Lesson 0023）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>角色 / 开关维度</th>
+              <th>主交互面 &amp; SLA</th>
+              <th>端到端闭环产物</th>
+              <th>双模 Entitlement 实现要点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>研发 / AI Coding Agent</strong></td>
+              <td>Single Go Core (MCP/Hook/LSP) &lt;1.5s · PR &lt;15s</td>
+              <td>安装前拦投毒/幻觉包；PR 内聚合无破坏性升级建议。</td>
+              <td rowspan="3">业务代码只调用 <a href="https://openfeature.dev/" target="_blank" rel="noopener"><code>OpenFeature</code></a>（<code>Apache-2.0</code>）语义化 Flag Key；SaaS 挂载动态租户 Provider，Air-Gapped 挂载本地 Ed25519 离线 License Provider。</td>
+            </tr>
+            <tr>
+              <td><strong>AppSec &amp; DevOps/SRE</strong></td>
+              <td>Triage 台 &lt;10s 0-day 定损 · K8s VSA &lt;50ms</td>
+              <td>静动态可达性举证 + OpenVEX 签发；Hybrid Runner / 准入网关阻断。</td>
+            </tr>
+            <tr>
+              <td><strong>法务 OSPO &amp; CISO</strong></td>
+              <td>License 中心 &amp; 集团态势大盘（分钟级 OLAP）</td>
+              <td><code>ReleaseBundle</code> 监管归档（EU CRA）+ 可达性降噪/MTTR 水位。</td>
+            </tr>
+            <tr>
+              <td><strong>统一未授权降级语义</strong></td>
+              <td>API 固定错误码 <code>FEATURE_NOT_ENTITLED</code></td>
+              <td>前端与 CLI 统一提示所需 SKU 等级，无需区分 SaaS 或私有化分支。</td>
+              <td>彻底杜绝代码库出现 <code>if isOnPrem</code> / <code>if tenant == ...</code> 硬分叉。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="../lessons/0023-product-domain-model-and-persona-workflows.html">&larr; 回到 Lesson 0023 · 产品域模型与闭环</a>
+      <a href="../index.html">返回课程首页 &middot; 23 / 27 课 &rarr;</a>
+    </footer>
+  </main>
+</body>
+</html>
