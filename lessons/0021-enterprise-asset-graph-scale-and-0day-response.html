@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0021：企业级海量资产台账、全图谱检索与 0-day 秒级应急响应架构</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+        <a href="./0021-enterprise-asset-graph-scale-and-0day-response.html" class="active">Lesson 0021 · 海量资产与 0-day 应急</a>
+        <a href="../reference/ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0021</span>
+        <span class="sep">/</span>
+        <span>PHASE 3 &amp; CH 06 第 2 课（大规模工程化与应急响应）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>企业级海量资产台账、全图谱检索与 0-day 秒级应急响应架构</h1>
+      <p class="subtitle">很多商业与开源 SCA 在 POC 阶段跑几十个仓库流畅无比，一旦放进 <strong>10,000+ 微服务、1 亿+ 依赖边、每日 3 万次 CI 推送</strong>的企业真实环境，往往瞬间被重复 SBOM 撑爆数据库、被循环依赖拖垮递归查询、或在 Log4Shell 级 0-day 爆发时算不出爆炸半径。本课剖析 <a href="https://github.com/guacsec/guac" target="_blank" rel="noopener"><strong>OpenSSF GUAC</strong></a>（自 <code>v0.6.0</code> 收敛至 PostgreSQL）与 <a href="https://dependencytrack.org/" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5</strong></a>（Project Hyades）的真实演进教训，落地 <strong>CAS 内容寻址去重、冷热温三层存储、<code>RoaringBitmap</code> 内存倒排、PG 14+ <code>CYCLE</code> 路径还原、Backstage 团队归属路由及 CEL vs OPA 策略热更新</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>看透图数据库商业许可陷阱（Neo4j <code>GPL-3.0</code>、ArangoDB/Memgraph <code>BSL</code>）与关系底座收敛趋势；掌握 CAS 图去重、Hot/Warm/Cold 三层架构、<code>RoaringBitmap/roaring/v2</code> + PG 14+ <code>CYCLE</code> 10 秒 0-day 检索；划清 <code>google/cel-go</code>（K8s <code>1.30</code> <code>ValidatingAdmissionPolicy</code>）与 <code>OPA</code> 分工及 Shadow Dry-Run 热更铁律</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> · <a href="./0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（规模化生死线 · 从“能扫单个仓”到“10 秒掌控全公司”）</div>
+      <p>当 CEO 在周五凌晨发问“<strong>新爆发的 0-day 影响了公司哪几个核心支付服务？谁负责修？集群现在拦住了没有？</strong>”，你只有 <strong>10 秒钟</strong>给出答案：不能去扫原始 JSONB，也不能把 2,000 条孤儿告警塞给已经离职的人，更不能没灰度就直接阻断线上紧急热修发版。这要求你在存储、内存索引、团队路由与策略热更四层做出彻底的规模化设计。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>规模化雪崩根源、开源底座收敛与 CAS 三层存储架构</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 为什么连 GUAC 和 Dependency-Track v5 都最终收敛到 PostgreSQL？</h3>
+      <p>早年供应链安全界曾流行“万事皆用专用原生图数据库（Neo4j / ArangoDB）”的构想，但大规模生产落地迅速戳破了这一执念：</p>
+      <ul>
+        <li><strong>OpenSSF GUAC（<code>Apache-2.0</code>）的后端演进：</strong>早期曾探索 Neo4j/openCypher 与 ArangoDB，但自 <code>v0.6.0</code> 起官方将 <strong>PostgreSQL（基于 Go <code>ent</code> ORM）</strong> 定为唯一完整支持并持续优化的生产持久化后端，而 Neo4j 与 ArangoDB 均留在 unsupported / incomplete 队列。</li>
+        <li><strong>OWASP Dependency-Track v5（Project Hyades，<code>Apache-2.0</code>）的重构：</strong>为了摆脱 v4 单体内存队列（<code>ExecutorService</code>）与本地磁盘 Lucene 索引无法水平扩展的瓶颈，v5 全面转向无状态多实例 + <strong>PostgreSQL 作为单一状态真值与协调底座</strong>。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">为何不把“全部原始 SBOM JSON”直接塞进 PG？</span>
+        若每天 3 万次 CI 推送每次都写入 2–5 MB 的完整 CycloneDX JSON 与 4,000 条重复依赖边，一个月就会产生数亿条高度重复的垃圾行。必须引入 <strong>CAS 内容寻址图去重</strong>：95% 以上未改锁文件的构建只写 1 行几十字节的 <code>snapshot_ref</code> 指针！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:23%" />
+          <col style="width:31%" />
+          <col style="width:26%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>存储层级 / 机制</th>
+            <th>存储介质与保留窗口</th>
+            <th>存放数据与去重数据结构</th>
+            <th>核心性能与成本收益</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>CAS 子图去重字典</strong><br/>（入库前前置闸门）</td>
+            <td>PostgreSQL + 内存 Bloom/LRU</td>
+            <td>规范化组件表 + 依赖边排序后计算 <code>dep_tree_hash = SHA256(...)</code>；项目分支仅存轻量快照引用表。</td>
+            <td>将日均数万次重复 CI 推送的物理边存储与写入 IOPS 压缩 <strong>90%–96%</strong>。</td>
+          </tr>
+          <tr>
+            <td><strong>Hot Layer（热层）</strong><br/>（秒级应急主战场）</td>
+            <td>PostgreSQL 分区表 + Go <code>RoaringBitmap</code> 内存倒排</td>
+            <td>仅保存各项目<strong>默认分支最新快照 + 线上运行中容器 Digest</strong> 的活跃组件关系、VSA 状态与可达性标记。</td>
+            <td>把数亿条历史流水缩减到千万级活跃映射，支撑 <strong>&lt; 2 秒</strong>完成 0-day 全公司爆炸半径交集计算。</td>
+          </tr>
+          <tr>
+            <td><strong>Warm Layer（温层）</strong><br/>（安全运营趋势分析）</td>
+            <td><a href="https://clickhouse.com/" target="_blank" rel="noopener"><strong>ClickHouse</strong></a>（<code>Apache-2.0</code>）</td>
+            <td>按天分区存储 30–90 天历史漏洞发现、MTTR 修复时效、各部门清零燃尽曲线与策略拦截审计流。</td>
+            <td>彻底把重度 OLAP <code>GROUP BY</code> 统计查询从主业务 PostgreSQL 剥离，避免报表拖慢生产门禁。</td>
+          </tr>
+          <tr>
+            <td><strong>Cold Layer（冷层）</strong><br/>（合规审计留存）</td>
+            <td>S3 / 对象存储（Zstd Parquet）</td>
+            <td>1–7 年完整原始 CycloneDX / SPDX / SLSA Provenance 与 Sigstore Bundle v0.3 WORM 不可变归档。</td>
+            <td>存储单价降低 10 倍以上，既满足监管溯源回溯，又零占用主库内存与 SSD 空间。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>10 秒 0-day 爆炸半径检索与 Backstage 团队归属路由</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 三段式极速流水线：先内存位图缩小范围，再安全还原依赖路径</h3>
+      <p>面对 Log4Shell 级 0-day 爆发，最蠢的做法是对上万个项目同时跑全图遍历或正则扫 JSONB。正确的工程流水线分为三段：</p>
+      <ol>
+        <li><strong>第一段（&lt; 5 ms）· 内存 <code>RoaringBitmap</code> 多维交集：</strong>在内存中维护 <code>purl_ver_id &rarr; roaring.Bitmap</code>、<code>env_prod &rarr; Bitmap</code>、<code>reachable &rarr; Bitmap</code> 等压缩位图（复用 <a href="./0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a> 机制）。0-day 触发后只需执行 <code>roaring.And(...)</code>，数毫秒即可算出“真正在生产环境运行且可达”的精确项目 ID 子集（例如从 10,000 个项目瞬间收敛至 312 个）。</li>
+        <li><strong>第二段（&lt; 1 s）· PostgreSQL 14+ <code>CYCLE</code> 安全路径还原：</strong>仅对这 312 个命中项目关联的 CAS 子图执行 <a href="https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE" target="_blank" rel="noopener"><strong>PostgreSQL 14+ SQL 标准 <code>CYCLE</code> 递归查询</strong></a>（<code>WITH RECURSIVE ... CYCLE child_id SET is_cycle USING path</code>），安全避开 npm/Maven 环路死循环，返回“根服务 &rarr; 传递链路 &rarr; 漏洞组件”的最短见证路径。</li>
+        <li><strong>第三段（&lt; 2 s）· 责任团队聚合路由 + 策略热挂起：</strong>禁止直接按 Git 最后提交者个人邮箱发几千封邮件！将项目 ID 映射至服务目录责任群组，合并成十几张团队级工单，并同步把规则以 Shadow 模式热推至准入网关预览爆炸面。</li>
+      </ol>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">Backstage <code>spec.owner</code> 铁律：只认 Group，不认个人</span>
+        <a href="https://backstage.io/docs/features/software-catalog/descriptor-format/" target="_blank" rel="noopener">Backstage <code>catalog-info.yaml</code></a>（<code>Apache-2.0</code>）将 <code>spec.owner</code> 设为强制字段，且最佳实践要求填写 <code>group:default/payment-platform</code> 而非个人账号。配合仓库 <code>CODEOWNERS</code> 兜底与飞书/Slack 群机器人，确保组织架构调整或人员离职时零“孤儿漏洞”。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 企业级 10 秒 0-day 爆炸半径检索、CAS 三层台账与 CEL/OPA 策略热更新架构</strong>
+        <span>打通 CAS 写前去重、Hot 内存位图 + PG14 CYCLE 路径还原、Warm/Cold 卸载、Backstage Group 派单与 Shadow Dry-Run 热更门禁</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">接入与去重层 · CAS 图去重 + 冷热温三层分流</span>
+            <span class="orch-stage-kicker">dep_tree_hash (SHA256) &middot; Hot(PG) &middot; Warm(ClickHouse) &middot; Cold(S3)</span>
+          </div>
+          <p class="orch-stage-desc">
+            每日数万次 CI/镜像扫描先计算规范化子图 <code>dep_tree_hash</code>：命中 CAS 仅写入轻量 <code>snapshot_refs</code>；Hot 层只留活跃分支与线上 Digest 并实时刷新 <code>RoaringBitmap</code>；历史统计异步进入 <strong>ClickHouse</strong>，全量 SBOM/Bundle 归档进 <strong>S3 Parquet</strong>。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 0-day 情报（OSV / MAL-*）秒级下发触发三段式应急响应 &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">10 秒应急检索 &amp; 团队路由</span>
+              <span class="badge badge-blue">RoaringBitmap + PG14 CYCLE</span>
+            </div>
+            <ul>
+              <li><strong>位图交集：</strong><code>PURL &cap; PROD &cap; Reachable</code> 毫秒级收敛命中集；仅对命中子图跑 PG 14+ <code>CYCLE</code> 还原最短依赖路径。</li>
+              <li><strong>团队聚合：</strong>关联 Backstage <code>spec.owner</code>（Group）与 <code>CODEOWNERS</code>，零孤儿告警精准派单。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">双引擎策略热更 &amp; 灰度门禁</span>
+              <span class="badge badge-warn">CEL (K8s VAP) + OPA + atomic.Pointer</span>
+            </div>
+            <ul>
+              <li><strong>热路径阻断：</strong><code>cel-go</code> 编入进程与 K8s <code>1.30</code> <code>ValidatingAdmissionPolicy</code>，非图灵完备微秒级执行。</li>
+              <li><strong>安全灰度：</strong>通过 <code>atomic.Pointer</code> 原子切换，先 <strong>Shadow Dry-Run</strong> 看影响面再切 <strong>Enforce</strong>，保留 VEX/紧急热修旁路。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>数据库商业许可排雷、CEL vs OPA 分工与 Go + SQL 核心原语</h2>
+
+    <div class="prose-col">
+      <h3>3.1 存储与策略底座选型：严堵图数据库 GPL/BSL 暗坑</h3>
+      <p>在商业闭源 SCA 产品中，数据库选型不仅是性能问题，更是直接决定产品能否合法商业化售卖的法务红线。下表给出经过核验的许可边界：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:22%" />
+          <col style="width:16%" />
+          <col style="width:31%" />
+          <col style="width:31%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>组件 / 引擎</th>
+            <th>精确许可协议</th>
+            <th>架构定位与真实性能表现</th>
+            <th>商业闭源集成与红线边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>PostgreSQL + <a href="https://age.apache.org/" target="_blank" rel="noopener">Apache AGE</a></strong></td>
+            <td><span class="badge badge-ok">PostgreSQL / Apache-2.0</span></td>
+            <td>GUAC v0.6.0+ 与 Dependency-Track v5 共同收敛的主库底座；原生 14+ <code>CYCLE</code> + 按需挂载 AGE openCypher 扩展。</td>
+            <td><strong>商业主库首选</strong>：零传染零托管限制，极易接入企业现有高可用 PG 集群与私有化交付。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://clickhouse.com/" target="_blank" rel="noopener">ClickHouse</a> + <a href="https://github.com/RoaringBitmap/roaring" target="_blank" rel="noopener"><code>RoaringBitmap/roaring</code></a></strong></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>ClickHouse 承接亿级漏洞流水/MTTR 温层 OLAP；<code>roaring/v2</code> 在 Go 内存实现 KB 级压缩位图百万级交并。</td>
+            <td><strong>纯宽松黄金组合</strong>：可直接作为 Go 后端内存索引和报表数仓嵌入闭源商业矩阵。</td>
+          </tr>
+          <tr>
+            <td><strong>Neo4j CE / ArangoDB / Memgraph</strong></td>
+            <td><span class="badge badge-danger">GPL-3.0 / BSL</span></td>
+            <td>Neo4j 社区版为 <code>GPL-3.0</code>；ArangoDB 与 Memgraph 已转向 <code>BSL</code>（限制作为托管数据库/SaaS 商业转售）。</td>
+            <td><strong>商业避坑红线</strong>：严禁将 GPL-3.0 图库混编或将 BSL 限制组件打包成受限商业托管产品交付客户。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/google/cel-go" target="_blank" rel="noopener"><strong><code>google/cel-go</code></strong></a><br/>（K8s <code>1.30</code> <code>VAP</code>）</td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td><strong>非图灵完备</strong>（无无界循环，保证有界终止），支持编译器类型检查，进程内<strong>微秒级求值</strong>；GA 于 K8s <code>1.30</code> 原生准入。</td>
+            <td><strong>热路径与准入首选</strong>：无外部 Webhook 序列化跳数与单点宕机风险，最适合高频门禁与 0-day 急停。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/open-policy-agent/opa" target="_blank" rel="noopener"><strong><code>open-policy-agent/opa</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>图灵完备 Rego 语言，支持复杂跨文档关联、递归遍历与 Bundle 集中分发；常以外部 Webhook 或库模式运行。</td>
+            <td><strong>复杂治理首选</strong>：与 CEL 形成双引擎互补，专攻多标准合规矩阵（许可证 + VEX + 审批流），避免把重逻辑塞进热路径。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 核心原语：Go <code>atomic.Pointer</code> + <code>RoaringBitmap</code> 多维交集 &amp; PG 14+ <code>CYCLE</code></h3>
+      <p>下面这段代码把内存零锁原子热切换、<code>RoaringBitmap/roaring/v2</code> 多维毫秒交集与 PostgreSQL 14+ SQL 标准防环路递归查询串成完整的 10 秒 0-day 应急引擎：</p>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go + PostgreSQL 14+ 核心原语：atomic.Pointer 无锁位图交集 &amp; CYCLE 最短依赖路径还原</strong>
+        <span>Sub-Second 0-Day Blast Radius &amp; Loop-Safe Path Reconstruction</span>
+      </div>
+      <pre><code><span class="tok-cmt">// Go 热层索引快照：后台增量构建新位图后通过 atomic.Pointer 原子切换，读取侧零锁</span>
+<span class="tok-kw">type</span> AssetBitmapIndex <span class="tok-kw">struct</span> {
+    ByPurlVersion <span class="tok-kw">map</span>[<span class="tok-type">string</span>]*roaring.Bitmap <span class="tok-cmt">// key: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"</span>
+    ProdProjects  *roaring.Bitmap
+    ReachableIdx  *roaring.Bitmap
+}
+
+<span class="tok-kw">var</span> liveIndex atomic.Pointer[AssetBitmapIndex]
+
+<span class="tok-kw">func</span> Query0DayBlastRadius(affectedPurls []<span class="tok-type">string</span>, onlyProd, onlyReachable <span class="tok-type">bool</span>) []<span class="tok-type">uint32</span> {
+    idx := liveIndex.Load()
+    <span class="tok-kw">if</span> idx == <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> <span class="tok-kw">nil</span>
+    }
+    <span class="tok-cmt">// 1. 并集归并全部受影响 PURL 版本的项目位图</span>
+    hit := roaring.New()
+    <span class="tok-kw">for</span> _, p := <span class="tok-kw">range</span> affectedPurls {
+        <span class="tok-kw">if</span> bm, ok := idx.ByPurlVersion[p]; ok {
+            hit = roaring.Or(hit, bm)
+        }
+    }
+    <span class="tok-cmt">// 2. 毫秒级维度交集裁剪（生产环境 &amp; 可达性），将 10,000 项目收敛至精确命中子集</span>
+    <span class="tok-kw">if</span> onlyProd &amp;&amp; idx.ProdProjects != <span class="tok-kw">nil</span> {
+        hit = roaring.And(hit, idx.ProdProjects)
+    }
+    <span class="tok-kw">if</span> onlyReachable &amp;&amp; idx.ReachableIdx != <span class="tok-kw">nil</span> {
+        hit = roaring.And(hit, idx.ReachableIdx)
+    }
+    <span class="tok-kw">return</span> hit.ToArray()
+}
+
+<span class="tok-cmt">/* 3. PostgreSQL 14+ SQL 标准 CYCLE 子句：仅针对命中项目的 CAS 子图安全还原传递路径（防循环依赖爆栈）
+WITH RECURSIVE dep_witness AS (
+    SELECT e.subgraph_hash, e.parent_comp_id, e.child_comp_id, 1 AS depth
+    FROM cas_dependency_edges e
+    WHERE e.subgraph_hash = ANY($1) AND e.child_comp_id = ANY($2)
+    UNION ALL
+    SELECT e.subgraph_hash, e.parent_comp_id, e.child_comp_id, w.depth + 1
+    FROM dep_witness w
+    JOIN cas_dependency_edges e
+      ON e.subgraph_hash = w.subgraph_hash AND e.child_comp_id = w.parent_comp_id
+    WHERE w.depth &lt; 32
+)
+CYCLE parent_comp_id SET is_cycle USING witness_path
+SELECT subgraph_hash, witness_path, depth
+FROM dep_witness
+WHERE NOT is_cycle
+ORDER BY depth ASC;
+*/</span></code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切入四大企业规模化痛点（Log4Shell 级 1.2 亿边应急、恶意包 SHA256 横扫、深层循环依赖防环、每日 3 万次 CI 推送 CAS 去重），关闭任意组件对比雪崩后果；在<strong>模式二</strong>中切换 <code>CEL</code> 进程内与 <code>OPA</code> Webhook、Shadow Dry-Run 灰度及 <code>atomic.Pointer</code> 热更策略，验证 0-day 门禁安全性。</p>
+    </div>
+
+    <!-- INTERACTIVE ENTERPRISE SCALE & 0-DAY LAB -->
+    <section class="widget-panel full-width" data-widget="enterprise-scale-0day-lab">
+      <script type="application/json" class="enterprise-scale-0day-lab-data">
+        {
+          "title": "交互实验台：海量资产 0-day 秒级检索与策略热更新模拟器",
+          "intro": "模拟万级项目 CAS 去重、RoaringBitmap 毫秒交集、PG 14+ CYCLE 防环路径还原与 CEL/OPA 灰度热更边界。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "企业级海量资产台账与 0-day 应急架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为拥有 10,000+ 微服务、每日 30,000 次 CI 构建且受严格商业闭源约束的集团构建平台底座。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐企业级高并发扩展与 10 秒 0-day 应急标准！同时守住了商业许可、存储去重、环路保护与灰度门禁底线。",
+            "warning": "方案基本可用，但在 {warning} 项上存在存储膨胀、孤儿告警或策略误杀隐患（标黄项），建议补齐 CAS、Group 路由与 Shadow 灰度。",
+            "critical": "当前方案踩中 {critical} 处致命红线（标红项）：可能触碰 GPL/BSL 商业雷区、引发主库雪崩或直接掐断救火热修！"
+          },
+          "modules": [
+            {
+              "name": "亿级依赖图谱底座选型与商业闭源许可边界",
+              "layer": "L2 存储底座",
+              "context": "需要支撑千万级活跃组件关系查询与商业化私有化打包交付，严禁 GPL/BSL 传染与托管限制。",
+              "options": [
+                {
+                  "label": "以 PostgreSQL（配 PG 14+ CYCLE 与按需 Apache AGE）为真值主库，ClickHouse 承接温层趋势聚合",
+                  "status": "optimal",
+                  "verdictTitle": "与 GUAC v0.6.0+ 及 Dependency-Track v5 演进完全一致，0 GPL / 0 BSL 商业风险",
+                  "feedback": "关系底座成熟稳定，且天然适配企业运维与私有化打包。"
+                },
+                {
+                  "label": "引入 Neo4j Community（GPL-3.0）或 ArangoDB/Memgraph（BSL）直接打包进商业 SaaS/私有化产品售卖",
+                  "status": "critical",
+                  "verdictTitle": "严重商业合规红线！GPL-3.0 引发强传染，BSL 严禁商业托管/受限转售",
+                  "feedback": "商业闭源产品选数据库必须同时核验代码与商业源可用条款。"
+                },
+                {
+                  "label": "把每日所有历史版本的完整 CycloneDX JSON 原文直接塞进单张 PG 表，不做规范化拆分",
+                  "status": "warning",
+                  "verdictTitle": "数周内主库膨胀崩盘！大 JSONB 导致 VACUUM 抖动且无法高效还原传递路径",
+                  "feedback": "原始 SBOM 归档应当进 Cold 层对象存储，Hot 层只存去重后的图结构与摘要索引。"
+                }
+              ]
+            },
+            {
+              "name": "每日 3 万次 CI 高频推送去重与冷热温分层机制",
+              "layer": "L2/SYS 扩展性",
+              "context": "96% 的日常 PR 构建并未改动任何依赖锁文件，但每次都会上报一份 SBOM。",
+              "options": [
+                {
+                  "label": "入库前计算规范化依赖子图 CAS SHA-256 哈希去重，Hot/Warm(ClickHouse)/Cold(S3 Parquet) 三层分流",
+                  "status": "optimal",
+                  "verdictTitle": "写入量与存储边数下降 90%–96%，主库永远只承载高价值活跃资产",
+                  "feedback": "内容寻址存储（CAS）是企业级 SBOM 平台扛住 CI 风暴的第一准则。"
+                },
+                {
+                  "label": "每次 CI 构建无论 lockfile 是否变化，一律全量深拷贝插入 4,000 条新依赖边并永久留在主库热表",
+                  "status": "critical",
+                  "verdictTitle": "3 个月内主库磁盘与 B-Tree 索引爆炸，所有查询与备份全部超时",
+                  "feedback": "无去重直写会在万级项目规模下迅速压垮 IOPS。"
+                },
+                {
+                  "label": "为了省磁盘直接覆盖删掉全部历史扫描快照，不保留任何合规冷归档",
+                  "status": "warning",
+                  "verdictTitle": "丧失事后审计溯源能力！无法回答“上个月线上发版究竟包含什么组件”",
+                  "feedback": "历史快照应当低成本压缩归档至 S3 Cold 层，而非彻底丢弃。"
+                }
+              ]
+            },
+            {
+              "name": "Log4Shell 级 0-day 10 秒爆炸半径检索与环路防护",
+              "layer": "L3/L4 应急引擎",
+              "context": "突发 0-day 需要立刻算出全部生产环境受影响且可达的应用及具体传递路径。",
+              "options": [
+                {
+                  "label": "内存 RoaringBitmap 执行 PURL×环境×可达性毫秒交集，再仅对命中子图运行 PG 14+ CYCLE 还原路径",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾 10 秒内全网定损 SLA 与深层循环依赖绝对不死锁",
+                  "feedback": "RoaringBitmap 负责极速缩小候选集，PG 14+ CYCLE 负责安全路径见证。"
+                },
+                {
+                  "label": "应急时对主库千万行 JSONB 跑全文正则扫描，并在无深度限制和无 CYCLE 防护下递归展开全部项目",
+                  "status": "critical",
+                  "verdictTitle": "查询耗时数十分钟甚至触发环路死循环，直接把生产 SCA 平台打挂",
+                  "feedback": "应急期间往往全公司同时刷看板，必须靠内存位图扛住查询风暴。"
+                },
+                {
+                  "label": "只返回“包含漏洞组件的项目 ID 列表”，完全不给出是通过哪条传递依赖链引入的",
+                  "status": "warning",
+                  "verdictTitle": "开发团队拿到告警却不知道该升级哪个直接父依赖，大幅拖慢止血效率",
+                  "feedback": "最短依赖见证路径是开发团队执行升级或 override 的必备依据。"
+                }
+              ]
+            },
+            {
+              "name": "0-day 责任归属与大规模通知聚合路由",
+              "layer": "SYS 资产治理",
+              "context": "万级微服务经历多年迭代，很多仓库最早提交者早已离职或转岗。",
+              "options": [
+                {
+                  "label": "对接 Backstage Software Catalog（spec.owner 强制绑定 Group 实体）+ CODEOWNERS 按团队群组聚合派单",
+                  "status": "optimal",
+                  "verdictTitle": "彻底消灭无主孤儿漏洞，把千条碎片告警收敛成可跟踪的团队行动清单",
+                  "feedback": "Backstage 规范推荐 owner 指向 Group 而非个人，天然免疫人员流动。"
+                },
+                {
+                  "label": "直接读取 Git 第一个 commit 作者邮箱逐条群发几千封高危催办邮件",
+                  "status": "critical",
+                  "verdictTitle": "80% 告警发给错误或已离职人员，真正的核心服务无人响应！",
+                  "feedback": "Git 提交历史不等于当前生产服务的运维与安全责任归属。"
+                },
+                {
+                  "label": "只在安全团队大屏展示榜单，让业务线自己每天主动登录平台认领",
+                  "status": "warning",
+                  "verdictTitle": "MTTR 极差！应急响应窗口期内业务研发根本来不及也不主动翻看大屏",
+                  "feedback": "必须结合 Group 路由主动推送到团队群与 PR 流水线。"
+                }
+              ]
+            },
+            {
+              "name": "策略引擎选型、热更新与 0-day 门禁安全发布",
+              "layer": "SYS 策略网关",
+              "context": "既要在 K8s 准入与 CI 热路径毫秒拦截新发现 0-day，又要防误杀生产救火补丁。",
+              "options": [
+                {
+                  "label": "CEL（进程内 + K8s 1.30 VAP）守热路径，OPA 管复杂跨系统治理；atomic.Pointer 热更并坚持先 Shadow 后 Enforce + 旁路",
+                  "status": "optimal",
+                  "verdictTitle": "微秒级热路径、绝对防死循环、零重启热更新与零业务误伤的黄金闭环",
+                  "feedback": "先通过 Shadow Dry-Run 预览爆炸半径再切硬阻断，并保留带审计旁路。"
+                },
+                {
+                  "label": "0-day 一出不经任何影响面预览，立即全网直接 Enforce 硬阻断所有包含该库的构建与上线，且无任何旁路",
+                  "status": "critical",
+                  "verdictTitle": "高危自残事故！可能把正在发布 0-day 修复补丁的关联流水线与核心业务一并掐死",
+                  "feedback": "门禁策略上硬阻断前必须先 Shadow 评估，且留有授权紧急逃生通道。"
+                },
+                {
+                  "label": "每次新增应急规则都必须重新编译发布并滚动重启全部准入网关与扫描节点",
+                  "status": "warning",
+                  "verdictTitle": "变更滞后数十分钟且存在重启抖动，远超 0-day 秒级响应目标",
+                  "feedback": "编译型策略程序通过 atomic.Pointer 原子替换即可毫秒生效。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道实战题覆盖 <strong>CAS 去重与冷热温三层架构、<code>RoaringBitmap</code> + PG 14+ <code>CYCLE</code> + Backstage 归属路由、图存储 GPL/BSL 商业排雷，以及 CEL vs OPA 与灰度热更新铁律</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0021 · 海量资产台账与 0-day 秒级应急回忆测验",
+          "intro": "重点检验 CAS 去重分层、RoaringBitmap 与 PG 14+ CYCLE 路径还原、GPL/BSL 数据库排雷及 CEL/OPA 灰度发布准则。",
+          "questions": [
+            {
+              "prompt": "面对每日数万次 CI 推送大量重复 SBOM 引发的存储雪崩，GUAC v0.6.0+ 与现代商业 SCA 底座应采用何种核心架构？",
+              "options": [
+                "把全部历史扫描的完整原始文档全量塞进单张关系宽表，并直接引入社区闭源图数据库引擎。",
+                "禁止内容寻址哈希去重机制，要求每日每次构建重复入库全量传递树并按小时全表扫描检索。",
+                "采用内容寻址哈希去重并按冷热温三层分流，以关系型底座为主图真值并分离趋势聚合归档。",
+                "在关系数据库里完全禁用连接表和摘要索引，改用定期手工导出离线表格人工检索影响清单。"
+              ],
+              "answerIndex": 2,
+              "explanation": "OpenSSF GUAC（v0.6.0+）与 Dependency-Track v5 均收敛至 PostgreSQL 主库真值；工程上必须通过 CAS 子图哈希去重压缩 90%+ 冗余边，配合 Hot(PG)/Warm(ClickHouse)/Cold(S3 Parquet) 三层分流兼顾秒级检索与合规归档（C 正确）。"
+            },
+            {
+              "prompt": "当 Log4Shell 级 0-day 爆发要求 10 秒内定位受影响服务与传递链路并精准派单时，哪套工程组合最稳健？",
+              "options": [
+                "用内存压缩位图多维交集秒级锁定项目，用标准递归防环子句还原路径并按团队组别聚合路由。",
+                "用全表模糊文本匹配扫描全部历史归档压缩包，并将千条孤儿告警按提交邮箱逐一私信个人。",
+                "将内存倒排位图与数据库主键彻底剥离，遇到传递依赖环路时直接忽略整条项目分支并报错。",
+                "在单次应急查询时重新拉取全部源码重新构建依赖树，然后由安全管理员手工逐个群发通知。"
+              ],
+              "answerIndex": 0,
+              "explanation": "RoaringBitmap 在内存中执行 PURL × 生产环境 × 可达性毫秒交集缩小命中集；随后仅对命中集在 PostgreSQL 14+ 上运行 WITH RECURSIVE ... CYCLE SET is_cycle USING path 安全还原最短见证路径；最终绑定 Backstage spec.owner（Group）避免无主孤儿告警（A 正确）。"
+            },
+            {
+              "prompt": "商业闭源 SCA 产品在为亿级依赖图谱与分析数仓选型底层数据库时，应如何守住开源协议红线？",
+              "options": [
+                "将开源社区版强传染图引擎直接编译进闭源商业内核，并把商业源可用限制数据库托管转售。",
+                "优先选用受源码可用协议限制云托管的图引擎做主库，认为只要闭源不修改源码即可任意转售。",
+                "将所有底层图数据库替换成纯内存临时字典，彻底放弃持久化审计与分布式多实例高可用性。",
+                "规避强传染和商业源码限制图数据库，优先选用宽松协议的关系主库搭配列存分析与图扩展。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Neo4j 社区版为强传染 GPL-3.0，ArangoDB 与 Memgraph 均采用限制商业托管转售的 BSL 协议；商业闭源产品应首选 PostgreSQL（PostgreSQL License）+ Apache AGE（Apache-2.0）+ ClickHouse（Apache-2.0）+ RoaringBitmap（Apache-2.0）（D 正确）。"
+            },
+            {
+              "prompt": "在设计高并发 0-day 策略热更新与 Kubernetes 准入拦截门禁时，CEL 与 OPA 的正确分工及安全发布铁律是什么？",
+              "options": [
+                "在集群准入热路径运行带无界递归的外部网络调用，并在未做影响预览前直接全网硬拦截。",
+                "热路径选非图灵完备进程内引擎先预览再硬阻断，跨系统复杂合规交由通用引擎并留旁路。",
+                "全部零日漏洞门禁都必须等待重启全部生产网关进程生效，且严禁为应急热修设置豁免机制。",
+                "彻底关闭所有容器准入策略与静态代码门禁检查，改为每季度末人工导出表格事后补救处理。"
+              ],
+              "answerIndex": 1,
+              "explanation": "google/cel-go 非图灵完备（保证有界终止）且驱动 K8s 1.30 GA 的原生 ValidatingAdmissionPolicy，适合微秒级热路径；OPA Rego 适合跨系统复杂合规；规则通过 atomic.Pointer 热更后须先 Shadow Dry-Run 预览爆炸面再 Enforce，并留 VEX/紧急热修旁路（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计海量资产台账、图谱防环检索与双引擎策略网关时，推荐精读以下官方架构文档与 Apache-2.0 项目：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/guacsec/guac" target="_blank" rel="noopener"><strong>OpenSSF GUAC (<code>Apache-2.0</code>)</strong></a> · <a href="https://dependencytrack.org/" target="_blank" rel="noopener"><strong>OWASP Dependency-Track v5 / Hyades (<code>Apache-2.0</code>)</strong></a>：开源图谱后端向 PostgreSQL 收敛的一线实证。</li>
+          <li><a href="https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE" target="_blank" rel="noopener"><strong>PostgreSQL 14+ <code>WITH RECURSIVE ... CYCLE</code></strong></a> · <a href="https://github.com/RoaringBitmap/roaring" target="_blank" rel="noopener"><strong><code>RoaringBitmap/roaring</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://clickhouse.com/" target="_blank" rel="noopener"><strong>ClickHouse (<code>Apache-2.0</code>)</strong></a> · <a href="https://age.apache.org/" target="_blank" rel="noopener"><strong>Apache AGE (<code>Apache-2.0</code>)</strong></a>。</li>
+          <li><a href="https://github.com/google/cel-go" target="_blank" rel="noopener"><strong><code>google/cel-go</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/" target="_blank" rel="noopener"><strong>Kubernetes <code>1.30</code> ValidatingAdmissionPolicy</strong></a> · <a href="https://github.com/open-policy-agent/opa" target="_blank" rel="noopener"><strong><code>open-policy-agent/opa</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://backstage.io/docs/features/software-catalog/descriptor-format/" target="_blank" rel="noopener"><strong>Backstage Catalog <code>spec.owner</code> (<code>Apache-2.0</code>)</strong></a>。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>随时向导师追问 · 冲刺全课程终章</h3>
+        <p>至此，L1 采集、L2 统一 IR、L3 情报与许可、L4 可达性/VEX/修复、投毒/同源/AI 供应链、SLSA 溯源以及万级企业规模化底座全部就位！下一课 <strong>Lesson 0022（全课程收官实战）</strong> 将把这 21 课的所有架构决策总装成一份可向 CEO/CTO 拍板的商业路线图。欢迎随时追问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“如果客户内网已经有一套现有的 CMDB 或 Jira/飞书架构，Backstage <code>spec.owner</code> 的团队归属映射层应该怎样抽象成通用 Adapter？”</li>
+          <li>“<code>RoaringBitmap</code> 在单机内存达到千万级组件×项目映射时大概占多少 MB 内存？多副本无状态 API 节点之间如何用 Redis Stream 或 PG LISTEN/NOTIFY 同步位图增量？”</li>
+          <li>“准备好了！请开启 <strong>全课程收官终章 · Lesson 0022（总架构师收官实战：全场景 SCA 产品矩阵、研发配比与竞品攻防蓝图）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0020-build-provenance-slsa-intoto-and-sigstore.html">&larr; 上一课：Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+      <a href="../reference/ch6-provenance-scale-and-blueprint-matrix.html">速查参考卡：Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入收官终章 Lesson 0022 &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/enterprise-scale-0day-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

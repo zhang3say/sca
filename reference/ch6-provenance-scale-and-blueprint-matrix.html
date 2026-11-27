@@ -13,6 +13,7 @@
       <div class="course-links">
         <a href="../index.html">课程首页 · 全局路线图</a>
         <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+        <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021 · 海量资产与 0-day 应急</a>
         <a href="./ch6-provenance-scale-and-blueprint-matrix.html" class="active">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
         <a href="./ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
       </div>
@@ -27,10 +28,10 @@
         <span>PRINT-READY CHAPTER 06 CHEAT SHEET</span>
       </div>
       <h1>可信溯源证明、海量资产检索与商业蓝图速查矩阵</h1>
-      <p class="subtitle">Chapter 06 &amp; Phase 3 架构师与研发决策核心速查表（<strong>已接入 Lesson 0020 精华</strong>；后续将随 <code>Lesson 0021</code> 海量图谱 0-day 秒级应急与 <code>Lesson 0022</code> 全场景商业总装蓝图持续扩展收官）。</p>
+      <p class="subtitle">Chapter 06 &amp; Phase 3 架构师与研发决策核心速查表（<strong>已覆盖 Lesson 0020–0021 精华</strong>；后续将随 <code>Lesson 0022</code> 全场景商业总装蓝图扩展收官）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与规范：</strong><a href="https://slsa.dev/spec/v1.2/" target="_blank" rel="noopener">SLSA v1.2 (2025-11-24)</a> · <a href="https://slsa.dev/verification_summary/v1" target="_blank" rel="noopener">SLSA VSA v1</a> · <a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><code>in-toto Statement v1</code></a> · <a href="https://github.com/secure-systems-lab/dsse" target="_blank" rel="noopener">DSSE PAE</a> · <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener">PyPI PEP 740</a> · <a href="https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md" target="_blank" rel="noopener">Fulcio V2 OIDs</a></span>
-        <span><strong>关联课程：</strong><a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020</a>（Lesson 0021–0022 待扩展）</span>
+        <span><strong>依据标准与规范：</strong><a href="https://slsa.dev/spec/v1.2/" target="_blank" rel="noopener">SLSA v1.2 (2025-11-24)</a> · <a href="https://slsa.dev/verification_summary/v1" target="_blank" rel="noopener">SLSA VSA v1</a> · <a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><code>in-toto Statement v1</code></a> · <a href="https://github.com/secure-systems-lab/dsse" target="_blank" rel="noopener">DSSE PAE</a> · <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener">PyPI PEP 740</a> · <a href="https://github.com/guacsec/guac" target="_blank" rel="noopener">GUAC v0.6.0+</a> · <a href="https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE" target="_blank" rel="noopener">PG 14+ <code>CYCLE</code></a> · <a href="https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/" target="_blank" rel="noopener">K8s <code>1.30</code> VAP (CEL)</a></span>
+        <span><strong>关联课程：</strong><a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020</a> · <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021</a>（Lesson 0022 待扩展）</span>
       </div>
     </header>
 
@@ -132,15 +133,114 @@
       </div>
     </section>
 
+    <!-- SECTION 3: CAS DEDUP, TIERED STORAGE & 10-SEC 0-DAY SEARCH -->
+    <section class="full-width">
+      <h2><span class="sec-num">03</span>海量资产 CAS 去重、三层存储与 10 秒 0-day 检索矩阵（Lesson 0021）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:25%" />
+            <col style="width:29%" />
+            <col style="width:26%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>架构组件 / 机制</th>
+              <th>权威架构对齐 / 关键接口</th>
+              <th>核心数据结构与执行流水线</th>
+              <th>规模化收益与避坑底线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>开源底座收敛与 CAS 去重</strong></td>
+              <td><a href="https://github.com/guacsec/guac" target="_blank" rel="noopener">GUAC <code>v0.6.0+</code></a> (PG <code>ent</code>) · <a href="https://dependencytrack.org/" target="_blank" rel="noopener">Dependency-Track v5</a> (PG 状态协调)</td>
+              <td>入库前对规范化依赖子图计算 <code>dep_tree_hash = SHA256(...)</code>；未改锁文件的 CI 构建仅写轻量 <code>snapshot_ref</code> 指针。</td>
+              <td>压缩 <strong>90%–96%</strong> 重复依赖边写入与索引体积；严禁每日把全量原始 CycloneDX JSON 塞进主库热表。</td>
+            </tr>
+            <tr>
+              <td><strong>Hot / Warm / Cold 三层分流</strong></td>
+              <td>Hot: PostgreSQL 分区<br/>Warm: <a href="https://clickhouse.com/" target="_blank" rel="noopener">ClickHouse</a> (<code>Apache-2.0</code>)<br/>Cold: S3 Zstd Parquet</td>
+              <td>Hot 只留默认分支最新与线上运行中 Digest；Warm 存 30–90 天 MTTR/漏洞趋势 OLAP；Cold 归档 1–7 年原始 SBOM/Bundle WORM。</td>
+              <td>彻底把重度 <code>GROUP BY</code> 运营大盘报表从主库剥离，避免运营查询拖垮门禁与实时检索。</td>
+            </tr>
+            <tr>
+              <td><strong>10 秒 0-day 三段检索</strong></td>
+              <td><a href="https://github.com/RoaringBitmap/roaring" target="_blank" rel="noopener"><code>RoaringBitmap/roaring/v2</code></a> + <a href="https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE" target="_blank" rel="noopener">PG 14+ <code>CYCLE</code></a></td>
+              <td>内存执行 <code>roaring.And(idxPurl, idxProd, idxReach)</code>（&lt;2ms）收敛命中集；再对命中子图运行 <code>WITH RECURSIVE ... CYCLE child_id SET is_cycle USING path</code>。</td>
+              <td>避免对全网万级项目直接递归与正则扫 JSONB；PG 14+ 标准 <code>CYCLE</code> 彻底杜绝 npm/Maven 循环依赖死循环。</td>
+            </tr>
+            <tr>
+              <td><strong>Backstage 团队归属路由</strong></td>
+              <td><a href="https://backstage.io/docs/features/software-catalog/descriptor-format/" target="_blank" rel="noopener">Backstage <code>catalog-info.yaml</code></a> (<code>Apache-2.0</code>)</td>
+              <td>以强制字段 <code>spec.owner</code>（指向 <code>group:default/team</code>）+ <code>CODEOWNERS</code> 聚合上百应用为十几张团队工单。</td>
+              <td><span class="badge badge-warn">严禁按个人派单</span> 人员离职或调岗会导致 Git 初次提交邮箱失效，催生数千条无主孤儿漏洞。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 4: STORAGE LICENSE REDLINE & CEL VS OPA -->
+    <section class="full-width">
+      <h2><span class="sec-num">04</span>图数据库许可排雷与 CEL vs OPA 双策略热更新矩阵（Lesson 0021）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:22%" />
+            <col style="width:18%" />
+            <col style="width:30%" />
+            <col style="width:30%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>底座 / 策略引擎</th>
+              <th>精确许可协议</th>
+              <th>执行模型与延迟边界</th>
+              <th>商业闭源选型与安全发布铁律</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>PostgreSQL + <a href="https://age.apache.org/" target="_blank" rel="noopener">Apache AGE</a></strong> vs <strong>Neo4j / ArangoDB / Memgraph</strong></td>
+              <td>PG / AGE (<code>Apache-2.0</code>)<br/>vs Neo4j (<code>GPL-3.0</code>) / ArangoDB &amp; Memgraph (<code>BSL</code>)</td>
+              <td>PG 原生递归 + CTE + 可选 AGE openCypher 覆盖绝大部分供应链深度遍历（通常 &le; 32 跳），无需独立维护重型图集群。</td>
+              <td><span class="badge badge-danger">商业红线</span> 严禁将 <code>GPL-3.0</code>（Neo4j 社区版）混编进闭源产品，或将受商业托管限制的 <code>BSL</code> 数据库转售为 SaaS。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/google/cel-go" target="_blank" rel="noopener"><strong><code>google/cel-go</code></strong></a><br/>（K8s <code>1.30</code> <code>VAP</code> 原生内核）</td>
+              <td><span class="badge badge-ok">Apache-2.0</span></td>
+              <td><strong>非图灵完备</strong>（无无界循环，数学保证有界终止），编译期类型校验，进程内<strong>微秒级求值</strong>（无 Webhook 序列化跳数）。</td>
+              <td>专守<strong>热路径 0-day 急停与 K8s 原生准入</strong>（<code>ValidatingAdmissionPolicy</code> GA 于 Kubernetes 1.30）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/open-policy-agent/opa" target="_blank" rel="noopener"><strong><code>open-policy-agent/opa</code></strong></a><br/>（Rego 通用策略引擎）</td>
+              <td><span class="badge badge-ok">Apache-2.0</span></td>
+              <td>图灵完备 Rego，擅长跨系统、多文件上下文与递归合规推理；作为外部 Webhook 运行时存在网络序列化延迟与可用性风险。</td>
+              <td>与 CEL 形成双引擎分工，承接复杂合规审批（许可证 + VEX + 豁免流）；热路径切勿全流量走重型外部 Webhook。</td>
+            </tr>
+            <tr>
+              <td><strong>0-day 策略热更新与灰度铁律</strong></td>
+              <td>Go <code>atomic.Pointer</code><br/>Shadow Dry-Run &rarr; Enforce</td>
+              <td>策略编译器预校验后通过 <code>atomic.Pointer</code> 原子切换热加载，全节点亚秒生效无需重启 Pod。</td>
+              <td><span class="badge badge-danger">严禁盲切硬阻断</span> 必须先走 <strong>Shadow Dry-Run</strong> 预览爆炸半径再切 <strong>Enforce</strong>，且必留 VEX 自动豁免与带审计紧急热修旁路。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">Phase 3 速查卡建档进行中（后续扩展规划）</div>
-      <p>当前已沉淀 <strong>Lesson 0020（SLSA v1.2 双轨模型、in-toto DSSE PAE、Sigstore Bundle v0.3 与 VSA 闭环）</strong> 核心矩阵。接下来 <strong>Lesson 0021（企业级海量资产台账与 0-day 秒级应急检索）</strong> 与 <strong>Lesson 0022（总架构师全场景产品矩阵与商业攻防蓝图）</strong> 完成后，将分别扩充至本速查卡第 03–06 节并完成全课程总装收官。</p>
+      <div class="callout-label">Phase 3 速查卡建档进行中（即将进入终章收官）</div>
+      <p>当前已沉淀 <strong>Lesson 0020（SLSA v1.2、in-toto DSSE PAE、Sigstore Bundle v0.3 与 VSA）</strong> 与 <strong>Lesson 0021（CAS 三层存储、RoaringBitmap + PG 14+ CYCLE、图存储许可排雷与 CEL/OPA 热更）</strong> 核心矩阵。接下来终章 <strong>Lesson 0022（总架构师收官实战：全场景 SCA 产品矩阵、研发配比与竞品攻防蓝图）</strong> 完成后，将补充第 05–06 节并完成全课程圆满收官！</p>
     </div>
 
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">← 返回 Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+      <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">← 返回 Lesson 0021 · 海量资产与 0-day 应急</a>
+      <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
       <a href="./ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
-      <a href="../index.html">返回课程总览 · 准备进入 Lesson 0021</a>
+      <a href="../index.html">返回课程总览 · 准备进入终章 Lesson 0022</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>
   </main>
