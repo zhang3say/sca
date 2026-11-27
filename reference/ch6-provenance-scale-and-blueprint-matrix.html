@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查参考 07：可信溯源证明、海量资产检索与商业蓝图速查矩阵</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+        <a href="./ch6-provenance-scale-and-blueprint-matrix.html" class="active">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+        <a href="./ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>REFERENCE CARD 07</span>
+        <span class="sep">/</span>
+        <span>PRINT-READY CHAPTER 06 CHEAT SHEET</span>
+      </div>
+      <h1>可信溯源证明、海量资产检索与商业蓝图速查矩阵</h1>
+      <p class="subtitle">Chapter 06 &amp; Phase 3 架构师与研发决策核心速查表（<strong>已接入 Lesson 0020 精华</strong>；后续将随 <code>Lesson 0021</code> 海量图谱 0-day 秒级应急与 <code>Lesson 0022</code> 全场景商业总装蓝图持续扩展收官）。</p>
+      <div class="meta-strip">
+        <span><strong>依据标准与规范：</strong><a href="https://slsa.dev/spec/v1.2/" target="_blank" rel="noopener">SLSA v1.2 (2025-11-24)</a> · <a href="https://slsa.dev/verification_summary/v1" target="_blank" rel="noopener">SLSA VSA v1</a> · <a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><code>in-toto Statement v1</code></a> · <a href="https://github.com/secure-systems-lab/dsse" target="_blank" rel="noopener">DSSE PAE</a> · <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener">PyPI PEP 740</a> · <a href="https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md" target="_blank" rel="noopener">Fulcio V2 OIDs</a></span>
+        <span><strong>关联课程：</strong><a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020</a>（Lesson 0021–0022 待扩展）</span>
+      </div>
+    </header>
+
+    <!-- SECTION 1: SLSA v1.2 DUAL TRACKS, IN-TOTO, DSSE PAE & VSA -->
+    <section class="full-width">
+      <h2 style="margin-top:0;"><span class="sec-num">01</span>SLSA v1.2 双轨规范、in-toto DSSE PAE 与 VSA 核心速查（Lesson 0020）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:26%" />
+            <col style="width:28%" />
+            <col style="width:26%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>规范 / 协议层</th>
+              <th>权威标识 / 核心字段</th>
+              <th>关键技术机制与防线意义</th>
+              <th>高危踩坑与强校验铁律</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>SLSA v1.2 Build Track</strong><br/>（L1 – L3 · 构建完整性）</td>
+              <td><code>https://slsa.dev/provenance/v1</code><br/><code>SLSA_BUILD_LEVEL_1..3</code></td>
+              <td>L1 产出机器可读 Provenance；L2 托管构建平台 + 密码学签名（防构建后篡改）；L3 加固临时化隔离 Runner（防构建中篡改）。</td>
+              <td>只验 Build Track 无法阻挡拥有写权限的内鬼或被盗账号直接向 <code>main</code> 推入恶意代码触发正规构建。</td>
+            </tr>
+            <tr>
+              <td><strong>SLSA v1.2 Source Track</strong><br/>（2025-11-24 正式定稿 · L1–L4）</td>
+              <td><code>SLSA_SOURCE_LEVEL_1..4</code><br/>Source Provenance / Source VSA</td>
+              <td>L1 VCS 不可变 SHA + Diff；L2 防强推历史保留 + 实时 Source 证明；L3 保护分支持续技术控制；L4 严格 <strong>Two-Party Review</strong>。</td>
+              <td><span class="badge badge-danger">连续性铁律</span> <strong>Onboarding &amp; Continuity</strong>：仅从接入后生效（不做历史追溯）；临时关闭分支保护即断链降级。</td>
+            </tr>
+            <tr>
+              <td><strong>in-toto v1 + DSSE PAE</strong><br/>（不可伪造声明信封）</td>
+              <td><code>_type</code>: <code>https://in-toto.io/Statement/v1</code><br/><code>payloadType</code>: <code>application/vnd.in-toto+json</code></td>
+              <td><code>subject[].digest</code> 绑定不可变 SHA-256；签名基于 <code>PAE(type, payload) = "DSSEv1" + SP + LEN(type) + SP + type + SP + LEN(payload) + SP + payload</code>。</td>
+              <td>禁止对原始 JSON 做脆弱文本规范化签名；PAE 绑定精确字节长度与 <code>payloadType</code>，彻底杜绝 <strong>Type Confusion</strong>。</td>
+            </tr>
+            <tr>
+              <td><strong>SLSA VSA v1</strong><br/>（消费端预验签摘要）</td>
+              <td><code>https://slsa.dev/verification_summary/v1</code><br/><code>verifier.id</code> / <code>verifiedLevels</code></td>
+              <td>中心策略引擎验签全量依赖与 Build/Source 连续性后签发极简结论（<code>verificationResult: PASSED</code>），供集群/客户毫秒级准入。</td>
+              <td>避免每个 K8s 准入节点重复拉取并递归重算上百层原始 Provenance 日志，同时隐藏内部构建敏感细节。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 2: SIGSTORE OID, TRUSTED PUBLISHERS & APACHE-2.0 STACK -->
+    <section class="full-width">
+      <h2><span class="sec-num">02</span>Sigstore Fulcio V2 OIDs、Trusted Publishers 与全 Apache-2.0 商业底座矩阵（Lesson 0020）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:22%" />
+            <col style="width:20%" />
+            <col style="width:28%" />
+            <col style="width:30%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>组件 / 生态标准</th>
+              <th>精确许可 / 扩展 OID</th>
+              <th>核心规格与工程接口</th>
+              <th>商业闭源边界与防冒名/泄密红线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Fulcio V2 X.509 OIDs</strong><br/>（<code>1.3.6.1.4.1.57264.1.*</code>）</td>
+              <td><code>.1.8</code> OIDC Issuer V2<br/><code>.1.9</code> Build Signer URI<br/><code>.1.12</code> Source Repo URI<br/><code>.1.21</code> Run Invocation URI</td>
+              <td>OIDC 短期令牌换取短命 X.509 证书（DER <code>UTF8String</code> 扩展）；结合 <strong>Rekor v2</strong>（Tile-backed 日志）与 <strong>TUF Trusted Root</strong> 打包进 <code>Bundle v0.3</code>。</td>
+              <td><span class="badge badge-danger">防 Confused Deputy</span> 严禁只验数学签名！必须同时锁定 <strong>制品 sha256 + Issuer (.1.8) + 精确源仓/Workflow SAN + TLog/SCT</strong>。</td>
+            </tr>
+            <tr>
+              <td><strong>包管理器无密钥生态</strong><br/>（PyPI / npm / GitHub）</td>
+              <td><a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener"><strong>PEP 740</strong></a> · npm Provenance<br/>GitHub Artifact Attestations</td>
+              <td>PyPI 分发包原生携带 <code>PyPI Publish</code> 与 <code>SLSA Provenance</code> 双证明；OIDC Trusted Publishers 彻底淘汰静态 <code>PYPI_API_TOKEN</code>。</td>
+              <td>私有化制品与 OCI 镜像同步通过 <code>oras-go</code>（<code>Apache-2.0</code>）将 <code>.sigstore.json</code> Bundle 与 AI-BOM 挂载至 OCI 1.1 Referrers。</td>
+            </tr>
+            <tr>
+              <td><strong>Sigstore 核心 Go SDK 与模型签名</strong></td>
+              <td><span class="badge badge-ok">Apache-2.0</span><br/><code>sigstore-go</code> · <code>cosign</code><br/><code>model-transparency</code> · <code>oras-go</code></td>
+              <td><code>verify.NewVerifier(root, WithSignedCertificateTimestamps(1), WithTransparencyLog(1))</code> + <code>WithArtifactDigest</code> + <code>WithCertificateIdentity</code>；<code>model-transparency</code> 覆盖 AI 权重。</td>
+              <td><span class="badge badge-warn">闭源数据主权红线</span> 公共 Rekor 对全球公开且不可删！闭源商业 CI <strong>严禁连公共 Rekor</strong>，必须自建 <strong>Private Sigstore (Rekor v2 Tile + 私有 TUF)</strong>。</td>
+            </tr>
+            <tr>
+              <td><strong>in-toto / SLSA / 图谱与准入引擎</strong></td>
+              <td><span class="badge badge-ok">Apache-2.0</span><br/><code>in-toto/attestation</code> · <code>witness</code><br/><code>slsa-verifier</code> · <code>guac</code> · <code>kyverno</code></td>
+              <td><code>attestation</code> 提供 Statement/VSA Schema；<code>witness</code> 适配非 OIDC 老旧 CI；<code>guac</code> 汇聚 SBOM/VEX/VSA 图谱；<code>kyverno</code> 守住 K8s 准入最后一公里。</td>
+              <td>全链路核心开源栈均属 <code>Apache-2.0</code> 纯宽松协议，可无传染嵌入商业闭源 SCA 平台，并无缝联动 <a href="../lessons/0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a>–<a href="../lessons/0018-model-serialization-security-and-payload-scanning.html">0018</a> AI 模型安全体系。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="callout tip full-width" style="max-width:100%;">
+      <div class="callout-label">Phase 3 速查卡建档进行中（后续扩展规划）</div>
+      <p>当前已沉淀 <strong>Lesson 0020（SLSA v1.2 双轨模型、in-toto DSSE PAE、Sigstore Bundle v0.3 与 VSA 闭环）</strong> 核心矩阵。接下来 <strong>Lesson 0021（企业级海量资产台账与 0-day 秒级应急检索）</strong> 与 <strong>Lesson 0022（总架构师全场景产品矩阵与商业攻防蓝图）</strong> 完成后，将分别扩充至本速查卡第 03–06 节并完成全课程总装收官。</p>
+    </div>
+
+    <footer class="lesson-end-nav no-print">
+      <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">← 返回 Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+      <a href="./ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      <a href="../index.html">返回课程总览 · 准备进入 Lesson 0021</a>
+      <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
+    </footer>
+  </main>
+</body>
+</html>

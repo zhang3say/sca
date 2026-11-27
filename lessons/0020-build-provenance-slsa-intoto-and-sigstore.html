@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0020：构建溯源与密码学证明：SLSA v1.2、in-toto 与 Sigstore 闭环</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0019-agentic-ai-and-mcp-supply-chain-governance.html">Lesson 0019 · Agentic AI 与 MCP</a>
+        <a href="./0020-build-provenance-slsa-intoto-and-sigstore.html" class="active">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
+        <a href="../reference/ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0020</span>
+        <span class="sep">/</span>
+        <span>PHASE 3 &amp; CH 06 首课（SLSA v1.2 · 2025-11-24）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>构建溯源与密码学证明：SLSA v1.2、in-toto 与 Sigstore 闭环</h1>
+      <p class="subtitle">过去 19 课我们打造了极强的“事后成分扫描与行为检测”体系，但它依然回答不了一个终极问题：<strong>你部署进生产环境的容器镜像、npm 包或大模型权重，真的由受控源码经受控 CI/CD 构建产出，还是在仓库、构建机或制品库被半路调包？</strong>随着 <a href="https://slsa.dev/spec/v1.2" target="_blank" rel="noopener"><strong>SLSA v1.2</strong></a>（2025 年 11 月 24 日正式发布）将 <strong>Source Track（L1–L4）</strong> 纳入正式规范，结合 <strong>in-toto Statement v1 / DSSE PAE</strong>、<strong>Sigstore Bundle v0.3（Fulcio + Rekor v2 + TUF）</strong> 与 <strong>VSA 预验签摘要</strong>，我们终于能把“扫描出来的清单”升级为“密码学不可伪造的端到端信任链”。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 SLSA v1.2 Build（L1–L3）与 Source（L1–L4）双轨及连续性铁律；掌握 in-toto v1、DSSE PAE 防类型混淆、VSA（<code>verification_summary/v1</code>）与 Fulcio V2 OID 身份绑定；划清 PyPI <code>PEP 740</code> / npm Provenance、公共 Rekor 泄密红线、Private Sigstore（Rekor v2 Tile）与全 <code>Apache-2.0</code> 商业栈落地边界</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0005-container-image-os-and-artifact-extraction.html">Lesson 0005</a> · <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（开启 Phase 3 · 从“检测漏洞”跃迁到“证明清白”）</div>
+      <p>在 SolarWinds 与 XZ Utils 式供应链投毒中，最终落盘的二进制根本没有已知 CVE；在现代云原生与 AI 交付中，如果缺乏<strong>源码审查连续性证明 + 隔离构建 Provenance + 不可变 Digest 绑定签名</strong>，任何基于可变 Tag 的 SBOM 都会在构建后被静默调包。你的第三代 SCA 底座必须在 Layer 2 IR 上原生接纳 <strong>in-toto DSSE Attestation &amp; SLSA VSA</strong>，把“可信溯源证明”变成与漏洞、恶意包并列的第三大核心资产证据柱。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>SLSA v1.2 双轨模型：为什么仅有 Build Track 依然会失守？</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 从 Build-only 到 Source + Build 双轨治理（2025-11-24 正式发布）</h3>
+      <p>早期 SLSA v1.0 只聚焦构建环节（Build Track）：证明制品确实产自某台隔离的 CI Runner，且构建过程未被篡改。但工程实战很快暴露了一个致命盲区：<strong>如果拥有合并权限的内部人员或被盗维护者账号直接向 <code>main</code> 分支强推了一段后门代码，甚至临时关闭分支保护两小时后再恢复，隔离完美的 Build L3 流水线依然会忠实地把恶意代码编译并签发“完全合规的 Build Provenance”！</strong></p>
+      <p>为此，<a href="https://slsa.dev/spec/v1.2" target="_blank" rel="noopener"><strong>SLSA v1.2</strong></a>（2025 年 11 月 24 日定稿）正式将 <strong>Source Track（L1–L4）</strong> 升级为与 Build Track 并列的规范轨道，并在验证摘要（VSA）中同时输出 <code>SLSA_SOURCE_LEVEL</code> 与 <code>SLSA_BUILD_LEVEL</code>，让下游消费方一眼看清“源码是否合规入库”与“构建是否未遭篡改”。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">SLSA v1.2 Source Track 的“连续性铁律”（Onboarding &amp; Continuity）</span>
+        SLSA v1.2 明确规定：源码安全等级<strong>仅自开启技术控制的时刻（Onboarding）起向前生效</strong>，绝不做历史追溯背书！如果某个受保护分支曾被管理员临时关闭强推保护或审查要求哪怕一小时，<strong>连续性（Continuity）即告断裂</strong>，系统必须吊销或降级其 Source 等级并要求重新建立审查基线。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:24%" />
+          <col style="width:28%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>轨道与等级</th>
+            <th>核心规范要求</th>
+            <th>防御的供应链威胁</th>
+            <th>SCA 平台校验与证据字段</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Build L1</strong><br/>（存在溯源描述）</td>
+            <td>构建流程产出机器可读的构建 Provenance（含源码输入、构建指令与制品摘要）。</td>
+            <td>人工误打包、缺失制品来源元数据、无法追溯上游 Commit。</td>
+            <td>校验存在 <code>https://slsa.dev/provenance/v1</code> 声明且 <code>subject.digest</code> 与产物一致。</td>
+          </tr>
+          <tr>
+            <td><strong>Build L2</strong><br/>（托管构建 + 签名）</td>
+            <td>必须由托管构建服务执行，并由服务本身对 Provenance 进行密码学签名。</td>
+            <td>构建完成后到制品库之间的中途篡改与伪造构建描述（防构建后篡改）。</td>
+            <td>验证 DSSE 签名及 Fulcio 证书来自受信任的 CI/CD OIDC 平台（非开发者本地笔记本）。</td>
+          </tr>
+          <tr>
+            <td><strong>Build L3</strong><br/>（加固临时隔离环境）</td>
+            <td>每次构建运行在强隔离、临时化（Ephemeral）Runner 中，构建步骤间无法偷改签名密钥或缓存。</td>
+            <td>同机并发任务跨构建投毒、构建脚本窃取签名私钥（防构建中篡改）。</td>
+            <td>核对 <code>builder.id</code> 属于高隔离托管 Runner URI（例如官方 GitHub Hosted / 隔离 K8s Tekton Pod）。</td>
+          </tr>
+          <tr>
+            <td><strong>Source L1 &amp; L2</strong><br/>（版本控制 + 防篡改历史）</td>
+            <td>L1 要求不可变 Commit SHA 与可审计 Diff；L2 要求源码控制系统阻止强推改写历史并实时签发 Source Provenance/VSA。</td>
+            <td>未托管源码直接发包、<code>git push --force</code> 掩盖恶意修改痕迹。</td>
+            <td>核对源码 VCS Commit SHA 可达，且 Source Control System 启用历史不可变审计日志。</td>
+          </tr>
+          <tr>
+            <td><strong>Source L3 &amp; L4</strong><br/>（持续控制 + 双人审查）</td>
+            <td>L3 要求对受保护分支/标签持续强制执行组织策略并证明连续性；L4 强制 <strong>Two-Party Review</strong>（且新推送自动作废旧审批）。</td>
+            <td>单人内部作恶（Insider Threat）、账号被盗后绕过审查直接合并恶意 PR。</td>
+            <td>校验 Source VSA 中的 <code>SLSA_SOURCE_LEVEL_3/4</code> 与分支保护连续性时间戳，未达标则在发版门禁拦截。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>密码学协议栈：in-toto v1、DSSE PAE、Sigstore 与 Trusted Publishers</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 为什么要用 DSSE PAE？告别脆弱 JSON 规范化与类型混淆</h3>
+      <p>任何可信溯源证明在落盘时都由三层标准自内向外嵌套封装：</p>
+      <ul>
+        <li><strong>最内层 · <code>in-toto Statement v1</code>（<a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><code>https://in-toto.io/Statement/v1</code></a>）：</strong>把“证明对象”和“声明内容”严格绑死——包含 <code>_type</code>、<code>subject</code>（数组，每项必须携带不可变密码学 <code>digest</code> 如 <code>sha256</code>）、<code>predicateType</code>（如 <code>https://slsa.dev/provenance/v1</code>、<code>https://slsa.dev/verification_summary/v1</code> 或 <code>https://cyclonedx.org/bom</code>）与 <code>predicate</code>。</li>
+        <li><strong>中间层 · DSSE（Dead Simple Signing Envelope）：</strong>将 Statement 编码为 Base64 放入 <code>payload</code>，并标明 <code>payloadType: "application/vnd.in-toto+json"</code>。签名时不直接对原始 JSON 或乱序换行签字，而是对 <strong>PAE（Pre-Authentication Encoding）</strong> 字节流签名：<br/><code>PAE(type, payload) = "DSSEv1" + SP + LEN(type) + SP + type + SP + LEN(payload) + SP + payload</code>（其中 <code>SP</code> 为 <code>0x20</code>，<code>LEN</code> 为精确字节长度的十进制 ASCII，无前导零）。它一举消除了易碎的 JSON Canonicalization 依赖，并彻底堵死跨协议 <strong>Type Confusion（类型混淆）</strong> 攻击。</li>
+        <li><strong>最外层 · Sigstore Bundle v0.3 &amp; Trusted Publishers：</strong>用 OIDC 短期身份令牌向 <strong>Fulcio</strong> 换取短命 X.509 代码签名证书（内嵌不可伪造的 Provider-agnostic V2 DER <code>UTF8String</code> 扩展 OID：<code>.1.8</code> OIDC Issuer V2、<code>.1.9</code> Build Signer URI、<code>.1.12</code> Source Repository URI、<code>.1.21</code> Run Invocation URI），并把签名记录写入不可篡改透明度日志 <strong>Rekor</strong>（<strong>Rekor v2</strong> 引入 Tile-backed 瓦片存储，大幅削减对象存储与索引运维成本）。全部证书链与日志包含性证明（Inclusion Proof）打包进单个 <code>.sigstore.json</code>（<strong>Bundle v0.3</strong>），配合 <strong>TUF</strong> 分发的 <code>Trusted Root</code> 即可在客户现场<strong>完全离线验签</strong>。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">致命误区：“通过 Sigstore 验签 ≠ 可以信任该制品”</span>
+        任何人都可以在自己的公共 GitHub 仓库注册一个账号，用 GitHub OIDC 经公共 Fulcio 签出<strong>数学上 100% 合法</strong>的 Sigstore 签名！如果只调用 <code>verify</code> 而不强制锁定 <strong>OIDC Issuer（OID <code>.1.8</code>）+ 精确 Workflow SAN（OID <code>.1.9</code>）+ 源仓 URI（OID <code>.1.12</code>）+ 不可变制品 Digest</strong>，就会沦为典型的 <em>Confused Deputy</em>。
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>2.2 生态实践：PyPI PEP 740、npm Provenance 与 VSA 预验签捷径</h3>
+      <p><strong>下游包管理器的无密钥革命：</strong>PyPI 通过 <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener"><strong>PEP 740（Digital Attestations）</strong></a> 为每个 <code>.whl</code>/<code>.tar.gz</code> 分发文件同时承载 <code>PyPI Publish</code>（证明经 Trusted Publisher 认证）与 <code>SLSA Provenance</code> 双证明，彻底淘汰长期泄露风险极高的静态 <code>PYPI_API_TOKEN</code>；npm Provenance 与 GitHub Artifact Attestations 同样采用 OIDC + Sigstore 将发布包与具体源码 Commit 强绑定。</p>
+      <p><strong>消费端性能破局 · VSA（<code>https://slsa.dev/verification_summary/v1</code>）：</strong>生产 K8s 准入节点或客户交付侧若每次部署都递归拉取几百层上游依赖的原始 Provenance 日志并逐条解析，不仅延迟极高，而且上游仓库策略细节往往不便对外暴露。<strong>VSA</strong> 允许受信任的中心策略引擎完成一次全量校验后，签发一张极简结论证书：包含 <code>verifier.id</code>、<code>policy</code>、<code>verificationResult</code>（<code>PASSED</code>/<code>FAILED</code>）以及达标列表 <code>verifiedLevels</code>（如 <code>["SLSA_BUILD_LEVEL_3", "SLSA_SOURCE_LEVEL_3"]</code>），让边缘节点与客户侧亚毫秒级放行。</p>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · SLSA v1.2 + in-toto DSSE + Sigstore 端到端密码学信任闭环架构</strong>
+        <span>打通源码连续性、隔离构建证明、PAE 抗混淆信封、Tile 化透明度日志、OCI Referrers / PEP 740 分发与 VSA 离线准入</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">第一层 · 事实生成（Source Track + Build Track + AI-BOM）</span>
+            <span class="orch-stage-kicker">in-toto Statement v1 &middot; subject[].digest.sha256</span>
+          </div>
+          <p class="orch-stage-desc">
+            源码平台生成 <strong>Source Provenance/VSA</strong>（验证保护分支连续性与双人审查）；隔离 CI Runner 产出 <strong>SLSA Build Provenance v1</strong>；SCA/AI 扫描器产出 CycloneDX / AI-BOM（Lesson 0017）与序列化校验结果（Lesson 0018），全部以不可变 SHA-256 摘要作为 <code>subject</code>。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 封装进 DSSE 信封并计算 PAE 防类型混淆 &nbsp; &darr;</div>
+
+        <div class="orch-stage stage-acl">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">第二层 · 无密钥密码学签发与捆绑（Sigstore Bundle v0.3）</span>
+            <span class="orch-stage-kicker">PAE("DSSEv1 ...") &middot; Fulcio OID .1.8/.1.9/.1.12/.1.21 &middot; Rekor v2</span>
+          </div>
+          <p class="orch-stage-desc">
+            CI/CD 使用短期 OIDC Token 向 <strong>Fulcio</strong> 换取短命 X.509 证书（硬编码 Issuer/Repo/Workflow/Invocation URI 扩展）；对 <code>PAE</code> 字节流签名并将记录写入 <strong>Rekor v2（Tile-backed 透明度日志）</strong>，连同 Inclusion Proof 封装为离线自验证的 <code>.sigstore.json</code> Bundle，通过 OCI Referrers / PEP 740 / npm 随制品伴生分发。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 中心策略引擎验签并签发 VSA &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">第三层（左）· 中心验签与 VSA 签发</span>
+              <span class="badge badge-blue">sigstore-go + GUAC</span>
+            </div>
+            <ul>
+              <li><strong>三要素强校验：</strong>基于 TUF <code>Trusted Root</code> 核验 Bundle，同时锁定制品 <code>sha256</code>、OIDC Issuer 与精确受保护分支/Workflow SAN。</li>
+              <li><strong>签发 VSA：</strong>校验 Source + Build 连续性后生成 <code>verification_summary/v1</code>（<code>SLSA_BUILD_LEVEL_3</code> + <code>SLSA_SOURCE_LEVEL_3</code>）并入库 Layer 2 IR / GUAC 图谱。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">第三层（右）· 离线准入与私有化防泄密</span>
+              <span class="badge badge-warn">Private Rekor v2 + Kyverno</span>
+            </div>
+            <ul>
+              <li><strong>闭源数据主权：</strong>私有仓与商业制品强制走 <strong>Private Sigstore</strong>（私有 Fulcio/Rekor v2/TUF），绝不向公共 Rekor 泄露内部仓库与员工邮箱。</li>
+              <li><strong>运行时最后一公里：</strong>K8s 集群通过 <code>Kyverno</code> 仅允许携带有效 VSA 且通过 Digest 锁定的镜像调度上线。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>全 Apache-2.0 商业底座选型与 Pure Go <code>sigstore-go</code> 验签原语</h2>
+
+    <div class="prose-col">
+      <h3>3.1 商业闭源生态矩阵：全栈 Apache-2.0 的罕见黄金赛道</h3>
+      <p>与二进制同源或自动修复赛道不同，SLSA / in-toto / Sigstore 核心开源生态几乎清一色采用纯宽松的 <strong><code>Apache-2.0</code></strong> 协议。架构师真正要防范的不是传染性 GPL，而是<strong>“误把内部闭源数据写入公共透明度日志”</strong>的运维与隐私泄密红线：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:23%" />
+          <col style="width:14%" />
+          <col style="width:31%" />
+          <col style="width:32%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源项目</th>
+            <th>精确许可协议</th>
+            <th>核心能力定位</th>
+            <th>商业闭源集成与数据主权边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/sigstore/sigstore-go" target="_blank" rel="noopener"><strong><code>sigstore/sigstore-go</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>Sigstore 官方轻量级 Go SDK，专注嵌入 SCA 内核执行 Bundle v0.3 / DSSE / TUF 验签与策略校验。</td>
+            <td><strong>核心嵌入式首选</strong>：极低依赖体积，直接作为 Layer 2/L4 验签库编译进你的 Go 后端与 CLI。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener"><strong><code>sigstore/cosign</code></strong></a> &amp; <a href="https://github.com/oras-project/oras-go" target="_blank" rel="noopener"><code>oras-go</code></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>容器镜像、SBOM 与 OCI 1.1 Referrers 签名/绑定与推送拉取标准工具链。</td>
+            <td><strong>OCI 分发伴生层</strong>：用 <code>oras-go</code> 在 Go 内核原生读写 OCI Referrers，实现制品、SBOM 与 Bundle 同仓随行。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><strong><code>in-toto/attestation</code></strong></a> &amp; <a href="https://github.com/in-toto/witness" target="_blank" rel="noopener"><code>witness</code></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>官方 Statement v1 / VSA Protobuf Schema，以及可插拔 CI 构建过程证明收集器（<code>witness</code>）。</td>
+            <td><strong>Schema 与收集器</strong>：直接复用官方 Go Struct 建模；跨 GitLab/Jenkins/自建 CI 可借力 <code>witness</code> 采集步骤级证据。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/slsa-framework/slsa-verifier" target="_blank" rel="noopener"><strong><code>slsa-framework/slsa-verifier</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>SLSA 官方独立校验器，对照 SLSA Build/Source 策略深度核验 Provenance 与构建器信任级别。</td>
+            <td><strong>语义规则参考/嵌入</strong>：可复用其 Builder 信任校验逻辑，配合自研策略引擎输出 SLSA VSA。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/sigstore/model-transparency" target="_blank" rel="noopener"><strong><code>sigstore/model-transparency</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>Sigstore 面向 AI 模型的无密钥签名工具链（<code>model-signing</code>），专治 GB 级权重目录/Safetensors 完整性。</td>
+            <td><strong>衔接 Lesson 0017–0018</strong>：将模型权重签名纳入统一 Sigstore Bundle 验签体系，防权重替换投毒。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/guacsec/guac" target="_blank" rel="noopener"><strong><code>guacsec/guac</code></strong></a> &amp; <a href="https://github.com/kyverno/kyverno" target="_blank" rel="noopener"><code>kyverno</code></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>GUAC 将 SBOM、VEX、Provenance 与 VSA 聚合成可查询图谱；Kyverno 负责 K8s 准入策略强拦截。</td>
+            <td><span class="badge badge-warn">私有化主权铁律</span> 全栈协议安全，但企业私有仓绝不能用公共 Rekor！必须部署私有 <strong>Fulcio + Rekor v2 + TUF Trusted Root</strong>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 Pure Go 核心原语：基于 <code>sigstore-go</code> 的三要素锁定与 VSA 解析</h3>
+      <p>下面这段 Go 核心代码直接嵌入你的商业 SCA 平台验签引擎：通过本地/私有 TUF <code>Trusted Root</code> 初始化 <code>verify.NewVerifier</code>，严格锁定制品 <code>sha256</code>、预期 OIDC Issuer（<code>.1.8</code>）与受保护分支发布工作流 SAN，随后解码 DSSE 内嵌的 <code>in-toto Statement v1</code> 并校验 SLSA v1.2 <code>VSA</code> 双轨等级：</p>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：sigstore-go 三要素验签 + SLSA v1.2 VSA 双轨策略裁决</strong>
+        <span>Zero-Keyless-Spoof Pure Go Provenance Verifier（Apache-2.0 生态）</span>
+      </div>
+      <pre><code><span class="tok-kw">import</span> (
+    <span class="tok-str">"encoding/hex"</span>
+    <span class="tok-str">"encoding/json"</span>
+    <span class="tok-str">"fmt"</span>
+
+    <span class="tok-str">"github.com/sigstore/sigstore-go/pkg/bundle"</span>
+    <span class="tok-str">"github.com/sigstore/sigstore-go/pkg/root"</span>
+    <span class="tok-str">"github.com/sigstore/sigstore-go/pkg/verify"</span>
+)
+
+<span class="tok-kw">type</span> InTotoVSAStatement <span class="tok-kw">struct</span> {
+    Type          <span class="tok-type">string</span> `json:<span class="tok-str">"_type"</span>`
+    PredicateType <span class="tok-type">string</span> `json:<span class="tok-str">"predicateType"</span>`
+    Predicate     <span class="tok-kw">struct</span> {
+        VerificationResult <span class="tok-type">string</span>   `json:<span class="tok-str">"verificationResult"</span>`
+        VerifiedLevels     []<span class="tok-type">string</span> `json:<span class="tok-str">"verifiedLevels"</span>`
+    } `json:<span class="tok-str">"predicate"</span>`
+}
+
+<span class="tok-cmt">// VerifyArtifactAndVSA 使用私有或官方 TUF TrustedRoot 锁定制品摘要、OIDC 身份与 SLSA v1.2 双轨等级</span>
+<span class="tok-kw">func</span> VerifyArtifactAndVSA(
+    trustedMaterial root.TrustedMaterial,
+    sigBundle *bundle.Bundle,
+    artifactSHA256Hex, oidcIssuer, exactWorkflowSANRegex <span class="tok-type">string</span>,
+) (*verify.VerificationResult, <span class="tok-type">error</span>) {
+    <span class="tok-cmt">// 1. 强约束校验透明度日志（Rekor v2）与 SCT，缺一不可</span>
+    sev, err := verify.NewVerifier(
+        trustedMaterial,
+        verify.WithSignedCertificateTimestamps(<span class="tok-num">1</span>),
+        verify.WithTransparencyLog(<span class="tok-num">1</span>),
+    )
+    <span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> <span class="tok-kw">nil</span>, fmt.Errorf(<span class="tok-str">"init sigstore verifier: %w"</span>, err)
+    }
+
+    digestBytes, err := hex.DecodeString(artifactSHA256Hex)
+    <span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> <span class="tok-kw">nil</span>, fmt.Errorf(<span class="tok-str">"decode artifact sha256: %w"</span>, err)
+    }
+
+    <span class="tok-cmt">// 2. 必须锁定 Issuer（OID .1.8）+ 精确 Workflow SAN，防任意 Fork 冒充（Confused Deputy）</span>
+    certID, err := verify.NewShortCertificateIdentity(oidcIssuer, <span class="tok-str">""</span>, <span class="tok-str">""</span>, exactWorkflowSANRegex)
+    <span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> <span class="tok-kw">nil</span>, fmt.Errorf(<span class="tok-str">"build certificate identity: %w"</span>, err)
+    }
+
+    <span class="tok-cmt">// 3. 执行离线/在线 Bundle v0.3 验签：同时绑定不可变制品 Digest 与证书身份</span>
+    res, err := sev.Verify(
+        sigBundle,
+        verify.NewPolicy(
+            verify.WithArtifactDigest(<span class="tok-str">"sha256"</span>, digestBytes),
+            verify.WithCertificateIdentity(certID),
+        ),
+    )
+    <span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> <span class="tok-kw">nil</span>, fmt.Errorf(<span class="tok-str">"sigstore verification rejected: %w"</span>, err)
+    }
+
+    <span class="tok-cmt">// 4. 解析 DSSE 内部 Statement v1，确认 SLSA v1.2 Build + Source 双轨达标</span>
+    <span class="tok-kw">if</span> res.Statement != <span class="tok-kw">nil</span> &amp;&amp; res.Statement.PredicateType == <span class="tok-str">"https://slsa.dev/verification_summary/v1"</span> {
+        raw, _ := json.Marshal(res.Statement)
+        <span class="tok-kw">var</span> vsa InTotoVSAStatement
+        <span class="tok-kw">if</span> err := json.Unmarshal(raw, &amp;vsa); err == <span class="tok-kw">nil</span> &amp;&amp; vsa.Predicate.VerificationResult != <span class="tok-str">"PASSED"</span> {
+            <span class="tok-kw">return</span> <span class="tok-kw">nil</span>, fmt.Errorf(<span class="tok-str">"VSA policy result not PASSED: %s"</span>, vsa.Predicate.VerificationResult)
+        }
+    }
+    <span class="tok-kw">return</span> res, <span class="tok-kw">nil</span>
+}</code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换 4 个攻防演练场景（合规 Build L3 + Source L3、Fork 仓库伪造合法签名、<code>:latest</code> Tag 调包失配、公共 Rekor 泄密 + Source 连续性断链），关闭任意刚性校验开关观察漏放后果；在<strong>模式二</strong>中组合制品形态、公私 Rekor 日志、Source Track、VSA 签发与 Kyverno 准入，诊断架构达标状态。</p>
+    </div>
+
+    <!-- INTERACTIVE PROVENANCE & SIGSTORE LAB -->
+    <section class="widget-panel full-width" data-widget="provenance-sigstore-lab">
+      <script type="application/json" class="provenance-sigstore-lab-data">
+        {
+          "title": "交互实验台：Sigstore 零信任验签演练与 SLSA v1.2 蓝图诊断",
+          "intro": "模拟 Confused Deputy 身份冒充、Tag Digest 调包、公共 Rekor 泄密与 Source Track 断链拦截，并实时评估 VSA 离线准入方案。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "可信构建溯源与密码学证明架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为企业商业闭源产品线与客户 K8s 交付环境设计 SLSA v1.2 + Sigstore 端到端溯源验签体系。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐 SLSA v1.2 与零信任溯源闭环！同时守住了身份绑定、私有 Rekor 数据主权、Source 连续性与 VSA 离线性能。",
+            "warning": "方案基本可行，但在 {warning} 项上存在性能瓶颈或源码连续性盲区（标黄项），建议补齐 VSA 摘要与 Source Track。",
+            "critical": "当前方案踩中 {critical} 处致命红线（标红项）：可能放任 Fork 冒充、泄露私仓拓扑到公共 Rekor、或因可变 Tag 被调包！"
+          },
+          "modules": [
+            {
+              "name": "Sigstore 验签策略的身份与摘要绑定准则",
+              "layer": "L4/SYS 验签基线",
+              "context": "研发线全面采用无密钥 OIDC + Fulcio 签名，需要制定生产集群和 SCA 网关的验签硬标准。",
+              "options": [
+                {
+                  "label": "同时锁定制品不可变 SHA-256 Digest、预期 OIDC Issuer（.1.8）与受保护分支精确 Workflow SAN",
+                  "status": "optimal",
+                  "verdictTitle": "彻底封堵 Confused Deputy 冒充与 Tag 调包攻击",
+                  "feedback": "sigstore-go 通过 WithArtifactDigest 与 WithCertificateIdentity 确保数学合法且来源唯一可信。"
+                },
+                {
+                  "label": "只要镜像附带的 Sigstore Bundle 数学验签返回 PASS 就一律放行，不限制具体仓库与工作流",
+                  "status": "critical",
+                  "verdictTitle": "致命漏洞！任何人用自己免费 GitHub Fork 都能签出数学合法的签名绕过门禁",
+                  "feedback": "无密钥签名必须校验 Fulcio 扩展 OID 中的实际源码仓与签发工作流身份。"
+                },
+                {
+                  "label": "校验 OIDC 身份但允许部署清单继续使用 :latest 可变标签由节点自行拉取对比",
+                  "status": "warning",
+                  "verdictTitle": "存在 TOCTOU 调包时间窗！拉取验证与实际启动的镜像可能已被替换",
+                  "feedback": "验证通过后必须改写或锁定为不可变 sha256 Digest 进行部署。"
+                }
+              ]
+            },
+            {
+              "name": "闭源商业产品线的透明度日志（Rekor）与信任根部署模式",
+              "layer": "SYS 数据主权",
+              "context": "企业内部私有微服务的仓名、流水线路径与员工身份属于高度机密，同时又希望保留无密钥签名能力。",
+              "options": [
+                {
+                  "label": "部署 Private Sigstore（私有 Fulcio + Rekor v2 Tile-backed Log + 私有 TUF Trusted Root）",
+                  "status": "optimal",
+                  "verdictTitle": "兼具无密钥敏捷性与闭源元数据零外泄的数据主权",
+                  "feedback": "Rekor v2 的瓦片架构大幅降低了私有化部署成本，TUF 保证内部信任根可安全轮换。"
+                },
+                {
+                  "label": "图省事直接让企业内网闭源 CI 连接公网公共 Fulcio 与公共 Rekor 日志登记全部构建",
+                  "status": "critical",
+                  "verdictTitle": "严重商业泄密事故！内部仓库地址、服务拓扑与工作流路径将永久公开可查",
+                  "feedback": "公共 Rekor 面向全网公开检索且不可删除，绝不可用于未脱敏闭源资产。"
+                },
+                {
+                  "label": "退回给每台 Jenkins 从节点下发一张十年不过期的共享静态 PGP 私钥文件",
+                  "status": "warning",
+                  "verdictTitle": "运维高危且不满足现代自动化审计：静态私钥一旦泄露需全网吊销重签",
+                  "feedback": "难以区分具体构建节点与触发人身份，也无法对接 PyPI PEP 740 / OIDC 生态。"
+                }
+              ]
+            },
+            {
+              "name": "SLSA v1.2 双轨治理与源码连续性（Continuity）控制",
+              "layer": "SYS 源码治理",
+              "context": "已有 Build L3 加固临时构建机，但团队讨论是否有必要接入 SLSA v1.2 新增的 Source Track。",
+              "options": [
+                {
+                  "label": "双轨齐抓：叠加 Source L3/L4（受保护分支连续性 + Two-Party Review），保护中断立即断链告警",
+                  "status": "optimal",
+                  "verdictTitle": "全面封堵维护者账号被盗或内部人员绕过审查直推主干引发的正规构建投毒",
+                  "feedback": "Build L3 只保构建干净，Source Track 才保源码合入干净。"
+                },
+                {
+                  "label": "只追求 Build L3，允许高级研发随时临时关闭主干保护强推紧急代码且事后不标记断链",
+                  "status": "critical",
+                  "verdictTitle": "违背 SLSA v1.2 Onboarding & Continuity 铁律，等于在构建起跑线前开了后门",
+                  "feedback": "保护窗口关闭期间进入的提交无法获得有效 Source 等级背书。"
+                },
+                {
+                  "label": "只用 git log 检查历史是否包含签名，不约束 GitHub/GitLab 服务端分支保护强制状态",
+                  "status": "warning",
+                  "verdictTitle": "难以拦截服务端被强推篡改或作者自审自批的流程绕过",
+                  "feedback": "Source Track L3/L4 依赖托管平台持续强执行的保护规则与实时 Source Provenance。"
+                }
+              ]
+            },
+            {
+              "name": "信封协议与包管理器无密钥发布（Trusted Publishers）",
+              "layer": "L2/L3 协议层",
+              "context": "需要为内部自研 SDK 与开源组件制定统一的声明签名格式与 PyPI/npm 发版机制。",
+              "options": [
+                {
+                  "label": "采用 in-toto Statement v1 + DSSE PAE 信封，PyPI 启用 PEP 740 / npm Provenance 彻底取消长效 Token",
+                  "status": "optimal",
+                  "verdictTitle": "杜绝跨协议类型混淆，并消除 CI 中长效 PYPI_API_TOKEN 泄露炸弹",
+                  "feedback": "PAE 绑定 payloadType 与字节长度，无需脆弱的 JSON Canonicalization。"
+                },
+                {
+                  "label": "要求所有发版流水线继续保存静态明文 PYPI_API_TOKEN，并对 JSON 文本直接做常规字符串签名",
+                  "status": "critical",
+                  "verdictTitle": "保留了最易被 GitHub Actions 投毒偷走的静态发布令牌，且未防 Type Confusion",
+                  "feedback": "2024–2025 年多起 PyPI/npm 账号劫持均因静态发布密钥外泄所致。"
+                },
+                {
+                  "label": "只给外部开源包做 npm Provenance，内部镜像产物完全不写入 OCI Referrers",
+                  "status": "warning",
+                  "verdictTitle": "割裂内部制品信任链，无法与外部上游证明共同形成完整企业溯源图谱",
+                  "feedback": "建议用 oras-go 将内部 Bundle 与 SBOM 一并关联进 OCI 1.1 Referrers。"
+                }
+              ]
+            },
+            {
+              "name": "大规模集群准入性能与离线客户现场验证方案",
+              "layer": "L4 运行时准入",
+              "context": "生产 K8s 集群每秒调度大量 Pod，且部分政企客户处于完全断网的离线内网环境。",
+              "options": [
+                {
+                  "label": "中心策略引擎验签后签发 VSA，连同 Sigstore Bundle v0.3 与 TUF Root 打包分发供 Kyverno 离线秒验",
+                  "status": "optimal",
+                  "verdictTitle": "兼顾毫秒级准入性能、策略不外泄与 100% 离线可验证闭环",
+                  "feedback": "VSA 避免消费端重复解析全量 Provenance 树，Bundle v0.3 自带 Inclusion Proof。"
+                },
+                {
+                  "label": "每次 Pod 启动都让准入控制器实时连公网逐个递归下载并重算上百个上游源码包构建日志",
+                  "status": "critical",
+                  "verdictTitle": "直接导致生产集群调度雪崩超时，且离线政企环境彻底瘫痪",
+                  "feedback": "准入节点应当消费预验签的 VSA 与自包含 Bundle，而非重跑全链路溯源。"
+                },
+                {
+                  "label": "仅在月度合规报告里人工抽查 Provenance，生产集群不做任何 Kyverno 强制验签准入",
+                  "status": "warning",
+                  "verdictTitle": "证明与部署完全脱节，手工 kubectl 部署的无签名恶意镜像仍可畅通无阻",
+                  "feedback": "必须将验签闭环落地到生产准入最后一公里。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道实战题覆盖 <strong>SLSA v1.2 Source Track 与连续性铁律、DSSE PAE 防类型混淆、Sigstore 验签三要素绑定防 Confused Deputy，以及 Private Sigstore 防公共 Rekor 泄密与 VSA 降载</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0020 · SLSA v1.2、in-toto 与 Sigstore 闭环回忆测验",
+          "intro": "重点检验 SLSA v1.2 双轨连续性、DSSE PAE 编码机理、sigstore-go 身份绑定及私有化数据主权边界。",
+          "questions": [
+            {
+              "prompt": "SLSA v1.2（2025-11-24 发布）正式引入的 Source Track 相比仅有 Build Track 解决了什么核心盲区，且遵循哪项关键原则？",
+              "options": [
+                "它允许研发管理员随时临时关闭主干分支保护检查，并在发版后对历史提交做追溯性合规背书。",
+                "它对主干变更实施持续技术控制并保留防篡改记录，且严格遵循接入后连续性而不做历史追溯。",
+                "它要求所有研发工程师在本地工作站用长期静态私钥签署每次提交，并彻底取消双人代码审查。",
+                "它仅在构建容器最终打包完成之后扫描制品依赖清单，完全不校验版本控制系统的变更保护规则。"
+              ],
+              "answerIndex": 1,
+              "explanation": "仅有 Build Track 时，攻击者或内部人员只要绕过审查把后门推入主干，隔离再好的 CI 也会编出合法 Build Provenance。SLSA v1.2 新增 Source Track（L1–L4）覆盖防强推历史、持续技术控制与双人审查，并严格遵守 Onboarding & Continuity：仅从接入后生效，一旦关闭保护即断链（B 正确）。"
+            },
+            {
+              "prompt": "in-toto Statement v1 外层包裹的 DSSE 信封为何要求对 PAE（Pre-Authentication Encoding）签名，而非直接对 JSON 字符串签名？",
+              "options": [
+                "使用客户端自主拼接的宽松文本规范化规则重排键值，并丢弃外部声明负载类型标签字段。",
+                "强制要求所有开发者改用固定对称加密私钥来签名明文，并禁止在信封中携带多方联名签。",
+                "在签名运算之前先对原始负载正文做无损压缩处理，然后再直接剔除声明类型字段的长度。",
+                "通过前缀编码将协议版本、负载类型及其字节长度与负载正文严格绑定，以杜绝类型混淆。"
+              ],
+              "answerIndex": 3,
+              "explanation": "DSSE 定义 PAE(type, payload) = \"DSSEv1\" + SP + LEN(type) + SP + type + SP + LEN(payload) + SP + payload。它直接对原始 Base64 解码字节流做签名，免去脆弱的 JSON Canonicalization 问题，同时把 payloadType（如 application/vnd.in-toto+json）与字节长度密码学锁死，杜绝 Type Confusion（D 正确）。"
+            },
+            {
+              "prompt": "使用 sigstore-go 对无密钥签名的制品与 Bundle v0.3 验签时，如何从根本上防范攻击者用自己 GitHub Fork 合法签发的“真签名假来源”攻击？",
+              "options": [
+                "同时校验制品不可变摘要、预期身份发行方、精确工作流路径及透明度日志或时间戳证据。",
+                "只需验证证书链确实由公共证书中心签发，无需核对代码仓库来源或工作流路径以及摘要。",
+                "只需把镜像标签名与代码仓库名做前缀匹配，在网络繁忙时直接跳过证书身份和日志校验。",
+                "仅验证包内声明字段是否包含构建平台名称，并在本地信任所有使用个人邮箱签名的证书。"
+              ],
+              "answerIndex": 0,
+              "explanation": "任何人都可以通过公共 OIDC + Fulcio 为自己的 Fork 签出数学完全有效的证书。防 Confused Deputy 必须通过 WithArtifactDigest 绑定制品 SHA-256、通过 WithCertificateIdentity 绑定 OIDC Issuer（OID .1.8）及精确源仓/Workflow SAN，并要求 SCT 与透明度日志证明（A 正确）。"
+            },
+            {
+              "prompt": "在商业闭源企业级场景中落地 Sigstore 与大规模 K8s 准入验签时，哪项架构拍板最能同时守住数据主权与验证性能？",
+              "options": [
+                "将企业私有仓库地址与内部流水线路径全量写入公共透明度日志，并要求节点递归重算日志。",
+                "在集群准入网关彻底关闭证明校验功能，仅依靠包管理器自带的动态安装标签完成身份认证。",
+                "部署私有化透明度日志以防内部元数据外泄，并由策略中心预验签后签发汇总证明供消费端。",
+                "将员工个人邮箱与静态长期令牌写入镜像环境变量，以此替代短期身份认证与汇总证明机制。"
+              ],
+              "answerIndex": 2,
+              "explanation": "公共 Rekor 全球公开不可删，闭源资产绝不能连公共 Rekor，必须自建 Private Sigstore（利用 Rekor v2 Tile-backed 降低运维成本 + 私有 TUF Trusted Root）；同时中心策略验签后签发 SLSA VSA（verification_summary/v1），配合 Bundle v0.3 支持消费端离线秒级准入（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>设计 SLSA v1.2、in-toto DSSE 与企业级 Sigstore 验签引擎时，推荐精读以下官方规范与 Apache-2.0 仓库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://slsa.dev/spec/v1.2/" target="_blank" rel="noopener"><strong>SLSA v1.2 Official Spec</strong></a> · <a href="https://slsa.dev/verification_summary/v1" target="_blank" rel="noopener"><strong>SLSA Verification Summary Attestation (VSA)</strong></a>：2025-11-24 定稿的 Build/Source 双轨规范、连续性铁律与 VSA Schema。</li>
+          <li><a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><strong><code>in-toto/attestation</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/secure-systems-lab/dsse" target="_blank" rel="noopener"><strong>DSSE Spec (<code>PAE</code>)</strong></a> · <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener"><strong>PEP 740 (PyPI Digital Attestations)</strong></a>：Statement v1、防类型混淆签名信封与无密钥包生态标准。</li>
+          <li><a href="https://github.com/sigstore/sigstore-go" target="_blank" rel="noopener"><strong><code>sigstore/sigstore-go</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md" target="_blank" rel="noopener"><strong>Fulcio X.509 OID Info</strong></a> · <a href="https://github.com/sigstore/model-transparency" target="_blank" rel="noopener"><strong><code>sigstore/model-transparency</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/guacsec/guac" target="_blank" rel="noopener"><strong><code>guacsec/guac</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/kyverno/kyverno" target="_blank" rel="noopener"><strong><code>kyverno/kyverno</code> (<code>Apache-2.0</code>)</strong></a>。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>随时向导师追问 · 下一步演进</h3>
+        <p>我们已用可验证的密码学证明把“单点制品”锁死了。但企业真实战场往往有<strong>上万个微服务、数亿条依赖边和海量 Provenance/VSA 证明</strong>——下一课 <strong>Lesson 0021</strong> 将直接挑战<strong>海量资产台账、全图谱检索与 0-day 秒级应急响应</strong>！欢迎随时追问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“如果我们要为没有原生 OIDC 的老旧 Jenkins 或自研 GitLab 接入 SLSA 证明，<code>in-toto/witness</code>（<code>Apache-2.0</code>）和硬件 SPIFFE/SPIRE 身份怎么配合？”</li>
+          <li>“企业私有化交付客户现场完全断网，<code>TUF Trusted Root</code> 怎么打包进离线安装包并在证书过期后安全升级？”</li>
+          <li>“准备好了！请开启 <strong>Lesson 0021（企业级海量资产台账、全图谱检索与 0-day 秒级应急响应架构）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0019-agentic-ai-and-mcp-supply-chain-governance.html">&larr; 上一课：Lesson 0019 · Agentic AI 与 MCP</a>
+      <a href="../reference/ch6-provenance-scale-and-blueprint-matrix.html">速查参考卡：Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Lesson 0021（海量资产与 0-day 应急） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/provenance-sigstore-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

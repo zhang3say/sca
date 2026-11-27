@@ -12,7 +12,8 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="./index.html" class="active">课程首页 · 全局路线图</a>
-        <a href="./lessons/0019-agentic-ai-and-mcp-supply-chain-governance.html">当前课程 · Lesson 0019</a>
+        <a href="./lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">当前课程 · Lesson 0020</a>
+        <a href="./reference/ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
         <a href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
         <a href="./reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
         <a href="./reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
@@ -36,8 +37,8 @@
       <div class="hero-stats">
         <div class="stat-card">
           <div class="stat-label">课程进度</div>
-          <div class="stat-value">19 / 22 课</div>
-          <div class="stat-sub">Phase 2 收官 · 下一课 Phase 3 (0020)</div>
+          <div class="stat-value">20 / 22 课</div>
+          <div class="stat-sub">Phase 3 已开启 · 下一课 0021</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">当前主攻阶段</div>
@@ -51,14 +52,14 @@
         </div>
         <div class="stat-card">
           <div class="stat-label">速查卡片库</div>
-          <div class="stat-value">6 / 6 份</div>
-          <div class="stat-sub">Ref 06 已完整覆盖 Lesson 0015–0019</div>
+          <div class="stat-value">7 / 7 份</div>
+          <div class="stat-sub">Ref 07 已启 · 覆盖 Lesson 0020</div>
         </div>
       </div>
 
       <div class="hero-actions">
-        <a class="btn-link-primary" href="./lessons/0019-agentic-ai-and-mcp-supply-chain-governance.html">进入当前课程：Lesson 0019 →</a>
-        <a class="btn-link-secondary" href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">打开完整速查卡：Ref 06 投毒 / 二进制 / AI 矩阵</a>
+        <a class="btn-link-primary" href="./lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">进入当前课程：Lesson 0020 →</a>
+        <a class="btn-link-secondary" href="./reference/ch6-provenance-scale-and-blueprint-matrix.html">打开速查卡：Ref 07 溯源 / 规模化 / 蓝图矩阵</a>
       </div>
     </header>
 
@@ -554,23 +555,26 @@
         <span class="badge badge-ok">3 课 · 规模化收官</span>
       </div>
       <ul class="lesson-list">
-        <li class="lesson-row is-next" data-phase="p3" data-layer="SYS,L2" data-status="next">
+        <li class="lesson-row is-available" data-phase="p3" data-layer="SYS,L2" data-status="ready">
           <div class="lesson-num">0020</div>
           <div>
-            <div class="lesson-main-title">构建溯源与密码学证明：SLSA v1.2、in-toto 与 Sigstore 闭环</div>
-            <p class="lesson-desc">超越事后成分扫描：基于 SLSA v1.2 Build/Source Track 生成与验签 Provenance 和 VSA 证明，结合 Trusted Publishers 与 Sigstore 无密钥签名建立端到端防篡改信任链。</p>
+            <div class="lesson-main-title">
+              <a href="./lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">构建溯源与密码学证明：SLSA v1.2、in-toto 与 Sigstore 闭环</a>
+            </div>
+            <p class="lesson-desc">打通 <code>SLSA v1.2</code>（2025-11-24）Build L1–L3 与 Source L1–L4 双轨连续性、<code>in-toto Statement v1</code> &amp; <code>DSSE PAE</code>、Fulcio V2 OIDs（<code>.1.8/.1.9/.1.12/.1.21</code>）、<code>PEP 740</code>、Private Sigstore（Rekor v2 Tile）与 <code>VSA</code> 离线准入。</p>
             <div class="lesson-tags">
-              <span class="tag-chip">全局架构</span>
-              <span class="tag-chip">SLSA v1.2 · in-toto · Sigstore</span>
+              <span class="tag-chip">全局架构 · Phase 3 首课</span>
+              <span class="tag-chip">SLSA v1.2 · DSSE PAE · VSA</span>
+              <span class="tag-chip">sigstore-go · Rekor v2 · PEP 740</span>
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="badge badge-ok">已发布 · 可学习</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>
 
-        <li class="lesson-row" data-phase="p3" data-layer="SYS,L2,L3" data-status="planned">
+        <li class="lesson-row is-next" data-phase="p3" data-layer="SYS,L2,L3" data-status="next">
           <div class="lesson-num">0021</div>
           <div>
             <div class="lesson-main-title">企业级海量资产台账、全图谱检索与 0-day 秒级应急响应架构</div>
@@ -581,7 +585,7 @@
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-blue">规划中</span>
+            <span class="badge badge-build">下一课 · ZPD</span>
             <span class="lesson-duration">~20 min</span>
           </div>
         </li>
@@ -662,12 +666,21 @@
           </div>
           <div style="font-size:0.8rem;"><a href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">打开速查卡 →</a></div>
         </div>
+
+        <div class="ref-card">
+          <div>
+            <div style="margin-bottom:0.45rem;"><span class="badge badge-build">已启篇 · 可打印</span></div>
+            <h4><a href="./reference/ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 可信溯源证明、海量资产检索与商业蓝图速查矩阵</a></h4>
+            <p style="margin-top:0.35rem;">已沉淀 <strong>Lesson 0020</strong> 精华：SLSA v1.2 Build/Source 双轨连续性、in-toto v1 / DSSE PAE、Fulcio V2 OIDs（<code>.1.8/.1.9/.1.12/.1.21</code>）、PEP 740、Private Sigstore（Rekor v2 Tile）与 VSA 离线准入（待 Lesson 0021–0022 扩展收官）。</p>
+          </div>
+          <div style="font-size:0.8rem;"><a href="./reference/ch6-provenance-scale-and-blueprint-matrix.html">打开速查卡 →</a></div>
+        </div>
       </div>
     </section>
 
     <footer class="lesson-end-nav">
       <span>工作区指南：可在对话中随时输入 <code>/teach</code> 继续下一课、点播任意章节，或调整学习目标</span>
-      <a href="./lessons/0019-agentic-ai-and-mcp-supply-chain-governance.html">进入当前课程：Lesson 0019 →</a>
+      <a href="./lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">进入当前课程：Lesson 0020 →</a>
     </footer>
   </main>
 
