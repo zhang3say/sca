@@ -171,14 +171,14 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Description:** 查验并登记一手源（OpenTelemetry Go & Python SDK `Apache-2.0`、Buf CLI/Schema Registry `Apache-2.0`、OpenAPI 3.1 + `oapi-codegen` `Apache-2.0`、MADR 架构决策记录标准、SCA 黄金样本评测指标规范）。编写第 27 课微课与 `assets/eval-observability-lab.js`（AI 改动后的 Precision/Recall/F1/P95 延迟回归门禁模拟器 + OTel 扫描阶段火焰/耗时剖面器 + 90 天垂直切片导航），完成 Ref 08 第 06 节全章收官，最终更新 `index.html`（`27 / 27 课 · 8 / 8 速查卡 · 4 阶段 7 章节全收官`）与 `NOTES.md`。
 
 **Acceptance criteria:**
-- [ ] `lessons/0027-sca-benchmark-harness-observability-and-ai-spec-repo.html` 讲透「1 人 + AI Coding Agent」模式下如何防止 AI 在重构解析器/版本匹配器/可达性时引入静默精度回退（黄金样本 Ground-Truth Benchmark Harness + 误报/漏报/P95 延迟门禁）、OpenTelemetry 跨 Go↔Python `traceparent` 全链路扫描耗时剖析、AI 友好的 Go + Python + Protobuf 强契约 Monorepo 目录与 ADR 约定，以及前 90 天可独立交付的垂直切片 Spec 框架。
-- [ ] `reference/ch7-product-arch-and-tech-design-matrix.html`（Ref 08）完整覆盖 `0023`–`0027` 全部 6 节并标明 CH 07 & 全课程 27 课收官。
-- [ ] `index.html` 更新为 27 / 27 课、8 / 8 速查卡，`0027` 设为已发布，顶部和底部导航全部指向最新版本且筛选器 `all (27)` / `p4 (5)` / `PROD (5)` 精确匹配。
+- [x] `lessons/0027-sca-benchmark-harness-observability-and-ai-spec-repo.html` 讲透「1 人 + AI Coding Agent」模式下如何防止 AI 在重构解析器/版本匹配器/可达性时引入静默精度回退（黄金样本 Ground-Truth Benchmark Harness + 误报/漏报/P95 延迟门禁）、OpenTelemetry 跨 Go↔Python `traceparent` 全链路扫描耗时剖析、AI 友好的 Go + Python + Protobuf 强契约 Monorepo 目录与 ADR 约定，以及前 90 天可独立交付的垂直切片 Spec 框架。
+- [x] `reference/ch7-product-arch-and-tech-design-matrix.html`（Ref 08）完整覆盖 `0023`–`0027` 全部 6 节并标明 CH 07 & 全课程 27 课收官。
+- [x] `index.html` 更新为 27 / 27 课、8 / 8 速查卡，`0027` 设为已发布，顶部和底部导航全部指向最新版本且筛选器 `all (27)` / `p4 (5)` / `PROD (5)` 精确匹配。
 
 **Verification:**
-- [ ] Content accuracy check: 核验 OTel / Buf / OpenAPI / MADR 一手资料并完善 `RESOURCES.md`。
-- [ ] Static check: 对全仓 CH 07（`0023`–`0027` + `Ref 08` + `index.html`）运行 `node --check` 与 Python 校验脚本，零报错。
-- [ ] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0027`、`Ref 08` 与 `index.html`（验证 27/27 计数、`p4 (5)`、`PROD (5)` 筛选及 `0023`↔`0027`↔`Ref 08` 双向跳转），全部通过后执行 `git add -A && git commit && git push`。
+- [x] Content accuracy check: 核验 OTel / Buf / OpenAPI / MADR 一手资料并完善 `RESOURCES.md`。
+- [x] Static check: 对全仓 CH 07（`0023`–`0027` + `Ref 08` + `index.html`）运行 `node --check` 与 Python 校验脚本，零报错。
+- [x] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0027`、`Ref 08` 与 `index.html`（验证 27/27 计数、`p4 (5)`、`PROD (5)` 筛选及 `0023`↔`0027`↔`Ref 08` 双向跳转），全部通过后执行 `git add -A && git commit && git push`。
 
 **Dependencies:** Task 5
 
@@ -192,7 +192,7 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Estimated scope:** Medium (5–6 files)
 
 ### Checkpoint 6: 全章收官总门禁与发布
-- [ ] 0027 内容准确性核验通过
-- [ ] 全 CH 07 静态检查（JS 语法 + 5 课测验均衡 + 全量相对链接）零报错
-- [ ] 真实浏览器 1280px & 375px 全量 UI/UX 与 `index.html` 筛选计数验证通过
-- [ ] `Ref 08`、`index.html`、`NOTES.md` 全量收官同步并已推送 `origin/main`
+- [x] 0027 内容准确性核验通过
+- [x] 全 CH 07 静态检查（JS 语法 + 5 课测验均衡 + 全量相对链接）零报错
+- [x] 真实浏览器 1280px & 375px 全量 UI/UX 与 `index.html` 筛选计数验证通过
+- [x] `Ref 08`、`index.html`、`NOTES.md` 全量收官同步并已推送 `origin/main`
