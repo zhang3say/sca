@@ -5564,9 +5564,13 @@ pre code,
 
 .grl-layout {
   display: grid;
-  grid-template-columns: 0.92fr 1.08fr;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
   gap: 0.95rem;
   align-items: start;
+}
+
+.grl-layout > * {
+  min-width: 0;
 }
 
 .grl-controls {
@@ -5647,6 +5651,10 @@ pre code,
   margin-bottom: 0.85rem;
 }
 
+.grl-compare-grid.is-2col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .grl-card {
   background: var(--surface);
   border: 1.5px solid var(--rule);
@@ -5658,26 +5666,26 @@ pre code,
 }
 
 .grl-card.is-ok {
-  border-top: 3px solid var(--ok);
   border-color: var(--ok-border);
+  border-top: 3px solid var(--ok);
   background: var(--ok-bg);
 }
 
 .grl-card.is-warn {
-  border-top: 3px solid var(--warn);
   border-color: var(--warn-border);
+  border-top: 3px solid var(--warn);
   background: var(--warn-bg);
 }
 
 .grl-card.is-bad {
-  border-top: 3px solid var(--danger);
   border-color: var(--danger-border);
+  border-top: 3px solid var(--danger);
   background: var(--danger-bg);
 }
 
 .grl-card.is-info {
-  border-top: 3px solid var(--accent-blue);
   border-color: #bfd7e5;
+  border-top: 3px solid var(--accent-blue);
   background: var(--accent-blue-soft);
 }
 
@@ -5825,6 +5833,8 @@ pre code,
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .grl-payload-head {
@@ -5836,6 +5846,12 @@ pre code,
   padding: 0.56rem 0.85rem;
   background: var(--surface-subtle);
   border-bottom: 1px solid var(--rule);
+}
+
+.grl-payload-head .badge,
+.grl-impact-head .badge {
+  white-space: normal;
+  max-width: 100%;
 }
 
 .grl-payload-title {
@@ -5854,6 +5870,7 @@ pre code,
   color: var(--ink);
   overflow-x: auto;
   white-space: pre;
+  max-width: 100%;
 }
 
 .grl-kpi-grid {
@@ -5880,7 +5897,15 @@ pre code,
   font-family: var(--font-mono);
   font-size: 1.12rem;
   font-weight: 700;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
   color: var(--ink);
+}
+
+.grl-kpi-val.is-text {
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  line-height: 1.42;
 }
 
 .grl-bar-card {
@@ -5938,6 +5963,7 @@ pre code,
 @media (max-width: 860px) {
   .grl-tabs,
   .grl-compare-grid,
+  .grl-compare-grid.is-2col,
   .grl-graph-grid {
     grid-template-columns: 1fr;
   }
