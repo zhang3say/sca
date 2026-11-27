@@ -14,6 +14,7 @@
         <a href="../index.html">课程首页 · 全局路线图</a>
         <a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023 · 产品域模型与闭环</a>
         <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">Lesson 0024 · 模块化单体与编排</a>
+        <a href="../lessons/0025-multitenant-storage-finding-lifecycle-and-consistency.html">Lesson 0025 · 多租户与一致性</a>
         <a href="./ch7-product-arch-and-tech-design-matrix.html" class="active">Ref 08 · 产品架构与双模工程矩阵</a>
         <a href="./ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
       </div>
@@ -28,10 +29,10 @@
         <span>PRINT-READY CHAPTER 07 CHEAT SHEET</span>
       </div>
       <h1>产品域模型、双模架构与工程落地速查矩阵</h1>
-      <p class="subtitle">Chapter 07 &amp; Phase 4（<strong>1 人 + AI Agent · Go+Python · 双模兼容</strong>）架构师与系统工程落地速查卡（<strong>已覆盖 Lesson 0023–0024 精华</strong>；后续将随 <code>0025–0027</code> 逐课增量扩展至 PG RLS 与 Outbox、双模基础设施许可及 AI Benchmark 门禁）。</p>
+      <p class="subtitle">Chapter 07 &amp; Phase 4（<strong>1 人 + AI Agent · Go+Python · 双模兼容</strong>）架构师与系统工程落地速查卡（<strong>已覆盖 Lesson 0023–0025 精华</strong>；后续将随 <code>0026–0027</code> 逐课增量扩展至双模部署、基础设施许可替代及 AI Benchmark 门禁）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与参考底座：</strong><a href="https://dependencytrack.org/" target="_blank" rel="noopener">OWASP Dependency-Track v5</a> (<code>Apache-2.0</code>) · <a href="https://openfeature.dev/" target="_blank" rel="noopener">CNCF OpenFeature</a> (<code>Apache-2.0</code>) · <a href="https://connectrpc.com/" target="_blank" rel="noopener">ConnectRPC</a> (<code>Apache-2.0</code>) · <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener">Buf</a> (<code>Apache-2.0</code>) · <a href="https://github.com/nats-io/nats-server" target="_blank" rel="noopener">NATS JetStream</a> (<code>Apache-2.0</code>) · <a href="https://github.com/riverqueue/river" target="_blank" rel="noopener">River</a> (<code>MPL-2.0</code>)</span>
-        <span><strong>关联课程：</strong><a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023</a> · <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">Lesson 0024</a>（<code>0025–0027</code> 待扩展）</span>
+        <span><strong>依据标准与参考底座：</strong><a href="https://dependencytrack.org/" target="_blank" rel="noopener">OWASP Dependency-Track v5</a> (<code>Apache-2.0</code>) · <a href="https://openfeature.dev/" target="_blank" rel="noopener">CNCF OpenFeature</a> (<code>Apache-2.0</code>) · <a href="https://connectrpc.com/" target="_blank" rel="noopener">ConnectRPC</a> (<code>Apache-2.0</code>) · <a href="https://www.postgresql.org/docs/current/ddl-rowsecurity.html" target="_blank" rel="noopener">PostgreSQL RLS</a> · <a href="https://github.com/sqlc-dev/sqlc" target="_blank" rel="noopener"><code>sqlc</code></a> (<code>MIT</code>) · <a href="https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree" target="_blank" rel="noopener">ClickHouse <code>ReplacingMergeTree</code></a> (<code>Apache-2.0</code>)</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023</a> · <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">Lesson 0024</a> · <a href="../lessons/0025-multitenant-storage-finding-lifecycle-and-consistency.html">Lesson 0025</a>（<code>0026–0027</code> 待扩展）</span>
       </div>
     </header>
 
@@ -192,9 +193,52 @@
       </div>
     </section>
 
+    <!-- SECTION 4: PG RLS, FINDING FINGERPRINT & TRANSACTIONAL OUTBOX -->
+    <section class="full-width">
+      <h2><span class="sec-num">04</span>PG RLS 多租户四防线、Finding 指纹与 Outbox 一致性矩阵（Lesson 0025）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>隔离 / 一致性机制</th>
+              <th>权威原语与技术栈</th>
+              <th>双模通用落地规范</th>
+              <th>高危踩坑与审计红线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>PG RLS 四重保险丝</strong></td>
+              <td><code>SET LOCAL</code> + <code>FORCE RLS</code> + <code>NOBYPASSRLS</code> + <code>NULLIF</code></td>
+              <td>全部表带 <code>tenant_id UUID</code>；Go <code>pgx</code> + <code>sqlc</code>（<code>MIT</code>）封装唯一 <code>WithTenantTx</code>，私有化固定默认租户 UUID 零分叉复用。</td>
+              <td><span class="badge badge-danger">严禁会话级 SET</span> 在 PgBouncer 事务池中会跨租户泄漏；表 Owner 默认绕过 RLS 必须加 <code>FORCE</code>。</td>
+            </tr>
+            <tr>
+              <td><strong>Finding 稳定指纹与状态机</strong></td>
+              <td><code>SHA256(tenant|asset|branch|purl_no_ver|vuln|sym)</code></td>
+              <td>物理文件路径与检测小版本仅做可更新属性；自动扫描只迁移 <code>OPEN/FIXED/REOPENED</code>。</td>
+              <td>严禁覆盖未过期 <code>VEX_NOT_AFFECTED</code> / <code>SUPPRESSED</code>，否则每次构建重弹误报。</td>
+            </tr>
+            <tr>
+              <td><strong>Transactional Outbox</strong></td>
+              <td>PG <code>outbox_events</code> &rarr; Poller / Debezium (<code>Apache-2.0</code>)</td>
+              <td>业务台账更新与 Outbox 事件同 PG 事务落库；ClickHouse 用 <code>ReplacingMergeTree(version, is_deleted)</code> + <code>FINAL</code>/<code>argMax</code> 收敛。</td>
+              <td>严禁应用端先写 PG 再调 HTTP 写 ClickHouse（进程崩溃即脑裂）；极简离线可降级至 PG 汇总表。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <footer class="lesson-end-nav">
-      <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">&larr; 回到 Lesson 0024 · 模块化单体与编排</a>
-      <a href="../index.html">返回课程首页 &middot; 24 / 27 课 &rarr;</a>
+      <a href="../lessons/0025-multitenant-storage-finding-lifecycle-and-consistency.html">&larr; 回到 Lesson 0025 · 多租户与一致性</a>
+      <a href="../index.html">返回课程首页 &middot; 25 / 27 课 &rarr;</a>
     </footer>
   </main>
 </body>

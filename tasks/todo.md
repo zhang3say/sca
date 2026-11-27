@@ -105,14 +105,14 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Description:** 查验并登记一手源（PostgreSQL 16+ Row-Level Security、`FORCE ROW LEVEL SECURITY` / `NOBYPASSRLS`、`sqlc` MIT、`pgx` MIT、Transactional Outbox 模式、Debezium `Apache-2.0`、ClickHouse `ReplacingMergeTree` `Apache-2.0`）。编写第 25 课微课与 `assets/multitenant-consistency-lab.js`（多租户 RLS 隔离/防泄漏模拟器 + Finding 稳定指纹与状态机演化沙盘 + Outbox 一致性演示），扩展 Ref 08 第 04 节并同步 `index.html`（`0025` → `ready`、`0026` → `next`）与 `NOTES.md`。
 
 **Acceptance criteria:**
-- [ ] `lessons/0025-multitenant-storage-finding-lifecycle-and-consistency.html` 讲清“一套 PG Schema 同时跑 SaaS 多租户与私有化单租户”的 `tenant_id` + RLS + Go 连接池事务注入机制、Finding 跨目录重构/分支切换的稳定指纹与 Waiver/VEX 继承状态机、Transactional Outbox 同步 ClickHouse/RoaringBitmap 原理，以及 Python Worker 只读或经 Go 控制面受控落库的写入防绕过边界。
-- [ ] 不重复 `0021` 的 CAS 去重与 `CYCLE` 查询内容，只聚焦在多租户安全隔离、Finding 生命周期与多存储事务一致性。
-- [ ] 交互实验台、4 题测验与 `Ref 08` 第 04 节全部完成并互链。
+- [x] `lessons/0025-multitenant-storage-finding-lifecycle-and-consistency.html` 讲清“一套 PG Schema 同时跑 SaaS 多租户与私有化单租户”的 `tenant_id` + RLS + Go 连接池事务注入机制、Finding 跨目录重构/分支切换的稳定指纹与 Waiver/VEX 继承状态机、Transactional Outbox 同步 ClickHouse/RoaringBitmap 原理，以及 Python Worker 只读或经 Go 控制面受控落库的写入防绕过边界。
+- [x] 不重复 `0021` 的 CAS 去重与 `CYCLE` 查询内容，只聚焦在多租户安全隔离、Finding 生命周期与多存储事务一致性。
+- [x] 交互实验台、4 题测验与 `Ref 08` 第 04 节全部完成并互链。
 
 **Verification:**
-- [ ] Content accuracy check: 核验 PG RLS、`sqlc`/`pgx`、ClickHouse 引擎与 Outbox 一手资料并更新 `RESOURCES.md`。
-- [ ] Static check: `node --check assets/*.js` 与 Python Quiz/链接检查通过。
-- [ ] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0025`、`Ref 08` 与 `index.html`，通过后 `git commit && git push`。
+- [x] Content accuracy check: 核验 PG RLS、`sqlc`/`pgx`、ClickHouse 引擎与 Outbox 一手资料并更新 `RESOURCES.md`。
+- [x] Static check: `node --check assets/*.js` 与 Python Quiz/链接检查通过。
+- [x] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0025`、`Ref 08` 与 `index.html`，通过后 `git commit && git push`。
 
 **Dependencies:** Task 3
 
@@ -126,10 +126,10 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Estimated scope:** Medium (5–6 files)
 
 ### Checkpoint 4: Lesson 0025 双门禁核验与发布
-- [ ] 内容准确性核验通过（PG RLS / Outbox / 协议与版本准确）
-- [ ] 静态脚本检查通过
-- [ ] 真实浏览器 1280px & 375px UI/UX 交互与溢出检查通过
-- [ ] 已同步 `Ref 08`、`index.html`、`NOTES.md` 并推送 `origin/main`
+- [x] 内容准确性核验通过（PG RLS / Outbox / 协议与版本准确）
+- [x] 静态脚本检查通过
+- [x] 真实浏览器 1280px & 375px UI/UX 交互与溢出检查通过
+- [x] 已同步 `Ref 08`、`index.html`、`NOTES.md` 并推送 `origin/main`
 
 ---
 

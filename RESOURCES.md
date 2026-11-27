@@ -217,6 +217,10 @@
   基于同一份 `proto3` 定义同时兼容标准 HTTP/JSON、gRPC 与 gRPC-Web；`connect-py` 原生对接 ASGI/WSGI（`uvicorn`）与 `asyncio`，配合 `buf generate` 实现 Go 控制面与 Python 专项 Worker 之间的零漂移强类型契约。
 - [Queue Evolution & Durable Orchestration (Lesson 0024): PG `FOR UPDATE SKIP LOCKED` · `riverqueue/river` (`MPL-2.0`) · `nats-io/nats-server` JetStream (`Apache-2.0`) · Apache Kafka (`Apache-2.0`) · `temporalio/temporal` (`MIT`)](https://github.com/nats-io/nats-server)
   Day-1 优先基于 PostgreSQL 原生 `SKIP LOCKED` 或 `river`（与业务写库共用事务彻底消灭双写不一致；注意 `river` 为 `MPL-2.0` 文件级弱传染，不修改其源文件直接库级调用完全合规），高并发流化平滑演进至单二进制 `NATS JetStream`（`Apache-2.0`）或企业集群 `Kafka`（`Apache-2.0`），复杂长耗时多阶段工作流可选 `Temporal`（`MIT`）。
+- [Multi-Tenant Isolation & Type-Safe Go SQL (Lesson 0025): PostgreSQL 16+ Row-Level Security · `sqlc-dev/sqlc` (`MIT`) · `jackc/pgx` (`MIT`)](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+  在 PgBouncer 事务池化下必须用 `BEGIN; SET LOCAL app.current_tenant = '...';` 取代会话级 `SET`（防连接复用跨租户泄露），并强制启用 `FORCE ROW LEVEL SECURITY`、应用角色 `NOBYPASSRLS` 及 `NULLIF(current_setting('app.current_tenant', true), '')::uuid` Fail-Closed；配合 `sqlc` 与 `pgx` 事务封装器以同一套 Schema 同时服务 SaaS 多租户与私有化单租户。
+- [Eventual Consistency & Analytical Deduplication (Lesson 0025): Transactional Outbox Pattern · Debezium (`Apache-2.0`) · ClickHouse `ReplacingMergeTree` (`Apache-2.0`)](https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree)
+  业务状态与 `outbox_events` 在 PG 同事务提交彻底消除“写 PG 成功但同步 ClickHouse/RoaringBitmap 失败”脑裂；分析端采用 `ReplacingMergeTree(version, is_deleted)` 配合单调 `version` 幂等落盘，并在实时大盘查询侧使用 `FINAL` 或 `argMax` 应对异步 Merge 窗口去重。
 
 ## Wisdom (Communities)
 
