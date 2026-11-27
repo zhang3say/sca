@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0019：Agentic AI 与 MCP 服务器供应链治理（OWASP ASI04）</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0018-model-serialization-security-and-payload-scanning.html">Lesson 0018 · 模型序列化安全</a>
+        <a href="./0019-agentic-ai-and-mcp-supply-chain-governance.html" class="active">Lesson 0019 · Agentic AI 与 MCP 治理</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0019</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 &amp; CH 05 收官课（OWASP ASI04:2026）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>Agentic AI 与 MCP 服务器供应链治理（OWASP ASI04）</h1>
+      <p class="subtitle">在 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 中，我们把自家 SCA 引擎打包成了保护 Coding Agent 的 <code>MCP Server</code>；但今天硬币的另一面正在成为企业最失控的盲区：研发本地与生产环境装满了来自 GitHub、npm 和社区注册表的<strong>第三方 MCP Server 与 <code>SKILL.md</code> 智能体技能包</strong>。根据 <a href="https://genai.owasp.org/" target="_blank" rel="noopener"><strong>OWASP Top 10 for Agentic Applications 2026</strong></a>，<strong><code>ASI04: Agentic Supply Chain Vulnerabilities</code></strong> 已正式将工具定义投毒（Tool Poisoning）、动态篡改（Rug Pull）、跨服务劫持（Tool Shadowing）与无版本锁定启动（<code>npx -y</code>）列为智能体头号供应链威胁。本课为你收官 Chapter 05 与 Phase 2，构建可纳入统一 SCA 台账与策略网关的 Agentic 治理体系。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 OWASP <code>ASI04</code> 与 MCP 规范安全边界（<code>tools/list_changed</code>、untrusted <code>annotations</code>、OAuth 2.1 + RFC 8707）；复盘 TPA、Rug Pull、<code>postmark-mcp</code>、<code>CVE-2025-49596</code> 与 <code>CVE-2025-6514</code>；划清 <code>toolhive</code> / <code>mcp-gateway</code> / <code>agentgateway</code> / <code>mcp-scanner</code> / <code>agent-scan</code> 商用数据主权边界并落地 Pure Go 钉死与语义审计原语</span>
+        <span><strong>先修底座：</strong><a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> · <a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html">Lesson 0015</a> · <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md 与 Phase 2 收官定位）</div>
+      <p>传统 SCA 只盯住代码里的 <code>package.json</code> 和 <code>requirements.txt</code>，却看不见项目根目录 <code>.mcp.json</code> 里那句 <code>npx -y some-mcp-server</code>、看不见 <code>SKILL.md</code> 里隐藏的提示词外联指令、更看不见远端 MCP 深夜动态推送的一次 <code>tools/list_changed</code> 投毒。只有将 <strong>MCP Server（软件依赖 + 传输端 CVE）+ Tool Schema 指纹（防 Rug Pull）+ <code>SKILL.md</code> 自然语言规则（Markdown as Code）</strong> 统一纳管到 Layer 2 IR 与零信任网关，你的第三代 SCA 才真正配得上“全场景 AI 时代供应链安全底座”！</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>OWASP ASI04 与 MCP 协议的三大结构性信任漏洞</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 为什么“人类不可见、模型全信任”造就了全新供应链攻击面？</h3>
+      <p>与传统软件函数调用不同，MCP 客户端在连接一个服务器时，会调用 <code>tools/list</code> 拉取每个工具的名称、JSON 参数 Schema 与自然语言 <code>description</code>，并将其原封不动拼接进大模型的 System / Tool Context。界面通常只向人类展示简短的工具名或摘要，但大模型却把整段自然语言描述当作<strong>可信操作指令</strong>来执行。</p>
+      <p>2025 年 4 月，Invariant Labs 首次系统演示了针对 MCP 生态的三类“零漏洞代码执行”供应链攻击；随后在 2025 年下半年，npm 在野恶意 MCP 包与官方/热门代理组件的 RCE CVE 接连爆发，彻底引爆了 <strong>OWASP ASI04（Agentic Supply Chain Vulnerabilities）</strong>。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title"><a href="https://modelcontextprotocol.io/specification/latest/server/tools" target="_blank" rel="noopener">MCP 官方规范</a>明文写明的“不可信标注”条款</span>
+        MCP Tool 对象支持 <code>annotations</code>（如 <code>readOnlyHint</code>、<code>destructiveHint</code>、<code>idempotentHint</code>、<code>openWorldHint</code>）。规范明确规定：<br/>
+        • <strong>Clients MUST treat tool annotations as untrusted</strong> unless they come from a trusted server.<br/>
+        • 恶意 MCP 完全可以把删库工具标成 <code>readOnlyHint: true</code>；若客户端据此自动跳过用户确认框，就构成了典型的<strong>协议级权限欺骗</strong>。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:21%" />
+          <col style="width:24%" />
+          <col style="width:30%" />
+          <col style="width:25%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>攻击载体 / 真实事件</th>
+            <th>利用的协议或供应链缺陷</th>
+            <th>攻击链与现实危害</th>
+            <th>SCA / 网关核心拦截锚点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Tool Poisoning (TPA)</strong><br/>（Invariant Labs · 2025.04）</td>
+            <td><code>tools/list</code> 描述字段混入隐形指令（<code>&lt;IMPORTANT&gt;</code>）与隐藏参数</td>
+            <td>表面是 <code>add</code> 算术工具，描述内却要求 Agent 读取 <code>~/.ssh/id_rsa</code> 与 <code>.env</code> 塞入 <code>sidenote</code> 参数悄悄外传。</td>
+            <td>本地静态扫描工具描述语义与隐藏标签/敏感路径模式，拒绝把带毒 Schema 注入 LLM Context。</td>
+          </tr>
+          <tr>
+            <td><strong>MCP Rug Pull</strong><br/>（动态热变脸）</td>
+            <td><code>notifications/tools/list_changed</code> 动态刷新工具定义</td>
+            <td>初审和用户授权阶段完全清白；待建立长期信任后，服务端推送列表变更通知，静默替换恶意描述且免二次审批。</td>
+            <td>首次入库对完整 Tool JSON Schema 计算 <strong>SHA256 Pinning</strong>；一旦漂移立即熔断冻结并强制重审。</td>
+          </tr>
+          <tr>
+            <td><strong>Cross-Server Tool Shadowing</strong><br/>（跨服务劫持 · WhatsApp 演示）</td>
+            <td>同会话多 MCP 共用单个 LLM 上下文窗口</td>
+            <td>恶意 MCP 根本无需被直接调用，只需在描述里指令 Agent“每次用受信任的 WhatsApp/邮件 MCP 时暗中转发聊天记录”，绕过传统 DLP。</td>
+            <td>跨服务指令引用检查 + 单工具禁止提及或改写其他 MCP Server 行为 + 出站目标白名单策略。</td>
+          </tr>
+          <tr>
+            <td><strong><code>postmark-mcp</code> 在野投毒</strong><br/>（npm · 2025.09 · <code>1.0.16–1.0.18</code>）</td>
+            <td>首个在野恶意 MCP Server npm 包 + <code>npx -y</code> 自动拉最新版</td>
+            <td>在合法发信 MCP 更新版本中植入 1 行暗桩，向 Agent 发出的每封邮件静默添加 <code>BCC</code> 抄送攻击者邮箱，窃取密码重置与发票。</td>
+            <td>严禁 <code>.mcp.json</code> 中写 <code>npx -y</code> 无锁版本；联动 <a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html">Lesson 0015</a> <code>MAL-*</code> 与 Capability Diff 拦截。</td>
+          </tr>
+          <tr>
+            <td><strong><code>CVE-2025-49596</code> &amp; <code>CVE-2025-6514</code></strong><br/>（端侧组件 RCE）</td>
+            <td><a href="https://github.com/modelcontextprotocol/inspector" target="_blank" rel="noopener">MCP Inspector</a> <code>&lt;0.14.1</code> 无鉴权 / <code>mcp-remote</code> <code>0.0.5–0.1.15</code> 命令注入（CVSS 9.6）</td>
+            <td>网页 DNS Rebinding 即可打穿本地 Inspector 执行 <code>stdio</code> 命令；连接恶意远端 MCP 时特制授权 URL 直接触发本机 OS 命令注入。</td>
+            <td>Layer 1 端侧资产采集器必扫开发机 MCP 运行时与代理包版本，强制升级 Inspector <code>&ge;0.14.1</code> 与 <code>mcp-remote &ge;0.1.16</code>。</td>
+          </tr>
+          <tr>
+            <td><strong><code>SKILL.md</code> + <code>npx -y</code> 组合链</strong><br/>（Markdown as Code）</td>
+            <td>Agent 把 <code>SKILL.md</code> / <code>CLAUDE.md</code> / <code>AGENTS.md</code> 当作可执行流程记忆</td>
+            <td>恶意技能文档诱导 Agent 运行恶意 Shell 或配合未钉死的 <code>.mcp.json</code> 启动恶意工具，以开发者完整宿主权限窃密。</td>
+            <td>将技能 Markdown 纳入代码级 PR 审查与提示注入扫描，<code>stdio</code> 强制容器化并绑定不可变 Digest。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>全触点盘点、Layer 2 IR 扩展与 OAuth 2.1 / RFC 8707 零信任网关</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 从 Layer 1 配置文件发现到 Layer 2 Tool Pinning 图谱建模</h3>
+      <p>要把 Agentic AI 供应链真正管起来，你的 SCA 平台必须在 <strong>Layer 1（IDE / Repo / 终端盘点）</strong> 识别开发者机器与代码仓里的所有 Agent 扩展入口，并映射到 <strong>Layer 2 统一 IR</strong>：</p>
+      <ul>
+        <li><strong>Layer 1 采集目标文件清单：</strong>项目级 <code>.mcp.json</code>、<code>.cursor/mcp.json</code>、<code>.vscode/mcp.json</code>、桌面端 <code>claude_desktop_config.json</code>，以及技能指令文件 <code>SKILL.md</code> / <code>CLAUDE.md</code> / <code>AGENTS.md</code>。</li>
+        <li><strong>Layer 2 IR 节点与属性扩展：</strong>新增 <code>MCP_SERVER</code>（记录传输方式 <code>stdio</code>/<code>streamable-http</code>、底层依赖 PURL 如 <code>pkg:npm/...</code> 或容器 Digest）、<code>MCP_TOOL</code>（记录规范化 JSON Schema 的 <strong><code>tool_schema_sha256</code></strong> 指纹）与 <code>AGENT_SKILL</code>（记录技能文件 SHA256 与声明所需工具权限集合）。</li>
+        <li><strong>远端 HTTP 鉴权刚性基线（<a href="https://modelcontextprotocol.io/specification/latest/basic/authorization" target="_blank" rel="noopener">MCP Authorization Spec</a>）：</strong>所有远端 HTTP MCP Server 必须采用 <strong>OAuth 2.1 + PKCE</strong>，且客户端在授权和 Token 请求中<strong>必须携带 RFC 8707（Resource Indicators）<code>resource</code> 参数</strong>绑定目标服务器规范 URI，防止 Access Token 被恶意中间服务器转发透传（Token Passthrough）或引发跨服务混淆代理人攻击。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">本地 <code>stdio</code> 最大失控点：秘密全裸暴露</span>
+        当研发在 <code>.mcp.json</code> 的 <code>"env"</code> 字段明文写满 <code>GITHUB_TOKEN</code>、<code>AWS_SECRET_ACCESS_KEY</code> 或数据库连接串直接喂给一个未知第三方 Node/Python MCP 进程时，该进程拥有与宿主完全一致的环境变量读取权和出网权限。零信任网关的核心价值之一就是<strong>进程外凭证代管 + 按需最小路径/网络策略隔离</strong>。
+      </aside>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · OWASP ASI04 四道防线协同治理架构（L1 发现 &rarr; L2 Pinning &rarr; L4 静态语义 &rarr; 运行时零信任网关）</strong>
+        <span>覆盖端侧配置/技能盘点、Tool Schema 哈希防漂移、本地不外泄语义审计与容器化沙箱/OAuth 2.1 受众隔离</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">防线一 &amp; 二 · Layer 1 配置/技能盘点 + Layer 2 依赖锁定与 Tool Schema Pinning</span>
+            <span class="orch-stage-kicker">.mcp.json · SKILL.md · Inspector/mcp-remote CVE · SHA256 Pinning</span>
+          </div>
+          <p class="orch-stage-desc">
+            禁止 <code>npx -y</code> / <code>uvx</code> 未锁版本启动；提取底层 npm/PyPI/OCI 组件进入 Layer 3 漏洞与恶意包（<code>postmark-mcp</code>）校验；对每个接入工具计算规范化 JSON Schema <code>SHA256</code>，捕获 <code>notifications/tools/list_changed</code> 后一旦哈希漂移立即触发 Rug Pull 熔断。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 把动态描述、Markdown 技能指令与运行时能力收口到策略网关 &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">防线三 · 本地化静态语义与不可信标注审计</span>
+              <span class="badge badge-blue">数据不出内网</span>
+            </div>
+            <ul>
+              <li><strong>TPA / Shadowing / SKILL.md 扫描：</strong>纯本地规则 + 私有小模型审计隐藏标签（<code>&lt;IMPORTANT&gt;</code>）、敏感路径读取与跨工具指令篡改。</li>
+              <li><strong>无视危险标注免审：</strong>强制遵守 <a href="https://modelcontextprotocol.io/specification/latest/basic/security_best_practices" target="_blank" rel="noopener">MCP 安全最佳实践</a>，将 <code>annotations.readOnlyHint</code> 视作不可信，高危能力必经 Human-in-the-Loop。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">防线四 · 零信任 MCP 运行时网关与凭证隔离</span>
+              <span class="badge badge-warn">ToolHive · AgentGateway</span>
+            </div>
+            <ul>
+              <li><strong><code>stdio</code> 强制容器沙箱：</strong>托管第三方 MCP 进微容器（只读目录挂载 + <code>--network=none</code> 或严格出口域名白名单），环境变量凭证由网关按工具白名单注入。</li>
+              <li><strong>远端 HTTP 鉴权：</strong>强制 <strong>OAuth 2.1 + PKCE + RFC 8707</strong> 受众绑定，阻断 Token Passthrough 并输出全量工具调用审计日志。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>开源 MCP 网关/扫描器商业选型与 Pure Go 治理原语</h2>
+
+    <div class="prose-col">
+      <h3>3.1 商用闭源底座整合：既要查 SPDX 协议，更要守住“数据主权红线”</h3>
+      <p>与常规 SCA 组件不同，MCP 安全扫描器往往不仅涉及源码许可证，还涉及一个隐形商业雷区——<strong>是否把企业客户的内部 Tool Schema 与业务提示词静默回传给外部云端检测 API</strong>。下表逐一核验主流开源项目的精确协议与整合边界：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:23%" />
+          <col style="width:15%" />
+          <col style="width:31%" />
+          <col style="width:31%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源项目</th>
+            <th>精确许可协议</th>
+            <th>核心能力定位</th>
+            <th>商业闭源集成与数据主权边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/stacklok/toolhive" target="_blank" rel="noopener"><strong><code>stacklok/toolhive</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>面向开发机与集群的 MCP 容器封装器：自动把裸跑 <code>stdio</code> 关进受限容器、托管密钥注入与网络策略，并内置校验门禁。</td>
+            <td><strong>极佳集成/对标底座</strong>：<code>Apache-2.0</code> 纯宽松，Go 技术栈与本课程底座高度同构，适合作为本地/网关侧沙箱化运行时参照。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/docker/mcp-gateway" target="_blank" rel="noopener"><strong><code>docker/mcp-gateway</code></strong></a></td>
+            <td><span class="badge badge-ok">MIT</span></td>
+            <td>Docker 官方 MCP 统一网关：基于容器目录聚合 MCP Server，集中管理 OAuth、秘密注入与工具路由。</td>
+            <td><strong>纯宽松商用</strong>：<code>MIT</code> 协议无传染，适合对接企业已有 Docker Desktop / 容器标准化研发底座。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/agentgateway/agentgateway" target="_blank" rel="noopener"><strong><code>agentgateway/agentgateway</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>Linux Foundation 托管的高性能 Agent/MCP 代理网关，专攻大规模流量路由、RBAC 策略、OAuth 2.1 与可观测性。</td>
+            <td><strong>纯宽松企业网关首选</strong>：适合融入商业 SaaS/私有化集群的南北向与东西向 Agent 流量治理层。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/cisco-ai-defense/mcp-scanner" target="_blank" rel="noopener"><strong><code>cisco-ai-defense/mcp-scanner</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>Cisco 开源的 MCP 扫描器，支持 YARA 规则、LLM 语义研判与 Cisco AI Defense API 混合检测工具描述投毒。</td>
+            <td><span class="badge badge-warn">数据主权警示</span> 源码为 <code>Apache-2.0</code> 可安全借鉴本地 YARA/启发式规则，但<strong>严禁在闭源私有化客户现场默认启用外联云端 API</strong>（防工具 Schema 泄露）。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/snyk/agent-scan" target="_blank" rel="noopener"><strong><code>snyk/agent-scan</code></strong></a><br/>（原 <code>invariantlabs-ai/mcp-scan</code>）</td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>自动发现本机各 IDE 的 MCP 配置、计算 Tool Pinning 哈希并检测 TPA / Rug Pull / Shadowing / ToxicSkills。</td>
+            <td><span class="badge badge-warn">竞品云接口警示</span> 代码已迁至 Snyk 名下（<code>Apache-2.0</code>），注意其部分高级护栏分析会调用远端校验接口——商业自研 SCA <strong>必须用本地引擎替代外联调用</strong>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 Pure Go 核心原语：<code>.mcp.json</code> 版本锁校验 + Tool Schema SHA256 Pinning</h3>
+      <p>下面这段 Pure Go 原语可以直接嵌入你在 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> 设计的三模本地 SCA 核心（<code>--mode=hook</code> / <code>--mode=mcp</code>），在 5 毫秒内同时拦住 <code>npx -y</code> 未锁版本启动、Tool Rug Pull 哈希漂移与 TPA 隐藏敏感指令：</p>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：.mcp.json 启动锁校验、Tool Schema SHA256 Pinning 与本地 TPA 启发式审计</strong>
+        <span>Zero-Cloud-Leak Pure Go Agentic 供应链守护内核</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> MCPToolDef <span class="tok-kw">struct</span> {
+    Name        <span class="tok-type">string</span>         <span class="tok-str">`json:"name"`</span>
+    Description <span class="tok-type">string</span>         <span class="tok-str">`json:"description"`</span>
+    InputSchema <span class="tok-kw">map</span>[<span class="tok-type">string</span>]<span class="tok-type">any</span> <span class="tok-str">`json:"inputSchema"`</span>
+    ReadOnly    <span class="tok-type">bool</span>           <span class="tok-str">`json:"-"`</span> <span class="tok-cmt">// 规范强制：绝不可轻信服务端 annotations.readOnlyHint</span>
+}
+
+<span class="tok-kw">var</span> tpaPattern = regexp.MustCompile(<span class="tok-str">`(?i)(&lt;IMPORTANT&gt;|do not mention|~/.ssh|\.env\b|send_whatsapp|bcc\s*=|sidenote)`</span>)
+<span class="tok-kw">var</span> pinnedPkgRe = regexp.MustCompile(<span class="tok-str">`^(@[a-z0-9-]+/)?[a-z0-9._-]+@\d+\.\d+\.\d+`</span>)
+
+<span class="tok-cmt">// AuditMCPServerLaunch 拦截危险的 npx -y / uvx 无版本钉死裸跑配置</span>
+<span class="tok-kw">func</span> AuditMCPServerLaunch(cmd <span class="tok-type">string</span>, args []<span class="tok-type">string</span>) <span class="tok-type">error</span> {
+    <span class="tok-kw">if</span> cmd == <span class="tok-str">"npx"</span> || cmd == <span class="tok-str">"uvx"</span> {
+        <span class="tok-kw">for</span> _, a := <span class="tok-kw">range</span> args {
+            <span class="tok-kw">if</span> strings.HasPrefix(a, <span class="tok-str">"-"</span>) { <span class="tok-kw">continue</span> }
+            <span class="tok-kw">if</span> !pinnedPkgRe.MatchString(a) {
+                <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"blocked ASI04: unpinned dynamic launch %s %q"</span>, cmd, a)
+            }
+            <span class="tok-kw">break</span>
+        }
+    }
+    <span class="tok-kw">return</span> <span class="tok-kw">nil</span>
+}
+
+<span class="tok-cmt">// VerifyAndPinTool 校验工具描述语义并对比入库基线 SHA256，防止 Rug Pull 与 TPA</span>
+<span class="tok-kw">func</span> VerifyAndPinTool(tool MCPToolDef, expectedSHA <span class="tok-type">string</span>) (currentSHA <span class="tok-type">string</span>, err <span class="tok-type">error</span>) {
+    <span class="tok-kw">if</span> tpaPattern.MatchString(tool.Description) {
+        <span class="tok-kw">return</span> <span class="tok-str">""</span>, fmt.Errorf(<span class="tok-str">"blocked TPA/Shadowing indicator in tool %q description"</span>, tool.Name)
+    }
+    canonical, err := json.Marshal(tool) <span class="tok-cmt">// 生产需保证 map key 规范序序列化（RFC 8785 JCS）</span>
+    <span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> <span class="tok-str">""</span>, err
+    }
+    sum := sha256.Sum256(canonical)
+    currentSHA = hex.EncodeToString(sum[:])
+    <span class="tok-kw">if</span> expectedSHA != <span class="tok-str">""</span> &amp;&amp; currentSHA != expectedSHA {
+        <span class="tok-kw">return</span> currentSHA, fmt.Errorf(<span class="tok-str">"blocked RUG_PULL: tool %q schema hash drifted (%s != %s)"</span>, tool.Name, currentSHA[:12], expectedSHA[:12])
+    }
+    <span class="tok-kw">return</span> currentSHA, <span class="tok-kw">nil</span>
+}</code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大攻防场景（合规钉死 MCP、TPA 隐藏 <code>~/.ssh</code> 窃密、<code>Rug Pull</code> + 跨服务 <code>Tool Shadowing</code>、<code>npx -y postmark-mcp</code> + 恶意 <code>SKILL.md</code>），测试关闭哈希钉死或语义扫描后的漏放后果；在<strong>模式二</strong>中组合传输模式、OAuth 2.1 RFC 8707、伪造只读标注与端侧 CVE（<code>CVE-2025-49596</code> / <code>CVE-2025-6514</code>），生成零信任加固方案。</p>
+    </div>
+
+    <!-- INTERACTIVE MCP SUPPLY CHAIN LAB -->
+    <section class="widget-panel full-width" data-widget="mcp-supply-chain-lab">
+      <script type="application/json" class="mcp-supply-chain-lab-data">
+        {
+          "title": "交互实验台：MCP 投毒拦截演练与零信任配置审计器",
+          "intro": "模拟 Tool Poisoning、Rug Pull、Cross-Server Shadowing 与 postmark-mcp/SKILL.md 复合攻击拦截，并实时核验 OAuth RFC 8707 与端侧 CVE。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Agentic AI 与 MCP 供应链治理架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为企业研发团队与云上智能体平台落地 OWASP ASI04 统一治理模块，把第三方 MCP 与 Agent Skills 纳入 SCA 底座。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐 OWASP ASI04 与 MCP 零信任规范！已完整覆盖依赖锁、Schema Pinning、本地隐私保护语义审计与网关隔离。",
+            "warning": "方案基本可行，但在 {warning} 项上存在工具热漂移或数据主权外泄隐患（标黄项），建议补齐 SHA256 Pinning 与本地化扫描。",
+            "critical": "当前方案踩中 {critical} 处致命红线（标红项）：可能放任 npx -y 投毒、盲信伪造 readOnlyHint、或因 Token Passthrough 引发跨服务沦陷！"
+          },
+          "modules": [
+            {
+              "name": "MCP Tool Metadata（tools/list）防投毒与防 Rug Pull 策略",
+              "layer": "L2/L4 协议防线",
+              "context": "第三方 MCP 服务器连接后可能返回带隐藏指令的描述，或事后通过 notifications/tools/list_changed 热更改定义。",
+              "options": [
+                {
+                  "label": "首次接入本地语义审计 + 规范化 Schema SHA256 Pinning，一旦 list_changed 漂移即熔断冻结复审",
+                  "status": "optimal",
+                  "verdictTitle": "同时堵死首日 TPA 投毒与事后 Rug Pull 变脸",
+                  "feedback": "通过本地规则拦截隐藏注入指令，再用不可变哈希确保已授权工具不被静默偷梁换柱。"
+                },
+                {
+                  "label": "仅在入库第一天让安全工程师人工看一遍网页介绍，此后收到 list_changed 自动热更新放行",
+                  "status": "critical",
+                  "verdictTitle": "门户大开！Rug Pull 攻击专为躲过首次人工审核而设计",
+                  "feedback": "一旦服务器动态修改 description，无哈希比对机制的客户端会直接把新毒指令送给大模型。"
+                },
+                {
+                  "label": "只检查工具 name 和参数名列表，完全跳过自然语言 description 字段检查",
+                  "status": "warning",
+                  "verdictTitle": "放过所有针对大模型 Context 的 Tool Poisoning 与 Cross-Server Shadowing",
+                  "feedback": "MCP 投毒的核心载体恰恰是喂给 LLM 的自然语言 description。"
+                }
+              ]
+            },
+            {
+              "name": "客户端对 MCP Tool Annotations 与审批交互的处理准则",
+              "layer": "L4 运行时边界",
+              "context": "某社区 MCP 在工具元数据里声明 annotations.readOnlyHint = true，开发团队想借此免除用户弹窗。",
+              "options": [
+                {
+                  "label": "严格遵循 MCP 规范将服务端 annotations 视为不可信（untrusted），由网关策略与人工审批共同裁决",
+                  "status": "optimal",
+                  "verdictTitle": "彻底免疫“伪造只读标注”引发的越权数据修改或窃密",
+                  "feedback": "除非服务器经过企业内部签名与严格白名单审计，否则绝不把自称只读的工具免除审批。"
+                },
+                {
+                  "label": "只要工具自己填了 readOnlyHint: true 就默认无害，自动静默执行全部调用",
+                  "status": "critical",
+                  "verdictTitle": "严重违反 MCP 官方安全条款！攻击者只需顺手填个 true 即可免密横行",
+                  "feedback": "MCP 规范明确指出 Clients MUST treat tool annotations as untrusted。"
+                },
+                {
+                  "label": "把所有工具无论高低风险一律弹出难懂的原始 JSON 框，让研发自己盲点“全部允许”",
+                  "status": "warning",
+                  "verdictTitle": "引发严重告警疲劳（Alert Fatigue），研发在连续弹窗下会失去防御意义",
+                  "feedback": "应结合容器只读沙箱与网关策略分级，只对真正高危操作或首次变更弹出清晰可读的审批提示。"
+                }
+              ]
+            },
+            {
+              "name": "开发机 .mcp.json 启动、Agent Skills 与端侧工具链治理",
+              "layer": "L1/L3 资产与恶意包防线",
+              "context": "研发仓库常见 .mcp.json 写 npx -y 启动 MCP，且目录里混有社区下载的 SKILL.md 与老旧调试工具。",
+              "options": [
+                {
+                  "label": "禁用 npx -y 裸跑并强制版本/容器 Digest 锁定，纳入恶意包情报(postmark-mcp)+端侧 CVE 扫描及 SKILL.md 审计",
+                  "status": "optimal",
+                  "verdictTitle": "在代码拉取与启动前全面截杀投毒包、CVE-2025-49596/6514 与 Markdown 提示注入",
+                  "feedback": "将 .mcp.json 与 SKILL.md 视为同等级别的可执行供应链资产统一纳管。"
+                },
+                {
+                  "label": "保留 npx -y 方便研发自动升级最新功能，仅靠开发者电脑自带杀毒软件事后拦截",
+                  "status": "critical",
+                  "verdictTitle": "完全重演 postmark-mcp 与供应链抢注灾难，传统杀软对纯 JS/Python 逻辑暗桩无能为力",
+                  "feedback": "自动拉取最新未锁定包意味着上游一旦被投毒，全团队研发机立即沦陷。"
+                },
+                {
+                  "label": "只扫 npm 依赖锁定版本，把所有 SKILL.md / CLAUDE.md 当成普通 README 注释忽略",
+                  "status": "warning",
+                  "verdictTitle": "漏掉 Markdown as Code 提示词注入通道，恶意技能依然可以操控 Agent 偷密钥",
+                  "feedback": "Agent 对指令文件高度服从，SKILL.md 必须经过静态语义安全审计。"
+                }
+              ]
+            },
+            {
+              "name": "本地 stdio 运行隔离与远端 HTTP MCP 鉴权协议设计",
+              "layer": "SYS 零信任网关",
+              "context": "需要为企业研发统一接入本地文件/数据库 stdio MCP 以及云端 SaaS HTTP MCP。",
+              "options": [
+                {
+                  "label": "stdio 接入 ToolHive/Docker MCP Gateway 容器隔离与凭证代管；HTTP 强制 OAuth 2.1 + PKCE + RFC 8707 resource 绑定",
+                  "status": "optimal",
+                  "verdictTitle": "彻底隔离宿主机环境变量、文件与网络边界，杜绝 Token Passthrough 跨服务滥用",
+                  "feedback": "stacklok/toolhive (Apache-2.0) 与 agentgateway (Apache-2.0) 均符合商业闭源集成标准。"
+                },
+                {
+                  "label": "直接把全部云资源和数据库 ROOT 密钥写进 .mcp.json 的 env 里，让第三方 stdio 进程宿主裸跑",
+                  "status": "critical",
+                  "verdictTitle": "单点沦陷等于全盘交钥匙！进程可直接打包全部宿主密钥回传外网",
+                  "feedback": "第三方 MCP 进程绝不应该直接读取宿主机全量环境变量与文件系统。"
+                },
+                {
+                  "label": "HTTP MCP 直接沿用无 resource 校验的静态长效 Bearer Token 在多个服务器之间通用转发",
+                  "status": "critical",
+                  "verdictTitle": "触发严重的 Token Passthrough 与混淆代理人漏洞，被恶意服务器盗用令牌横移其他系统",
+                  "feedback": "MCP 授权规范强制要求 RFC 8707 resource indicator 绑定受众。"
+                }
+              ]
+            },
+            {
+              "name": "开源 MCP 扫描工具借鉴与商业闭源数据主权边界",
+              "layer": "SYS 商业合规",
+              "context": "评估参考 cisco-ai-defense/mcp-scanner 与 snyk/agent-scan（均为 Apache-2.0）。",
+              "options": [
+                {
+                  "label": "遵循 Apache-2.0 借鉴本地 YARA/Pinning 设计，彻底剥离或禁掉外联第三方云端校验 API，全量分析在私有化/自研引擎内闭环",
+                  "status": "optimal",
+                  "verdictTitle": "既享受宽松开源生态红利，又守住大客户 Tool Schema 与代码配置零外泄的数据主权",
+                  "feedback": "这是商业闭源 SCA 面对金融/政企客户时最核心的架构底线。"
+                },
+                {
+                  "label": "图省事在闭源商业产品里直接默认开启把客户全部内部工具描述发往外部第三方云服务做分析",
+                  "status": "critical",
+                  "verdictTitle": "极其严重的合规与商业事故！未经授权外传客户敏感工具接口与内部参数结构",
+                  "feedback": "商业安全产品绝不能把受扫资产的 Schema 静默外送给竞争对手或外部云 API。"
+                },
+                {
+                  "label": "只对最终生产容器跑常规 OS CVE 扫描，彻底放弃研发桌面与 CI 层的 MCP 资产发现",
+                  "status": "warning",
+                  "verdictTitle": "研发工作站本身已成为核心凭证库与生产发布跳板，端侧失明危害极大",
+                  "feedback": "必须把 L1 触点延伸到研发侧的 .mcp.json 与 Agent 技能文件。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道实战题覆盖 <strong>OWASP <code>ASI04</code> 与 TPA/Rug Pull 机理、MCP 规范 <code>annotations</code> 信任边界与 RFC 8707、<code>npx -y</code> / <code>SKILL.md</code> 组合治理、以及开源底座的数据主权红线</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0019 · Agentic AI 与 MCP 供应链治理回忆测验",
+          "intro": "重点检验 OWASP ASI04 攻击范式、MCP 协议不可信标注条款、OAuth RFC 8707 及闭源底座数据主权原则。",
+          "questions": [
+            {
+              "prompt": "为何 Invariant Labs 披露的 Tool Poisoning（TPA）与 MCP Rug Pull 能在不依赖传统内存破坏漏洞的前提下攻陷研发环境？",
+              "options": [
+                "因为标准协议规定所有远程工具在每次会话启动前必须强制上传公钥到中心认证服务器。",
+                "因为大模型把工具描述当成可信上下文执行，且动态变更后缺乏哈希校验与再审批机制。",
+                "因为桌面端宿主机默认将所有本地标准输入输出管道挂载到全局超级管理员内核空间中。",
+                "因为全部开源工具注册仓库在发布新版本之前都不会检验发布者的双因素身份认证令牌。"
+              ],
+              "answerIndex": 1,
+              "explanation": "LLM 会将 tools/list 返回的自然语言 description 视作上下文指令执行（TPA 可在其中隐藏读取 ~/.ssh 的指令）；同时 MCP 支持 notifications/tools/list_changed 动态更新工具列表，若客户端缺少 Tool Schema SHA256 Pinning 与变更阻断复审，攻击者即可借 Rug Pull 偷梁换柱（B 正确）。"
+            },
+            {
+              "prompt": "根据 MCP 官方工具（Tools）与授权（Authorization）规范，关于工具元数据 annotations 与远端 HTTP 鉴权的架构设计哪项准确？",
+              "options": [
+                "客户端应完全信任工具只读标注以消除确认弹窗，并在本地通过通用令牌直接转发远端认证。",
+                "客户端仅需在首次安装时校验证书指纹，后续收到列表变更通知可直接免审覆盖本地工具清单。",
+                "服务端只需开启普通跨站脚本过滤，即可在完全不绑定目标资源地址的情况下彻底阻止令牌滥用。",
+                "客户端必须将工具标注视为不可信输入，并在授权时携带目标资源标识以实现令牌受众严格绑定。"
+              ],
+              "answerIndex": 3,
+              "explanation": "MCP 官方规范明确要求客户端 MUST treat tool annotations as untrusted（禁止盲信 readOnlyHint: true 免审）；同时 HTTP 远端 MCP 授权强制使用 OAuth 2.1 + PKCE + RFC 8707 Resource Indicators（携带 resource 参数绑定目标服务器 URI），防止 Token Passthrough（D 正确）。"
+            },
+            {
+              "prompt": "针对 .mcp.json 中的 npx -y 启动风险（如 postmark-mcp 投毒事件）以及仓库内的第三方 SKILL.md，企业 SCA 应采用何种组合策略？",
+              "options": [
+                "强制锁定不可变版本号或容器摘要，并将自然语言指令文档视同代码纳入静态安全扫描与审批。",
+                "全面禁用全部企业内部开发工具的容器隔离策略，以减少本地进程通信时的序列化与启动延迟。",
+                "保留默认动态拉取最新版命令行参数以便自动热更，只需在口头会议上提醒开发者谨慎点击确认。",
+                "只扫描后台语言包依赖树而完全放行工作区说明文档，因为纯文本文件永远不可能影响代理行为。"
+              ],
+              "answerIndex": 0,
+              "explanation": "npx -y 未锁版本会自动拉取最新被投毒包（如 postmark-mcp 1.0.16–1.0.18 窃密邮件），必须禁止并钉死版本或镜像 Digest；同时 Agent 把 SKILL.md / CLAUDE.md 当成可执行程序记忆（Markdown as Code），必须纳入静态提示注入审计与审批（A 正确）。"
+            },
+            {
+              "prompt": "在整合 stacklok/toolhive、agentgateway 与 cisco-ai-defense/mcp-scanner / snyk/agent-scan（均为 Apache-2.0）构建商业闭源 SCA 时，最核心的防踩坑边界是什么？",
+              "options": [
+                "只要引入的扫描工具采用宽松开源协议，就可以默认将客户全部内部工具描述直接传至外部云端。",
+                "在商业闭源安全网关中直接复用未设外联限制的第三方云端护栏接口，以节省本地研发维护成本。",
+                "结合宽松协议网关实施隔离，并在内网闭源场景自研或本地化部署语义审计以杜绝配置结构外泄。",
+                "只检测研发桌面端显式安装的调试检查器，无需排查远程代理插件的命令注入以及邮件暗桩包体。"
+              ],
+              "answerIndex": 2,
+              "explanation": "上述主流 MCP 工具链本身均为宽松 Apache-2.0/MIT 协议，但 mcp-scanner 与 agent-scan 的部分云端检测功能会外发工具 Schema；商业闭源 SCA 必须剥离第三方云端外联调用，以自研/本地引擎完成语义审计，同时利用 ToolHive/AgentGateway 架构实现沙箱与鉴权隔离（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地 OWASP ASI04 治理、MCP Tool Pinning 与零信任网关时，推荐精读以下官方规范与 Apache-2.0/MIT 项目：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://genai.owasp.org/" target="_blank" rel="noopener"><strong>OWASP Top 10 for Agentic Applications 2026 (<code>ASI04</code>)</strong></a> · <a href="https://modelcontextprotocol.io/specification/latest/server/tools" target="_blank" rel="noopener"><strong>MCP Tools Spec (untrusted <code>annotations</code>)</strong></a> · <a href="https://modelcontextprotocol.io/specification/latest/basic/authorization" target="_blank" rel="noopener"><strong>MCP Authorization Spec (OAuth 2.1 + RFC 8707)</strong></a> · <a href="https://modelcontextprotocol.io/specification/latest/basic/security_best_practices" target="_blank" rel="noopener"><strong>MCP Security Best Practices</strong></a>。</li>
+          <li><a href="https://github.com/stacklok/toolhive" target="_blank" rel="noopener"><strong><code>stacklok/toolhive</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/docker/mcp-gateway" target="_blank" rel="noopener"><strong><code>docker/mcp-gateway</code> (<code>MIT</code>)</strong></a> · <a href="https://github.com/agentgateway/agentgateway" target="_blank" rel="noopener"><strong><code>agentgateway/agentgateway</code> (<code>Apache-2.0</code>)</strong></a>：容器化隔离、秘密代管与企业级 Agent 流量网关。</li>
+          <li><a href="https://github.com/cisco-ai-defense/mcp-scanner" target="_blank" rel="noopener"><strong><code>cisco-ai-defense/mcp-scanner</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/snyk/agent-scan" target="_blank" rel="noopener"><strong><code>snyk/agent-scan</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/modelcontextprotocol/inspector" target="_blank" rel="noopener"><strong><code>modelcontextprotocol/inspector</code></strong></a>：MCP 静态审计、Pinning 实践与端侧 CVE 防护基线。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>Phase 2 收官 · 准备跃迁 Phase 3</h3>
+        <p>恭喜！至此我们正式完成了 <strong>Chapter 05（恶意包防御、同源/二进制 SCA 与 AI 供应链三部曲）</strong> 以及整个 <strong>Phase 2（第三代核心壁垒）</strong>！接下来最后 3 课将进入 <strong>Phase 3（企业级可信溯源闭环与商业总装）</strong>。随时在对话中追问或开启终章：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“如果企业已经把自家 SCA 引擎做成了 MCP Server 供 Coding Agent 调用，如何同时用本课的 RFC 8707 与 Tool Pinning 给自家内部 MCP 加上防冒名顶替护城河？”</li>
+          <li>“对于既有 PyTorch 模型权重、又有复杂构建流水的企业 AI 平台，怎么用 <strong>SLSA v1.2 + in-toto + Sigstore</strong> 从源头证明‘模型权重与容器确实产自受控 CI 且未被投毒替换’？”</li>
+          <li>“准备好了！请为我开启 <strong>Phase 3 首课 · Lesson 0020（构建溯源与密码学证明：SLSA v1.2、in-toto 与 Sigstore 闭环）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0018-model-serialization-security-and-payload-scanning.html">&larr; 上一课：Lesson 0018 · 模型序列化安全</a>
+      <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">完整收官速查卡：Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Phase 3 · Lesson 0020（SLSA v1.2 与 Sigstore） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/mcp-supply-chain-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
