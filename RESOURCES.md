@@ -160,6 +160,16 @@
 - [Zero-Execution Extractors, OCI Model Packaging & Non-OSI Governance: CNCF ModelPack (`modelpack/model-spec`, `Apache-2.0`) · KitOps (`kitops-ml/kitops`, `Apache-2.0`) · `ggml-org/ggml` (GGUF)](https://github.com/modelpack/model-spec)
   只读解析 `adapter_config.json`（`base_model_name_or_path`）、GGUF Header（`general.license`）、Safetensors `__metadata__` 及 OCI ModelPack/`Kitfile`（严禁 `torch.load()`）；沿血缘递归校验 `CC-BY-NC-4.0` 污染、Llama 3（700M MAU / `"Built with Llama"`）、OpenRAIL-M 禁令及 2025-08-02 生效的 EU AI Act Art. 53(1)(d) 训练数据摘要。
 
+### 模型序列化安全、反序列化绕过与安全权重格式（Ch 05 · Lesson 0018）
+- [Pickle VM & PyTorch Deserialization Bypasses: Python `pickle` / `pickletools` · PyTorch Serialization Notes (`2.6+ weights_only=True`) · `CVE-2025-32434`](https://docs.python.org/3/library/pickletools.html)
+  `pickletools` 揭示 `GLOBAL` (`0x63`)、`STACK_GLOBAL` (`0x93`)、`EXT1/2/4` (`0x82–0x84`)、`REDUCE` (`0x52`)、`NEWOBJ*`、`BUILD` (`0x62`) 等图灵完备栈式操作码；`CVE-2025-32434`（CVSS 9.3）证实 PyTorch `<= 2.5.1` 因现代 ZIP 路径与 `_legacy_load` 校验不一致，即便传入 `weights_only=True` 仍可触发 RCE（自 [`PyTorch 2.6.0`](https://docs.pytorch.org/docs/stable/notes/serialization.html) 起修复并将 `weights_only` 默认改为 `True`）。
+- [Parser Differential & In-Memory Backdoors: `CVE-2025-1945` / `CVE-2025-10156` (ZIP CRC) · `NullifAI` (`7z`) · Trail of Bits *Sleepy Pickle*](https://blog.trailofbits.com/2024/06/11/exploiting-ml-models-with-pickle-file-attacks-part-1/)
+  早期 `picklescan < 0.0.23` 因 Python `zipfile` 对篡改 CRC32 或畸形头抛异常而 **Fail-Open** 跳过放行；`NullifAI` 利用 `7z` 等非标归档绕过标准 ZIP 假设；*Sleepy Pickle* 借助 `STACK_GLOBAL` 等在加载瞬间于内存篡改模型推理逻辑而不弹 Shell。
+- [Safe Tensor Formats & Cross-Format Blind Spots: `huggingface/safetensors` (`Apache-2.0`) · `Hugging Face Pickle Security` · Keras `CVE-2025-1550` · ONNX `CVE-2025-51480` · GGUF `CVE-2024-34359`](https://github.com/huggingface/safetensors)
+  Safetensors 以 8B `u64` 头长度（硬编码 `MAX_HEADER_SIZE = 100,000,000` 字节防 DoS）+ UTF-8 JSON 头 + 连续 `data_offsets` 消除字节码 VM，但仍防不住权重自身投毒、同仓 `config.json` `auto_map` + `trust_remote_code=True` 与 Jinja2 `chat_template` SSTI（`CVE-2024-34359`, `llama-cpp-python < 0.2.72`）；异构框架须同步封堵 Keras `Lambda`/`safe_mode` 绕过与 ONNX `external_data.location` 路径穿越（`onnx < 1.21.0`）。
+- [Model Payload Scanners & Commercial License Boundary: `protectai/modelscan` (`Apache-2.0`) · `mmaitre314/picklescan` (`MIT`) · `trailofbits/fickling` (`LGPL-3.0`) · `sigstore/model-transparency` (`Apache-2.0`)](https://github.com/protectai/modelscan)
+  商业闭源 SCA 首选 Pure Go 零执行流式操作码白名单 + Fail-Closed 归档解包，借鉴 `modelscan`（`Apache-2.0`）与 [`picklescan`](https://github.com/mmaitre314/picklescan)（`MIT`）规则，严禁将 [`fickling`](https://github.com/trailofbits/fickling)（`LGPL-3.0`）静态混编进闭源内核，并衔接 [`sigstore/model-transparency`](https://github.com/sigstore/model-transparency)（`Apache-2.0`）形成签名闭环。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -176,7 +186,7 @@
   PURL 与 VERS 版本规范的核心维护社区。用于：解决跨生态冷门包管理器命名规范与版本区间边界争议。
 
 ## Gaps
-- **模型反序列化安全与 MCP/Agent 供应链治理（Ch 05 · Lesson 0018–0019）**：`Lesson 0015–0017` 及 `Ref 06` 第 01–04 节已补齐恶意包投毒防御、Winnowing/TLSH/CENTRIS 同源与三层二进制 SCA、以及 AI-BOM 统一建模（CycloneDX 1.7 ML-BOM / SPDX 3.0.1 / `pkg:huggingface` / ModelPack / 非 OSI 与 EU AI Act 合规）；待后续在 0018–0019 补齐 Pickle RCE vs Safetensors 操作码扫描与 MCP/Agentic AI (ASI04) 治理。
+- **Agentic AI 与 MCP 服务器供应链治理（Ch 05 · Lesson 0019）**：`Lesson 0015–0018` 及 `Ref 06` 第 01–05 节已补齐恶意包投毒防御、Winnowing/TLSH/CENTRIS 同源与三层二进制 SCA、AI-BOM 统一建模（CycloneDX 1.7 / SPDX 3.0.1 / `pkg:huggingface` / ModelPack / EU AI Act），以及 Pickle VM 绕过（`CVE-2025-32434` / CRC / Sleepy Pickle）、Safetensors `100 MB` 规范、Keras/ONNX/GGUF 攻击面与 `fickling` (`LGPL-3.0`) 隔离边界；仅余 `Lesson 0019` 补齐 MCP Server / Agent Skills 供应链治理（OWASP ASI04）。
 - **静态、运行时可达性与优先级/VEX/自动修复协同闭环（Ch 04 · Lessons 0011–0014 已全面收口）**：第 11–13 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）、运行时融合/容器裁剪与 EPSS/KEV/SSVC/VEX 协同降噪；第 14 课及 Ref 05 第 05 节已补齐 OSV-Scanner v2 Guided Remediation（`in-place/relock/override`）、`deps.dev/util/resolve`、PubGrub（`MPL-2.0`）、Ochoa et al. (EMSE 2022) `API Diff ∩ Call Graph` 实证与五大生态 Diff 底座、OpenRewrite LST（`Apache-2.0`）、`dependabot-core`（`MIT`）vs `Renovate`（`AGPL-3.0`）红线及双触点防 PR 风暴闭环。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。

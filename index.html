@@ -12,7 +12,7 @@
       <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
       <div class="course-links">
         <a href="./index.html" class="active">课程首页 · 全局路线图</a>
-        <a href="./lessons/0017-aibom-modeling-models-datasets-and-lineage.html">当前课程 · Lesson 0017</a>
+        <a href="./lessons/0018-model-serialization-security-and-payload-scanning.html">当前课程 · Lesson 0018</a>
         <a href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
         <a href="./reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
         <a href="./reference/layer3-intel-and-version-matrix.html">Ref 04 · L3 情报与许可矩阵</a>
@@ -36,8 +36,8 @@
       <div class="hero-stats">
         <div class="stat-card">
           <div class="stat-label">课程进度</div>
-          <div class="stat-value">17 / 22 课</div>
-          <div class="stat-sub">Ch 05 AI 供应链开启 · 下一课 0018</div>
+          <div class="stat-value">18 / 22 课</div>
+          <div class="stat-sub">Ch 05 模型载荷安全完成 · 下一课 0019</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">当前主攻阶段</div>
@@ -52,12 +52,12 @@
         <div class="stat-card">
           <div class="stat-label">速查卡片库</div>
           <div class="stat-value">6 / 6 份</div>
-          <div class="stat-sub">Ref 06 已覆盖 Lesson 0015–0017</div>
+          <div class="stat-sub">Ref 06 已覆盖 Lesson 0015–0018</div>
         </div>
       </div>
 
       <div class="hero-actions">
-        <a class="btn-link-primary" href="./lessons/0017-aibom-modeling-models-datasets-and-lineage.html">进入当前课程：Lesson 0017 →</a>
+        <a class="btn-link-primary" href="./lessons/0018-model-serialization-security-and-payload-scanning.html">进入当前课程：Lesson 0018 →</a>
         <a class="btn-link-secondary" href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">打开完整速查卡：Ref 06 投毒 / 二进制 / AI 矩阵</a>
       </div>
     </header>
@@ -496,23 +496,26 @@
           </div>
         </li>
 
-        <li class="lesson-row is-next" data-phase="p2" data-layer="AI,L1,L4" data-status="next">
+        <li class="lesson-row is-available" data-phase="p2" data-layer="AI,L1,L4" data-status="ready">
           <div class="lesson-num">0018</div>
           <div>
-            <div class="lesson-main-title">模型序列化安全与恶意载荷扫描（Pickle RCE vs Safetensors）</div>
-            <p class="lesson-desc">剖析 <code>.pkl/.pt/.ckpt</code> 反序列化字节码注入执行原理，学习 <code>safetensors</code> 零代码执行机制与 Protect AI ModelScan 静态操作码检测范式，设计模型制品门禁扫描器。</p>
+            <div class="lesson-main-title">
+              <a href="./lessons/0018-model-serialization-security-and-payload-scanning.html">模型序列化安全与恶意载荷扫描（Pickle RCE vs Safetensors）</a>
+            </div>
+            <p class="lesson-desc">剖析 Pickle VM 操作码与 <code>CVE-2025-32434</code> / ZIP CRC / <code>NullifAI</code> / <code>Sleepy Pickle</code> 绕过链，吃透 <code>Safetensors</code>（<code>100 MB</code> 头上限）及三大外围失明面（<code>auto_map</code> / Jinja2 SSTI）、Keras <code>safe_mode</code> 与 ONNX <code>external_data</code> 风险，严守 <code>fickling</code>（<code>LGPL-3.0</code>）隔离边界并落地 Pure Go Fail-Closed 白名单内核。</p>
             <div class="lesson-tags">
               <span class="tag-chip">AI 供应链</span>
-              <span class="tag-chip">Pickle Opcodes · Safetensors · ModelScan</span>
+              <span class="tag-chip">Pickle VM · CVE-2025-32434 · Safetensors</span>
+              <span class="tag-chip">Fail-Closed · modelscan · fickling 隔离</span>
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-build">下一课 · ZPD</span>
+            <span class="badge badge-ok">已发布 · 可学习</span>
             <span class="lesson-duration">~18 min</span>
           </div>
         </li>
 
-        <li class="lesson-row" data-phase="p2" data-layer="AI,L4" data-status="planned">
+        <li class="lesson-row is-next" data-phase="p2" data-layer="AI,L4" data-status="next">
           <div class="lesson-num">0019</div>
           <div>
             <div class="lesson-main-title">Agentic AI 与 MCP 服务器供应链治理（OWASP ASI04）</div>
@@ -523,7 +526,7 @@
             </div>
           </div>
           <div class="lesson-status-col">
-            <span class="badge badge-blue">规划中</span>
+            <span class="badge badge-build">下一课 · ZPD</span>
             <span class="lesson-duration">~20 min</span>
           </div>
         </li>
@@ -652,7 +655,7 @@
           <div>
             <div style="margin-bottom:0.45rem;"><span class="badge badge-ok">已发布 · 可打印</span></div>
             <h4><a href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 恶意包投毒防御、代码同源与 AI 供应链安全速查矩阵</a></h4>
-            <p style="margin-top:0.35rem;">已接入 Lesson 0015–0017 精华（随 CH 05 持续扩展）：恶意包四级漏斗/冷却期、Winnowing/CENTRIS/二进制金字塔，及 <code>pkg:huggingface</code>、CycloneDX 1.7 / SPDX 3.0.1 与非 OSI/EU AI Act 合规矩阵。</p>
+            <p style="margin-top:0.35rem;">已接入 Lesson 0015–0018 精华（随 CH 05 持续扩展）：恶意包四级漏斗、Winnowing/CENTRIS/二进制金字塔、AI-BOM 双标准建模，及 Pickle VM 绕过、Safetensors 边界与 <code>fickling</code> 隔离矩阵。</p>
           </div>
           <div style="font-size:0.8rem;"><a href="./reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">打开速查卡 →</a></div>
         </div>
@@ -661,7 +664,7 @@
 
     <footer class="lesson-end-nav">
       <span>工作区指南：可在对话中随时输入 <code>/teach</code> 继续下一课、点播任意章节，或调整学习目标</span>
-      <a href="./lessons/0017-aibom-modeling-models-datasets-and-lineage.html">进入当前课程：Lesson 0017 →</a>
+      <a href="./lessons/0018-model-serialization-security-and-payload-scanning.html">进入当前课程：Lesson 0018 →</a>
     </footer>
   </main>
 

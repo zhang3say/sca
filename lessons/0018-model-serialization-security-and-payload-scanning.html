@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0018：模型序列化安全与恶意载荷扫描（Pickle RCE vs Safetensors）</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017 · AI-BOM 统一建模</a>
+        <a href="./0018-model-serialization-security-and-payload-scanning.html" class="active">Lesson 0018 · 模型序列化安全</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0018</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 05 AI 供应链三部曲中篇（OWASP LLM03:2025）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>模型序列化安全与恶意载荷扫描（Pickle RCE vs Safetensors）</h1>
+      <p class="subtitle">在 <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a> 中，我们立下了 AI-BOM 采集的一条铁律：<strong>“严禁在扫描器进程内调用 <code>torch.load()</code>”</strong>。因为在传统的 <code>.pkl/.pt/.pth/.bin</code> 模型文件背后，藏着的不是单纯的浮点数矩阵，而是一台图灵完备的<strong>栈式虚拟机（Pickle VM）</strong>。甚至即便开发者显式写了 <code>weights_only=True</code>，PyTorch 2.5.1 及以前版本仍爆出了 CVSS 9.3 的 <strong><code>CVE-2025-32434</code></strong> 绕过漏洞。本课带你拆穿 Pickle 字节码注入与扫描器绕过花招，看清 <code>Safetensors</code> 零执行格式与跨格式（Keras/ONNX/GGUF）攻击面，并拍板商业闭源 SCA 的纯静态 Fail-Closed 模型载荷扫描内核。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>吃透 Pickle VM 核心操作码与 <code>CVE-2025-32434</code> / ZIP CRC / NullifAI / Sleepy Pickle 绕过链；掌握 Safetensors <code>MAX_HEADER_SIZE=100MB</code> 规范与三大失明边界；划清 <code>modelscan</code> / <code>picklescan</code> / <code>fickling</code> (<code>LGPL-3.0</code>) 商业许可红线并编写 Pure Go 静态扫描原语</span>
+        <span><strong>先修底座：</strong><a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html">Lesson 0015</a> · <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md）</div>
+      <p>传统 SCA 扫描器面对 5 GB 的 <code>model.pt</code> 往往束手无策：既不能靠正则匹配源码，也不能把它塞进 Python 进程加载。商业化第三代 SCA 必须在 <strong>Layer 1/4 制品入库门禁</strong> 侧具备<strong>零反序列化（Zero-Deserialization）、流式偏移读取、Fail-Closed 容错、且不依赖 <code>LGPL-3.0</code> 反编译库</strong> 的模型恶意载荷扫描能力，并与 <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a> 的 AI-BOM 血缘无缝协同——在漏洞与木马进入 GPU 集群前完成阻断。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>Pickle VM 字节码本质与真实绕过链路解剖</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 为什么 <code>.pkl / .pt / .bin</code> 本质上是一段可执行字节码？</h3>
+      <p>Python 官方 <a href="https://docs.python.org/3/library/pickle.html" target="_blank" rel="noopener"><code>pickle</code> 模块</a> 文档顶部用醒目的红色警告写着：<em>“The pickle module is not secure. Only unpickle data you trust.”</em> 原因在于 Pickle 并非 JSON 那样的被动数据格式，而是一门自带<strong>操作码（Opcodes）、栈（Stack）与备忘录（Memo）</strong>的微型栈式虚拟机语言。</p>
+      <p>当一个正常模型序列化张量时，Pickle 字节流会压入函数对象 <code>torch._utils._rebuild_tensor_v2</code> 与张量维度参数，再通过 <code>REDUCE</code> 指令在读取端原地调用该函数重建张量；而攻击者只需将压栈的目标替换成 <code>posix.system</code>、<code>builtins.eval</code> 或利用对象的 <code>__reduce__</code> 魔术方法，<code>torch.load()</code> 尚未返回模型对象，攻击者的 Shell 或内存后门就已经执行完毕。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">静态扫描器必抓的 Pickle VM 高危操作码（<a href="https://docs.python.org/3/library/pickletools.html" target="_blank" rel="noopener"><code>pickletools</code></a> 核验）</span>
+        • <strong>帧与协议头</strong>：<code>PROTO</code> (<code>0x80</code>, p2+)、<code>FRAME</code> (<code>0x95</code>, p4+)、<code>STOP</code> (<code>0x2e</code>)<br/>
+        • <strong>外部符号导入</strong>：<code>GLOBAL</code> (<code>0x63</code>)、<code>STACK_GLOBAL</code> (<code>0x93</code>, p4+，动态从栈顶拼接模块名与属性名，专绕静态关键字匹配)、<code>EXT1/2/4</code> (<code>0x82/0x83/0x84</code>，查 <code>copyreg</code> 扩展注册表)<br/>
+        • <strong>可调用执行指令</strong>：<code>REDUCE</code> (<code>0x52</code>)、<code>INST</code> (<code>0x69</code>)、<code>OBJ</code> (<code>0x6f</code>)、<code>NEWOBJ</code> (<code>0x81</code>)、<code>NEWOBJ_EX</code> (<code>0x92</code>) 及调用 <code>__setstate__</code> 的 <code>BUILD</code> (<code>0x62</code>)<br/>
+        • <strong>持久化回调</strong>：<code>PERSID</code> (<code>0x50</code>)、<code>BINPERSID</code> (<code>0x51</code>)
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 从 <code>weights_only=True</code> 失效到四大扫描器绕过范式</h3>
+      <p>很多研发团队以为只要调用 <code>torch.load(..., weights_only=True)</code> 或挂个开源扫描器就高枕无忧，但 2024–2025 年间的一系列真实披露击碎了这种错觉：</p>
+      <ul>
+        <li><strong><code>CVE-2025-32434</code>（CVSS 9.3 · PyTorch &le; 2.5.1）：</strong>即便开发者显式传入了 <code>weights_only=True</code>，由于 PyTorch 现代 ZIP 路径与历史 <code>_legacy_load</code>（Tar/旧序列化路径）之间对受限反序列化器（<code>_weights_only_unpickler</code>）的校验存在不一致，恶意构造的文件仍可触发任意代码执行（RCE）。PyTorch 自 <a href="https://docs.pytorch.org/docs/stable/notes/serialization.html" target="_blank" rel="noopener"><strong>2.6.0</strong></a> 起彻底修复了该差异，并将 <code>weights_only</code> 的默认值正式由 <code>False</code> 改为 <code>True</code>（自定义合法类须通过 <code>torch.serialization.add_safe_globals()</code> 显式注册）。</li>
+        <li><strong>ZIP CRC 篡改与解析差分绕过（<code>picklescan &lt; 0.0.23</code>）：</strong>PyTorch 的 <code>.pt</code> 实质是包含 <code>archive/data.pkl</code> 的 ZIP 归档。安全研究人员披露了多起 0-day（如 <code>CVE-2025-1945</code>、<code>CVE-2025-10156</code>、<code>CVE-2025-10155</code>）：攻击者故意把 ZIP 局部头里的 CRC32 校验值填错或修改标志位/扩展名映射，Python 标准库 <code>zipfile</code> 读取时直接抛出异常，早期扫描器因 <strong>Fail-Open（异常即跳过）</strong> 直接放行；而 PyTorch 底层 C++/Python 加载器容错极强，照常解出并执行 <code>data.pkl</code> 恶意代码。</li>
+        <li><strong><code>NullifAI</code> 非标归档封装（ReversingLabs 2025）：</strong>攻击者在 Hugging Face 上传经 <code>7z</code> 等格式重新压制的损坏/套壳 PyTorch 模型文件，直接让按标准 ZIP 假设编写的扫描流水线失明，诱导下游研发手工解包加载中招。</li>
+        <li><strong><code>Sleepy Pickle</code> 内存态隐蔽后门（Trail of Bits 2024）：</strong>不再调用 <code>os.system</code> 弹反向 Shell（太容易被 EDR 和黑名单抓包），而是利用 <a href="https://blog.trailofbits.com/2024/06/11/exploiting-ml-models-with-pickle-file-attacks-part-1/" target="_blank" rel="noopener"><code>STACK_GLOBAL</code> + <code>builtins.exec</code></a> 在加载瞬间于内存里原地劫持模型权重或篡改 <code>forward()</code> 逻辑，不落盘、不外连，静默投放逻辑后门或数据窃取钩子。</li>
+      </ul>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>Safetensors 零执行边界与跨格式模型攻击面</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 Safetensors 的二进制确定性与三类“仍会失明”的外围攻击面</h3>
+      <p>为了从根源上终结反序列化执行，Hugging Face 推出了 <a href="https://github.com/huggingface/safetensors" target="_blank" rel="noopener"><strong><code>Safetensors</code></strong></a>（<code>Apache-2.0</code>）：整个文件不再包含任何虚拟机或控制流指令，完全由三段纯静态结构组成：① 前 <strong>8 字节小端 <code>uint64</code></strong> 声明头部字节数 <code>N</code>；② <strong><code>N</code> 字节 UTF-8 JSON Header</strong>（必须以 <code>{</code> 开头，记录每个张量的 <code>dtype</code>、<code>shape</code>、<code>data_offsets: [BEGIN, END]</code> 与可选 <code>__metadata__</code>）；③ 连续排列的原始张量字节区，支持零拷贝 <code>mmap</code> 直接映射。</p>
+      <p>为防止恶意构造一个天文数字的头长度耗尽解析器内存（DoS），官方 Rust 实现硬编码了不可逾越的常数上限：<strong><code>MAX_HEADER_SIZE = 100_000_000</code>（100 MB）</strong>，同时强制校验所有张量 <code>data_offsets</code> 区间必须连续、不重叠、不越界，并与文件物理总长度精确对齐。</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">Safetensors 绝对防不住的三类威胁！</span>
+        架构师切忌把“文件后缀是 <code>.safetensors</code>”等同于“整个模型仓库安全”：<br/>
+        1. <strong>权重自身投毒</strong>：后门触发器（Trojan Triggers）藏在合法浮点权重分布里；<br/>
+        2. <strong><code>auto_map</code> + <code>trust_remote_code=True</code></strong>：同仓 <code>config.json</code> 指定外部 <code>modeling_*.py</code>，加载瞬间照样执行任意 Python；<br/>
+        3. <strong>Jinja2 <code>chat_template</code> SSTI</strong>：<code>tokenizer_config.json</code> 或 GGUF 元数据里嵌入恶意模板表达式（如 <code>CVE-2024-34359</code>），渲染提示词时直接打穿服务端。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:24%" />
+          <col style="width:30%" />
+          <col style="width:28%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>模型序列化格式</th>
+            <th>底层存储与解析机制</th>
+            <th>核心攻击面与代表性真实漏洞</th>
+            <th>SCA 静态门禁设计要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>PyTorch<br/><code>.pt / .pth / .bin</code></strong></td>
+            <td>ZIP 容器封装 <code>data.pkl</code>（Pickle 字节码）+ 张量块；旧版 Tar 路径</td>
+            <td><code>REDUCE</code>/<code>STACK_GLOBAL</code> RCE、<code>Sleepy Pickle</code> 内存篡改、ZIP CRC 差分绕过、<code>CVE-2025-32434</code>（<code>&le; 2.5.1</code> 绕过 <code>weights_only=True</code>）</td>
+            <td>严禁 <code>torch.load()</code>；宽容解包 + <strong>Fail-Closed</strong> 拦截畸形归档；操作码白名单校验 + 推动升级 PyTorch &ge; 2.6 与转 Safetensors。</td>
+          </tr>
+          <tr>
+            <td><strong>Safetensors<br/><code>.safetensors</code></strong></td>
+            <td>8B <code>u64</code> 头长 + UTF-8 JSON 头 + 纯连续张量数组（零 VM）</td>
+            <td>畸形大头 DoS（超 <code>100 MB</code>）、<code>data_offsets</code> 重叠越界；<strong>外围失明面</strong>：同仓 <code>auto_map</code> + <code>trust_remote_code</code> 与模板 SSTI</td>
+            <td>校验 <code>N &le; 100,000,000</code> 与偏移连续性；联动扫描同仓库 <code>config.json</code> / <code>tokenizer_config.json</code> / <code>*.py</code>。</td>
+          </tr>
+          <tr>
+            <td><strong>Keras / TensorFlow<br/><code>.keras / .h5</code></strong></td>
+            <td><code>.keras</code> 为 ZIP（含 <code>config.json</code> + 权重）；支持 <code>Lambda</code> 自定义层</td>
+            <td><code>Lambda</code> 层内嵌 marshalled Python 字节码；<code>CVE-2024-3660</code>、<code>CVE-2025-1550</code> 多次击穿 <code>safe_mode=True</code>（滥用 <code>get_file</code> 等内置组件）</td>
+            <td>禁止含 <code>Lambda</code> 层模型自动上线；对 <code>config.json</code> 中 <code>module</code> / <code>class_name</code> 实施严格白名单限制。</td>
+          </tr>
+          <tr>
+            <td><strong>ONNX<br/><code>.onnx</code></strong></td>
+            <td>Protobuf 计算图（<code>ModelProto</code> / <code>TensorProto</code>）+ 外部张量指针</td>
+            <td><code>external_data.location</code> 路径穿越与软链接逃逸导致任意文件读取/覆写（<code>CVE-2025-51480</code>、<code>CVE-2026-27489</code> / <code>49114</code>）</td>
+            <td>流式解析 Protobuf 头，拦截含 <code>..</code>、绝对路径或跨目录符号链接的 <code>external_data</code>，要求 <code>onnx &ge; 1.21.0</code>。</td>
+          </tr>
+          <tr>
+            <td><strong>GGUF<br/><code>.gguf</code></strong></td>
+            <td>纯二进制魔数 <code>GGUF</code> + KV 元数据字典 + 量化张量块</td>
+            <td>无 Pickle VM，但高危风险来自加载器 C/C++ 内存破坏与 <code>tokenizer.chat_template</code> Jinja2 SSTI（<strong><code>CVE-2024-34359</code></strong>, <code>llama-cpp-python &lt; 0.2.72</code>, CVSS 9.6）</td>
+            <td>只读解析 KV 头，静态检测 <code>tokenizer.chat_template</code> 中的双大括号反射特征（如 <code>__mro__</code> / <code>__subclasses__</code>）。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 零执行 Fail-Closed 模型载荷扫描与跨格式伴生审计双阶段架构</strong>
+        <span>先对归档格式执行严苛 Fail-Closed 容错解包 &rarr; 再按格式路由到操作码白名单 / 头部不变量 / 伴生文件审计 &rarr; 联动 Sigstore 防篡改验签</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Stage 1 · 魔数嗅探与 Fail-Closed 归档解包层（纯 Go 零加载 · 防解析差分）</span>
+            <span class="orch-stage-kicker">Magic Bytes Sniffer · Tolerant-vs-Strict ZIP Diff · 7z/Tar Reject · Max Header Bound</span>
+          </div>
+          <p class="orch-stage-desc">
+            不轻信文件后缀，直接校验文件魔数（ZIP <code>PK\x03\x04</code> / Safetensors JSON <code>{</code> / <code>GGUF</code> / HDF5 / Protobuf）。若发现 ZIP CRC32 错配、异常标志位、<code>7z</code> 套壳或嵌套深度超限，<strong>立即触发 Fail-Closed 阻断</strong>（绝不学早期 <code>picklescan</code> 抛异常跳过）。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 按真实载荷格式路由到零执行静态引擎（绝不启动 Python 解释器调用 pickle.load） &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Stage 2A · 权重内层静态载荷引擎</span>
+              <span class="badge badge-blue">白名单优先</span>
+            </div>
+            <ul>
+              <li><strong>Pickle VM 状态机：</strong>解码 <code>GLOBAL</code> / <code>STACK_GLOBAL</code> / <code>EXT*</code> / <code>REDUCE</code> / <code>NEWOBJ*</code>，仅放行 <code>torch.*</code> 与 <code>collections.OrderedDict</code> 张量白名单。</li>
+              <li><strong>Safetensors / ONNX / Keras：</strong>核验 <code>N &le; 100MB</code>、<code>data_offsets</code> 连续对齐、ONNX <code>external_data</code> 沙箱路径与 Keras <code>Lambda</code> 禁令。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Stage 2B · 伴生文件审计与 Sigstore 协同</span>
+              <span class="badge badge-warn">全仓联动 + 签名锚定</span>
+            </div>
+            <ul>
+              <li><strong>伴生文件红线：</strong>同步检查同仓 <code>config.json</code>（<code>auto_map</code>）、<code>tokenizer_config.json</code>（Jinja2 SSTI）与代码仓里的 <code>weights_only=False</code> / <code>trust_remote_code=True</code>。</li>
+              <li><strong>格式迁移 + 签名：</strong>阻断 PyTorch <code>&le; 2.5.1</code> 加载遗留 <code>.pt</code>，推荐转换为 <code>.safetensors</code> 并接入 <code>sigstore/model-transparency</code>（<code>Apache-2.0</code>）验签。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>开源扫描器商业许可排雷与 Pure Go 静态扫描原语</h2>
+
+    <div class="prose-col">
+      <h3>3.1 主流开源模型扫描底座选型：警惕 <code>fickling</code> 的 <code>LGPL-3.0</code> 边界</h3>
+      <p>设计商业闭源 SCA 的模型载荷扫描模块时，不能只看 GitHub Star 数和检出率，必须同步完成商业闭源协议审查：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:24%" />
+          <col style="width:18%" />
+          <col style="width:29%" />
+          <col style="width:29%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>开源项目 / 规范</th>
+            <th>精确许可协议</th>
+            <th>技术特点与检测能力</th>
+            <th>商业闭源产品整合边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/protectai/modelscan" target="_blank" rel="noopener"><strong><code>protectai/modelscan</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>覆盖 PyTorch/Pickle、TensorFlow SavedModel、Keras H5/ZIP 与 NumPy；基于操作码与层规则检查。</td>
+            <td><strong>纯宽松商用</strong>：可安全借鉴其多格式规则清单或作为独立 Python Worker 封装，注意规则偏黑名单需强化白名单与 Fail-Closed。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/mmaitre314/picklescan" target="_blank" rel="noopener"><strong><code>mmaitre314/picklescan</code></strong></a></td>
+            <td><span class="badge badge-ok">MIT</span></td>
+            <td><a href="https://huggingface.co/docs/hub/security-pickle" target="_blank" rel="noopener">Hugging Face Hub</a> 集成底座，轻量静态扫 Pickle 操作码与全局符号。</td>
+            <td><strong>纯宽松商用</strong>：须确保版本 <code>&ge; 0.0.23</code> 修复 ZIP 解析绕过，并在自研网关中强制改写为 Fail-Closed。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/trailofbits/fickling" target="_blank" rel="noopener"><strong><code>trailofbits/fickling</code></strong></a></td>
+            <td><span class="badge badge-warn">LGPL-3.0</span></td>
+            <td>Trail of Bits 出品：支持 Pickle 符号执行反编译为等价 Python AST，能深度抓出混淆与间接执行链。</td>
+            <td><span class="badge badge-danger">许可隔离警示</span> <code>LGPL-3.0</code> 严禁静态混编进闭源内核！仅建议研究其符号追踪思路，或在独立容器/沙箱进程中以 CLI/IPC 隔离运行（供客户自选或合规留存接口）。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/huggingface/safetensors" target="_blank" rel="noopener"><strong><code>huggingface/safetensors</code></strong></a> &amp; <a href="https://github.com/sigstore/model-transparency" target="_blank" rel="noopener"><strong><code>sigstore/model-transparency</code></strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>零拷贝安全张量格式标准 + Sigstore 无密钥模型防篡改签名校验。</td>
+            <td><strong>强烈推荐双底座</strong>：以 Pure Go 自研几十行 Header 校验器实现零外部依赖验真，并无缝衔接 Lesson 0020 签名体系。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.2 Pure Go 静态零执行扫描原语（流式 Pickle 白名单 + Safetensors 边界核验）</h3>
+      <p>与 <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">Lesson 0017</a> 的 AI-BOM 只读采集器完全同构，下面这段 Pure Go 原语<strong>不调用任何 Python 运行时、不分配巨额内存</strong>，即可同时守住 Safetensors 的 100 MB/偏移连续不变量与 Pickle 操作码的白名单安全线：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">架构取舍：白名单 > 黑名单</span>
+        黑名单去堵 <code>os.system</code>、<code>subprocess</code>、<code>eval</code> 永远在追着攻击者跑（绕过手段包括 <code>operator.attrgetter</code>、<code>builtins.__import__</code>、异常跳转等）。而在真实场景中，正常 PyTorch <code>state_dict</code> 导入的符号极其收敛（主要是 <code>torch._utils._rebuild_tensor_v2</code>、<code>torch.*Storage</code>、<code>collections.OrderedDict</code> 与基础编码器），因此<strong>“非白名单符号导入即拦截/转人工”</strong>才是商用级的终极正解。
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：Safetensors 头部边界检验与 Pickle 操作码 Fail-Closed 白名单扫描</strong>
+        <span>Zero-Execution Pure Go L1/L4 模型门禁内核（流式读取 · 无 LGPL 依赖）</span>
+      </div>
+      <pre><code><span class="tok-kw">const</span> SafetensorsMaxHeaderSize <span class="tok-type">uint64</span> = <span class="tok-num">100_000_000</span> <span class="tok-cmt">// 官方硬上限：100 MB 防 JSON 解析 OOM DoS</span>
+
+<span class="tok-kw">type</span> TensorMeta <span class="tok-kw">struct</span> {
+    DType       <span class="tok-type">string</span>    <span class="tok-str">`json:"dtype"`</span>
+    Shape       []<span class="tok-type">int64</span>   <span class="tok-str">`json:"shape"`</span>
+    DataOffsets [<span class="tok-num">2</span>]<span class="tok-type">uint64</span> <span class="tok-str">`json:"data_offsets"`</span>
+}
+
+<span class="tok-cmt">// VerifySafetensorsHeader 只读前 8 字节 + Header JSON，校验长度上限与连续无重叠不变量</span>
+<span class="tok-kw">func</span> VerifySafetensorsHeader(r io.ReaderAt, fileSize <span class="tok-type">uint64</span>) <span class="tok-type">error</span> {
+    <span class="tok-kw">var</span> lenBuf [<span class="tok-num">8</span>]<span class="tok-type">byte</span>
+    <span class="tok-kw">if</span> _, err := r.ReadAt(lenBuf[:], <span class="tok-num">0</span>); err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"fail-closed: read header len: %w"</span>, err)
+    }
+    hdrLen := binary.LittleEndian.Uint64(lenBuf[:])
+    <span class="tok-kw">if</span> hdrLen == <span class="tok-num">0</span> || hdrLen &gt; SafetensorsMaxHeaderSize || <span class="tok-num">8</span>+hdrLen &gt; fileSize {
+        <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"blocked: HeaderTooLarge or truncated (%d bytes)"</span>, hdrLen)
+    }
+    hdrBytes := <span class="tok-kw">make</span>([]<span class="tok-type">byte</span>, hdrLen)
+    <span class="tok-kw">if</span> _, err := r.ReadAt(hdrBytes, <span class="tok-num">8</span>); err != <span class="tok-kw">nil</span> || hdrBytes[<span class="tok-num">0</span>] != <span class="tok-str">'{'</span> {
+        <span class="tok-kw">return</span> errors.New(<span class="tok-str">"blocked: invalid safetensors JSON header"</span>)
+    }
+    <span class="tok-kw">var</span> raw <span class="tok-kw">map</span>[<span class="tok-type">string</span>]json.RawMessage
+    <span class="tok-kw">if</span> err := json.Unmarshal(hdrBytes, &amp;raw); err != <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"fail-closed: malformed JSON header: %w"</span>, err)
+    }
+    dataLen := fileSize - <span class="tok-num">8</span> - hdrLen
+    <span class="tok-kw">type</span> span <span class="tok-kw">struct</span>{ begin, end <span class="tok-type">uint64</span> }
+    <span class="tok-kw">var</span> spans []span
+    <span class="tok-kw">for</span> k, v := <span class="tok-kw">range</span> raw {
+        <span class="tok-kw">if</span> k == <span class="tok-str">"__metadata__"</span> { <span class="tok-kw">continue</span> }
+        <span class="tok-kw">var</span> tm TensorMeta
+        <span class="tok-kw">if</span> err := json.Unmarshal(v, &amp;tm); err != <span class="tok-kw">nil</span> || tm.DataOffsets[<span class="tok-num">0</span>] &gt; tm.DataOffsets[<span class="tok-num">1</span>] || tm.DataOffsets[<span class="tok-num">1</span>] &gt; dataLen {
+            <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"blocked: illegal tensor data_offsets on %s"</span>, k)
+        }
+        spans = <span class="tok-kw">append</span>(spans, span{tm.DataOffsets[<span class="tok-num">0</span>], tm.DataOffsets[<span class="tok-num">1</span>]})
+    }
+    sort.Slice(spans, <span class="tok-kw">func</span>(i, j <span class="tok-type">int</span>) <span class="tok-type">bool</span> { <span class="tok-kw">return</span> spans[i].begin &lt; spans[j].begin })
+    <span class="tok-kw">for</span> i := <span class="tok-num">1</span>; i &lt; <span class="tok-kw">len</span>(spans); i++ {
+        <span class="tok-kw">if</span> spans[i].begin != spans[i-<span class="tok-num">1</span>].end { <span class="tok-cmt">// 必须严格连续、无空洞且无重叠</span>
+            <span class="tok-kw">return</span> errors.New(<span class="tok-str">"blocked: non-contiguous or overlapping tensor buffers"</span>)
+        }
+    }
+    <span class="tok-kw">return</span> <span class="tok-kw">nil</span>
+}
+
+<span class="tok-cmt">// SafePickleGlobals 仅放行标准张量反序列化所需的最小白名单符号</span>
+<span class="tok-kw">var</span> SafePickleGlobals = <span class="tok-kw">map</span>[<span class="tok-type">string</span>]<span class="tok-type">bool</span>{
+    <span class="tok-str">"collections.OrderedDict"</span>:          <span class="tok-kw">true</span>,
+    <span class="tok-str">"torch._utils._rebuild_tensor_v2"</span>:  <span class="tok-kw">true</span>,
+    <span class="tok-str">"torch.FloatStorage"</span>:               <span class="tok-kw">true</span>,
+    <span class="tok-str">"torch.BFloat16Storage"</span>:            <span class="tok-kw">true</span>,
+    <span class="tok-str">"torch.HalfStorage"</span>:                <span class="tok-kw">true</span>,
+}
+
+<span class="tok-cmt">// InspectPickleOpcodes 对解压出的 data.pkl 字节流执行 Fail-Closed 操作码审查</span>
+<span class="tok-kw">func</span> InspectPickleOpcodes(ops []OpcodeToken) <span class="tok-type">error</span> {
+    <span class="tok-kw">for</span> _, op := <span class="tok-kw">range</span> ops {
+        <span class="tok-kw">switch</span> op.Code {
+        <span class="tok-kw">case</span> <span class="tok-num">0x93</span>, <span class="tok-num">0x82</span>, <span class="tok-num">0x83</span>, <span class="tok-num">0x84</span>, <span class="tok-num">0x50</span>, <span class="tok-num">0x51</span>: <span class="tok-cmt">// STACK_GLOBAL, EXT1/2/4, PERSID, BINPERSID</span>
+            <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"blocked: dynamic/opaque pickle opcode 0x%02x"</span>, op.Code)
+        <span class="tok-kw">case</span> <span class="tok-num">0x63</span>: <span class="tok-cmt">// GLOBAL ('c'): 严格对照最小白名单</span>
+            <span class="tok-kw">if</span> !SafePickleGlobals[op.Symbol] {
+                <span class="tok-kw">return</span> fmt.Errorf(<span class="tok-str">"blocked: non-allowlisted GLOBAL symbol %q"</span>, op.Symbol)
+            }
+        }
+    }
+    <span class="tok-kw">return</span> <span class="tok-kw">nil</span>
+}</code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大攻防样本（标准 <code>state_dict</code>、经典 RCE、CRC 篡改 + <code>Sleepy Pickle</code> 隐蔽后门、<code>Safetensors</code> 伴生 <code>auto_map</code>/SSTI 投毒），关闭不同防线开关亲眼验证 Fail-Open 漏报灾难；在<strong>模式二</strong>中调试 <code>Safetensors</code> 100 MB 头部上限、偏移重叠检测与 PyTorch &le; 2.5.1（<code>CVE-2025-32434</code>）版本门禁。</p>
+    </div>
+
+    <!-- INTERACTIVE MODEL SERIALIZATION LAB -->
+    <section class="widget-panel full-width" data-widget="model-serialization-lab">
+      <script type="application/json" class="model-serialization-lab-data">
+        {
+          "title": "交互实验台：模型载荷反汇编对比与格式迁移门禁模拟器",
+          "intro": "零执行环境静态剖析 Pickle VM 操作码绕过链，并验证 Safetensors 头部不变量与 PyTorch/Keras/ONNX 漏洞门禁。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 1/4 模型序列化安全与载荷扫描架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为商业闭源 SCA 平台设计模型制品入库门禁与代码仓联合扫描器，确保企业 AI 平台免疫反序列化 RCE。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐现代零执行 Fail-Closed 模型扫描架构！已彻底封堵 Pickle 绕过、LGPL 传染与 Safetensors 伴生盲区。",
+            "warning": "方案基本可行，但在 {warning} 项上存在漏报盲区或运维瓶颈（标黄项），建议补齐白名单收敛与伴生配置审计。",
+            "critical": "当前方案踩中 {critical} 处致命隐患（标红项）：可能放任 ZIP CRC 畸形绕过、触发 LGPL 传染、或让扫描器本身直接 RCE 沦陷！"
+          },
+          "modules": [
+            {
+              "name": "模型载荷扫描器的运行隔离与解析策略",
+              "layer": "L1 安全边界 · Zero-Execution",
+              "context": "平台每天需在制品网关拦截数千个数百 MB 至数十 GB 的开源与微调模型文件。",
+              "options": [
+                {
+                  "label": "纯静态流式读取归档头与 Pickle 字节码操作码，零 Python 反序列化执行（Zero-Deserialization）",
+                  "status": "optimal",
+                  "verdictTitle": "毫秒级吞吐且扫描器自身 100% 免疫反序列化 RCE，兼顾安全性与云原生弹性",
+                  "feedback": "与 Lesson 0017 只读采集原则一脉相承：只拆字节流结构，绝不调用 pickle.load() 或 torch.load()。"
+                },
+                {
+                  "label": "在扫描服务器直接调用 torch.load(..., weights_only=True) 试跑，不报错就判定安全",
+                  "status": "critical",
+                  "verdictTitle": "极其危险！PyTorch <= 2.5.1 的 CVE-2025-32434 可直接击穿 weights_only=True 攻陷扫描集群",
+                  "feedback": "运行态加载永远存在解释器与框架级绕过风险，扫描器本身绝不能成为靶机。"
+                },
+                {
+                  "label": "对几十 GB 的模型全量启动 GPU 容器拉起完整推理服务来动态观察是否弹 Shell",
+                  "status": "warning",
+                  "verdictTitle": "算力与延迟完全不可接受，且会被 Sleepy Pickle 这类不弹 Shell 的内存篡改后门轻松逃逸",
+                  "feedback": "动态推理观察无法取代静态全量操作码白名单检查。"
+                }
+              ]
+            },
+            {
+              "name": "ZIP/归档异常处理与 Pickle 符号拦截准则",
+              "layer": "L4 门禁裁决 · Fail-Closed",
+              "context": "如何应对 CVE-2025-1945 CRC 篡改、NullifAI 7z 套壳及 STACK_GLOBAL 反射绕过？",
+              "options": [
+                {
+                  "label": "采用 Fail-Closed 畸形拦截 + 最小白名单（仅放行已知安全张量原语，遇未知 GLOBAL/STACK_GLOBAL 阻断）",
+                  "status": "optimal",
+                  "verdictTitle": "从机理上封堵解析差分、非标压缩包装及冷门反射链绕过",
+                  "feedback": "安全模型加载器所需的全局符号屈指可数，白名单收敛的精确度与抗绕过能力远高于黑名单。"
+                },
+                {
+                  "label": "沿用标准 Python zipfile 解析，遇到 BadZipFile 异常捕获后直接日志跳过并放行",
+                  "status": "critical",
+                  "verdictTitle": "典型的 Fail-Open 灾难！攻击者只需改坏 1 字节 CRC32 即可完美绕过整套防线",
+                  "feedback": "这正是早期 picklescan < 0.0.23 在实战中被反复绕过的根本原因。"
+                },
+                {
+                  "label": "仅靠正则匹配明文字符串 'os.system' 和 'subprocess'，放行所有其他符号",
+                  "status": "warning",
+                  "verdictTitle": "轻易被 STACK_GLOBAL、EXT1/2/4 扩展码与 builtins.exec 绕过",
+                  "feedback": "黑名单永远落后于攻击者的字节码拼接变形。"
+                }
+              ]
+            },
+            {
+              "name": "开源模型扫描底座引入与商业闭源许可边界",
+              "layer": "L1/SYS 合规选型",
+              "context": "团队评估引入 protectai/modelscan、mmaitre314/picklescan 与 trailofbits/fickling。",
+              "options": [
+                {
+                  "label": "Pure Go 自研流式白名单内核 + 借鉴 Apache-2.0 (modelscan) / MIT (picklescan) 规则；严格隔离 LGPL-3.0 的 fickling",
+                  "status": "optimal",
+                  "verdictTitle": "100% 守住商业闭源交付红线，同时拥有零依赖高性能原生二进制内核",
+                  "feedback": "绝不把 LGPL-3.0 的 fickling 混编进核心闭源二进制；只参考其研究结论或进程外隔离。"
+                },
+                {
+                  "label": "把 trailofbits/fickling 核心代码直接拷贝并静态打包进商业闭源后端产品发布",
+                  "status": "critical",
+                  "verdictTitle": "严重违反 LGPL-3.0 协议！可能被迫开放核心商业产品链接源码或提供重链接义务",
+                  "feedback": "fickling 采用 LGPL-3.0，商用闭源核心必须严守隔离边界。"
+                },
+                {
+                  "label": "完全忽略开源已披露的格式规则库，连 Safetensors 官方 100 MB 头部上限都不对齐",
+                  "status": "warning",
+                  "verdictTitle": "容易遗漏 Keras/ONNX 已知绕过锚点或遭受头部 OOM DoS",
+                  "feedback": "应充分吸收 Apache-2.0/MIT 社区已沉淀的跨格式规范。"
+                }
+              ]
+            },
+            {
+              "name": "Safetensors 仓库与伴生文件协同门禁设计",
+              "layer": "L1/L4 跨维联动",
+              "context": "上游提交了一个 model.safetensors 权重，但仓内同时存在 config.json、tokenizer_config.json 与 Python 推理脚本。",
+              "options": [
+                {
+                  "label": "校验 Safetensors 100MB/偏移不变量的同时，联动扫描同仓 auto_map、Jinja2 chat_template 及代码里 trust_remote_code",
+                  "status": "optimal",
+                  "verdictTitle": "彻底打通“权重层 + 配置文件层 + 推理代码调用层”的全仓库防御闭环",
+                  "feedback": "精准防住利用无毒 Safetensors 打掩护、实则靠 auto_map 或 CVE-2024-34359 SSTI 实施 RCE 的供应链攻击。"
+                },
+                {
+                  "label": "只要扫描发现仓库内是 .safetensors 后缀，立刻给整仓发全绿通行证并跳过其余文件",
+                  "status": "critical",
+                  "verdictTitle": "重度盲区！auto_map 与恶意 Jinja2 chat_template 依然能在推理节点执行任意代码",
+                  "feedback": "Safetensors 只保护张量文件自身不含字节码，不保护同目录配置文件。"
+                },
+                {
+                  "label": "只检查推理脚本有没有写 eval()，不检查 Safetensors 前 8 字节头长度与 data_offsets 合法性",
+                  "status": "warning",
+                  "verdictTitle": "可能被构造超长 Header JSON 或重叠偏移的畸形 Safetensors 触发内存崩溃",
+                  "feedback": "几十行 Go 代码即可实现 100 MB 上限与偏移连续性核验，切勿省略。"
+                }
+              ]
+            },
+            {
+              "name": "跨格式模型（Keras / ONNX）与 PyTorch 版本联合治理策略",
+              "layer": "L3/L4 统一阻断",
+              "context": "企业 AI 平台同时运行着 PyTorch 2.4 老集群、Keras 3 业务与 ONNX Runtime 边缘推理节点。",
+              "options": [
+                {
+                  "label": "将模型格式扫描与 Layer 3 软件漏洞关联：PyTorch<=2.5.1+Pickle 标红强升 >=2.6/转 Safetensors，同步封堵 Keras Lambda 与 ONNX external_data",
+                  "status": "optimal",
+                  "verdictTitle": "把“框架 CVE”与“模型制品载荷风险”在 Layer 2 IR 图上真正联合裁决",
+                  "feedback": "完美体现统一底座威力：比如识别到边缘节点仍用 onnx < 1.21.0 时，立即对 external_data 路径穿越实施最高优先级拦截。"
+                },
+                {
+                  "label": "只管 PyTorch 的 .pt 文件，对 .keras 中的 Lambda 层与 .onnx external_data 完全不做路径和结构审计",
+                  "status": "warning",
+                  "verdictTitle": "攻击者只需换用 Keras (CVE-2025-1550) 或 ONNX 路径穿越即可绕过全部防线",
+                  "feedback": "企业多框架异构环境必须统一纳入多格式静态剖析矩阵。"
+                },
+                {
+                  "label": "在企业文档里发一封“请大家自觉不要加载未知模型”的邮件，不在网关与 CI 做任何技术阻断",
+                  "status": "critical",
+                  "verdictTitle": "防线形同虚设，研发微调拉取 Hugging Face 社区模型几乎必定发生误加载",
+                  "feedback": "安全治理必须以 CI/制品库网关与本地 Hook/MCP 的自动化 Fail-Closed 为底线。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道实战题覆盖 <strong><code>CVE-2025-32434</code> 与 Pickle 绕过机理、<code>Safetensors</code> 头部规范与三大盲区、跨格式（Keras/ONNX/GGUF）攻击面、以及开源扫描器许可与白名单策略</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0018 · 模型序列化安全与恶意载荷扫描回忆测验",
+          "intro": "重点检验 Pickle VM 操作码绕过原理、Safetensors 安全边界、跨格式 CVE 机制及 LGPL-3.0 选型红线。",
+          "questions": [
+            {
+              "prompt": "为什么早期部分开源 Pickle 扫描器（如 picklescan < 0.0.23）会被攻击者通过篡改 PyTorch .pt 文件的 ZIP CRC32 值轻松绕过，同时 Sleepy Pickle 又能逃逸传统黑名单检测？",
+              "options": [
+                "因为损坏校验和会迫使虚拟机自动跳过字节流读取并默认重编码为安全的静态张量数据。",
+                "因为标准解压库在面对非零填充位时会直接截断尾部所有函数名导致黑名单匹配彻底失效。",
+                "因为校验错误导致扫描器异常跳过放行，而动态栈指令或反射加载可绕开静态黑名单约束。",
+                "因为加载器在解析压缩包时只允许执行前四个全局符号并自动忽略后续注入的恶意载荷。"
+              ],
+              "answerIndex": 2,
+              "explanation": "ZIP CRC 篡改（如 CVE-2025-1945 / CVE-2025-10156）利用了解析差分：Python 标准 zipfile 抛异常后，Fail-Open 扫描器异常跳过放行，而 PyTorch 加载器仍宽容解包执行；同时 Sleepy Pickle 等技巧利用 STACK_GLOBAL 或冷门反射在内存改写模型逻辑，避开 os.system 等静态黑名单（C 正确）。"
+            },
+            {
+              "prompt": "关于 PyTorch 模型加载安全参数 weights_only=True 与 CVE-2025-32434 的架构认知，以下哪项表述完全准确？",
+              "options": [
+                "旧版本因遗留加载路径校验缺口仍可触发代码执行，官方自二点六版起默认开启限制并修补。",
+                "只要在任何历史版本中显式传入了禁用任意反序列化标志，底层就绝对无法执行外部代码。",
+                "该高危漏洞仅影响从本地磁盘读取的非压缩文本模型，完全不会影响常见的压缩格式权重。",
+                "新版本为了全面兼容历史社区所有自定义网络结构，已经将安全加载开关默认设为关闭状态。"
+              ],
+              "answerIndex": 0,
+              "explanation": "CVE-2025-32434（CVSS 9.3）影响 PyTorch <= 2.5.1：因现代 ZIP 路径与 _legacy_load 路径对受限反序列化器校验不一致，即使显式传 weights_only=True 仍可 RCE。PyTorch 2.6.0 修复了该差异，并将 weights_only 默认值改为 True（A 正确）。"
+            },
+            {
+              "prompt": "某团队把全部基座权重迁移为 .safetensors 格式后，就将整套 AI 仓库标为“零代码执行风险”并直接上线。这种做法忽略了哪项真实安全边界？",
+              "options": [
+                "该张量格式内部仍然支持内嵌微型脚本字节码指令，用于在推理前动态初始化权重矩阵。",
+                "该张量格式缺少任何头部大小上限保护，正常合法的模型文件超过百兆就会拒绝加载。",
+                "只检查单文件字节数即可自动清洗神经网络内部隐蔽后门，无需关心其余任何配置文件。",
+                "同仓配置仍可借自动映射开关拉起外部脚本，或借助聊天模板注入触发模板代码执行。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Safetensors（MAX_HEADER_SIZE = 100,000,000 字节）确实消除了权重文件自身的字节码 VM，但防不住：1) 权重自身的后门触发器；2) config.json 的 auto_map + trust_remote_code=True；3) tokenizer_config.json 或 GGUF 的 Jinja2 chat_template SSTI（如 CVE-2024-34359）（D 正确）。"
+            },
+            {
+              "prompt": "在为商业闭源 SCA 平台构建多格式模型载荷扫描内核时，以下哪项选型与跨格式治理决策严格符合工程与许可合规红线？",
+              "options": [
+                "直接将弱传染解析库静态混编进商业闭源后端进程，同时全面放行外部数据相对路径。",
+                "自研纯静默流式白名单引擎并审计多格式路径与层定义，同时将受限库隔离在内核外。",
+                "在扫描集群内直接运行反序列化接口试跑每个模型，捕获到报错后再决定是否阻断上线。",
+                "只扫描普通后缀的压缩权重包，对采用自定义层配置的模型以及外部路径不做任何检查。"
+              ],
+              "answerIndex": 1,
+              "explanation": "trailofbits/fickling 采用 LGPL-3.0 协议，严禁直接静态混编进商业闭源内核；商用首选 Pure Go 零执行流式白名单 + Fail-Closed 解析，参考 Apache-2.0 (modelscan / safetensors) 与 MIT (picklescan) 规范，并同步封堵 Keras Lambda（CVE-2025-1550）与 ONNX external_data 路径穿越（CVE-2025-51480）（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地零执行模型载荷扫描内核、Fail-Closed 解析与格式迁移门禁时，推荐精读以下官方规范与安全研究：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://docs.python.org/3/library/pickletools.html" target="_blank" rel="noopener"><strong>Python <code>pickletools</code> 官方文档</strong></a> &amp; <a href="https://docs.pytorch.org/docs/stable/notes/serialization.html" target="_blank" rel="noopener"><strong>PyTorch Serialization Notes (2.6+ <code>weights_only=True</code>)</strong></a>：操作码标准定义与 <code>add_safe_globals()</code> 白名单机制。</li>
+          <li><a href="https://github.com/huggingface/safetensors" target="_blank" rel="noopener"><strong><code>huggingface/safetensors</code> (<code>Apache-2.0</code>)</strong></a> &amp; <a href="https://huggingface.co/docs/hub/security-pickle" target="_blank" rel="noopener"><strong>Hugging Face Pickle Security Docs</strong></a>：<code>MAX_HEADER_SIZE=100MB</code> 规范、连续偏移不变量与生态安全基线。</li>
+          <li><a href="https://github.com/protectai/modelscan" target="_blank" rel="noopener"><strong><code>protectai/modelscan</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/mmaitre314/picklescan" target="_blank" rel="noopener"><strong><code>mmaitre314/picklescan</code> (<code>MIT</code>)</strong></a> · <a href="https://github.com/trailofbits/fickling" target="_blank" rel="noopener"><strong><code>trailofbits/fickling</code> (<code>LGPL-3.0</code> 边界参照)</strong></a> · <a href="https://blog.trailofbits.com/2024/06/11/exploiting-ml-models-with-pickle-file-attacks-part-1/" target="_blank" rel="noopener"><strong>Trail of Bits <em>Sleepy Pickle</em> 研究</strong></a> · <a href="https://github.com/sigstore/model-transparency" target="_blank" rel="noopener"><strong><code>sigstore/model-transparency</code> (<code>Apache-2.0</code>)</strong></a>。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>搞定“代码依赖 + 同源二进制 + AI-BOM + 模型载荷扫描”后，AI 时代的最后一块高危拼图就在眼前的<strong>智能体自身</strong>：当研发电脑和生产环境装上了几十个第三方 <code>MCP Server</code> 与 <code>Agent Skills</code>，工具描述投毒、跨工具窃取凭证与隐形提权该如何纳入 SCA 统一治理？随时在对话中追问或开启下节：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在企业的 Harbor / Artifactory 私有模型网关中，如果历史业务模型暂时离不开 <code>.pt</code>，该如何设计一套自动转换 <code>.safetensors</code> + 兜底白名单扫描的平滑迁移流？”</li>
+          <li>“ONNX 的 <code>external_data</code> 路径穿越和 Keras 3 的 <code>safe_mode</code> 绕过，在 Pure Go 里只读 Protobuf 和 ZIP JSON 需要解析哪些关键字段？”</li>
+          <li>“准备好了！请为我开启 <strong>Lesson 0019（Agentic AI 与 MCP 服务器供应链治理：OWASP ASI04）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0017-aibom-modeling-models-datasets-and-lineage.html">&larr; 上一课：Lesson 0017 · AI-BOM 统一建模</a>
+      <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">配套速查卡：Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Lesson 0019（Agentic AI 与 MCP 治理） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/model-serialization-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
