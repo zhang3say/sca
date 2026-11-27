@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0017：AI-BOM 统一建模：模型权重、数据集与推理框架血缘</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0016-snippet-fingerprinting-and-binary-sca.html">Lesson 0016 · 代码同源与二进制 SCA</a>
+        <a href="./0017-aibom-modeling-models-datasets-and-lineage.html" class="active">Lesson 0017 · AI-BOM 统一建模</a>
+        <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+        <a href="../reference/layer4-reachability-and-remediation-matrix.html">Ref 05 · L4 可达与修复矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0017</span>
+        <span class="sep">/</span>
+        <span>PHASE 2 · CH 05 AI 供应链三部曲首课（OWASP LLM03:2025）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>AI-BOM 统一建模：模型权重、数据集与推理框架血缘</h1>
+      <p class="subtitle">从本课起我们正式切入 <strong>AI 时代软件供应链安全（Lessons 0017–0019）</strong>。在传统业务应用中，风险几乎全部落在代码包与基础镜像里；但在大模型与智能体系统中，一个看似全部依赖 <code>Apache-2.0</code>/<code>MIT</code> Python 库的服务，可能因为拉取了 <code>@main</code> 可变分支的模型权重、合并了继承自 Llama 3 的第三方 LoRA 适配器，或者在训练链路混入了 <code>CC-BY-NC-4.0</code> 数据集而直接触发商业禁令与 <strong>OWASP LLM03:2025</strong> 供应链灾难。本课带你把 AI-BOM 无缝融进现有的 Layer 2 统一 IR 图谱，并吃透 CycloneDX 1.7 ML-BOM 与 SPDX 3.0.1 AI/Dataset Profiles 双标准投影。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握 <code>pkg:huggingface</code> (ECMA-427) 大小写与不可变 SHA 规范；吃透 CycloneDX 1.7 <code>modelCard</code> vs SPDX 3.0.1 <code>ai_AIPackage</code>/<code>trainedOn</code> 双向映射；落地“不加载权重”的只读头采集（PEFT / GGUF / Safetensors / CNCF ModelPack）；看清 Llama 3、OpenRAIL-M 与 EU AI Act Art. 53 合规门禁</span>
+        <span><strong>先修底座：</strong><a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0010-oss-license-compliance-and-copyleft-reasoning.html">Lesson 0010</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">架构师核心命题（对齐你的 MISSION.md）</div>
+      <p>我们早在 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> 就拍板过：<strong>AI-BOM 绝不能另起一套孤立的“模型台账系统”</strong>，而必须作为原生节点与血缘边直接长在 Layer 2 统一图谱（IR）之上！只有当「推理容器镜像 &rarr; Python <code>vllm</code>/<code>torch</code> 依赖 CVE &rarr; 基座模型权重 SHA &rarr; LoRA 适配器继承链 &rarr; <code>trainedOn</code> 数据集许可」处于同一张图里时，你的 SCA 平台才能一次性回答 CISO 与法务的终极追问：“上线这个 AI 服务究竟有哪些代码 CVE、哪些权重要求、以及是否违反非商用数据条款？”</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>为什么传统代码 SBOM 对 AI 应用失明？—— OWASP LLM03:2025 与四维血缘</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 AI 应用的真实 BOM 半径：从代码包延伸到权重、适配器与语料</h3>
+      <p>按照 <a href="https://genai.owasp.org/" target="_blank" rel="noopener"><strong>OWASP Top 10 for LLM Applications（<code>LLM03:2025 Supply Chain</code>）</strong></a>，生成式 AI 的供应链攻击面已经突破传统第三方库，扩展为相互耦合的四维资产图谱：</p>
+      <ul>
+        <li><strong>① 基座模型（Base Model）：</strong>如 <code>Qwen/Qwen2.5-7B-Instruct</code> 或 <code>meta-llama/Llama-3.1-8B-Instruct</code>，体积达数 GB 至数百 GB，承载核心架构与基础许可约束。</li>
+        <li><strong>② 参数高效微调适配器（PEFT / LoRA Adapter）：</strong>体积仅几十 MB，通过低秩矩阵叠加或合并进基座模型——它既可能悄无声息地破坏安全对齐（Alignment），又会在许可层面强制继承基座条款。</li>
+        <li><strong>③ 训练、微调与评测数据集（Datasets）：</strong>决定模型能力边界、潜在投毒/偏见以及商业版权清洗义务（如 <code>CC-BY-NC-4.0</code> 非商用或版权 TDM 保留）。</li>
+        <li><strong>④ 推理引擎与序列化运行时：</strong>如 PyTorch、vLLM、ONNX Runtime、<code>llama.cpp</code> 等传统软件栈（对应我们 Phase 1 已覆盖的 Python/C++ CVE 与依赖图）。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">ECMA-427 <code>pkg:huggingface</code> 极易踩错的大小写规范</span>
+        在 <a href="https://github.com/package-url/purl-spec" target="_blank" rel="noopener"><code>package-url/purl-spec</code>（ECMA-427）</a> 中，Hugging Face 模型与数据集使用 <code>pkg:huggingface/&lt;namespace&gt;/&lt;name&gt;@&lt;version&gt;</code>：<br/>
+        • <code>namespace</code> 与 <code>name</code> <strong>严格区分大小写</strong>（如 <code>Qwen/Qwen2.5-7B-Instruct</code> 不可强行小写）；<br/>
+        • <code>version</code> 为 Git Commit Hash 时<strong>必须统一转为小写</strong>，私有镜像站通过 <code>?repository_url=...</code> 表达；<br/>
+        • <strong>安全铁律</strong>：生产 AI-BOM 严禁使用可变分支名（如 <code>@main</code>），必须强制钉死 40 位十六进制 Commit SHA！
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>1.2 在 Lesson 0002 Layer 2 统一 IR 上扩展 AI-BOM 节点与血缘边</h3>
+      <p>延续 Lesson 0002 的 PostgreSQL / 图谱设计，Layer 2 IR 只需引入三类 AI 一等实体与四条有向关系边即可实现与传统软件依赖图完全同构的查询与合规推理：</p>
+      <ul>
+        <li><strong>扩展节点类型（<code>component_type</code>）：</strong><code>MODEL_WEIGHT</code>（基座或合并权重）、<code>PEFT_ADAPTER</code>（LoRA/QLoRA 适配器）、<code>DATASET</code>（训练/验证数据集），统一通过 PURL（如 <code>pkg:huggingface/...</code>）+ 内容 SHA256 双层标识去重。</li>
+        <li><strong>扩展有向血缘边（<code>edge_type</code>）：</strong><code>ADAPTS</code>（适配器指向基座模型）、<code>DERIVED_FROM</code>（微调/量化 GGUF 模型溯源）、<code>TRAINED_ON</code> / <code>TESTED_ON</code>（模型或微调任务指向数据集）、<code>SERVED_BY</code>（AI 模型关联推理容器与 <code>vllm</code>/<code>torch</code> 运行库）。</li>
+      </ul>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>双国际标准深度对标：CycloneDX 1.7 ML-BOM vs SPDX 3.0.1 Profiles</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 工程视角看清两大标准的结构差异与双向投影规则</h3>
+      <p>与软件 SBOM 领域相同，商业 SCA 平台必须坚持<strong>“内部 Layer 2 IR 主权 + 对外同时无损导出 CycloneDX 1.7 与 SPDX 3.0.1”</strong>。但两大标准对 AI 资产的抽象方式差异显著，绝不能混淆字段位置：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">CycloneDX 1.7 Schema 强制约束</span>
+        在官方 <a href="https://cyclonedx.org/schema/bom-1.7.schema.json" target="_blank" rel="noopener"><code>bom-1.7.schema.json</code></a> 中，<code>modelCard</code> 对象<strong>仅当组件 <code>type</code> 为 <code>"machine-learning-model"</code> 时才允许出现（MUST NOT 用于普通软件库或硬件组件）</strong>。数据集则必须建模为独立的 <code>type: "data"</code> 组件（携带 <code>data</code> 数组），再由 <code>modelCard.modelParameters.datasets</code> 通过 <code>bom-ref</code> 指向它。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:40%" />
+          <col style="width:40%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>建模维度</th>
+            <th><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener">CycloneDX 1.7 ML-BOM</a>（ECMA-424）</th>
+            <th><a href="https://spdx.github.io/spdx-spec/v3.0.1/" target="_blank" rel="noopener">SPDX 3.0.1 AI &amp; Dataset Profiles</a></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>底层图结构范式</strong></td>
+            <td>组件中心树 + <code>dependencies[]</code> 引用；模型资产内嵌完整 <code>modelCard</code> 元数据块。</td>
+            <td>扁平 JSON-LD <code>@graph</code> 图模型；元素与关系完全解耦，所有关联由一等公民 <code>Core_Relationship</code> 节点表达。</td>
+          </tr>
+          <tr>
+            <td><strong>AI 模型核心对象</strong></td>
+            <td><code>components[].type = "machine-learning-model"</code> + <code>modelCard.modelParameters</code>（<code>approach.type</code> / <code>task</code> / <code>architectureFamily</code> / <code>modelArchitecture</code>）。</td>
+            <td><code>ai_AIPackage</code>（<code>/AI/AIPackage</code> 类），原生包含 <code>ai_autonomyType</code>、<code>ai_domain</code>、<code>ai_energyConsumption</code>、<code>ai_limitation</code> 等字段。</td>
+          </tr>
+          <tr>
+            <td><strong>数据集核心对象</strong></td>
+            <td><code>components[].type = "data"</code> + <code>data[]</code>（定义类型、内容描述、治理与清洗属性）。</td>
+            <td><code>dataset_DatasetPackage</code>（<code>/Dataset/DatasetPackage</code>），含 <code>datasetType</code>、<code>dataCollectionProcess</code>、<code>dataPreprocessing</code>、<code>knownBias</code>、<code>anonymizationMethodUsed</code>。</td>
+          </tr>
+          <tr>
+            <td><strong>训练 / 评测血缘表达</strong></td>
+            <td><code>modelCard.modelParameters.datasets[]</code> 引用数据集 <code>bom-ref</code>，并在 <code>dependencies</code> 表达图依赖；<code>quantitativeAnalysis</code> 记录评估指标。</td>
+            <td>严格使用独立 <code>Core_Relationship</code> 节点，<code>relationshipType</code> 规定必须采用精确词表 <strong><code>trainedOn</code></strong> 或 <strong><code>testedOn</code></strong>。</td>
+          </tr>
+          <tr>
+            <td><strong>商业平台主攻定位</strong></td>
+            <td><strong>工程安全与 DevSecOps 交付首选</strong>：天然集成 VEX、<code>citations</code> 溯源与 <code>cdxgen</code>（<code>Apache-2.0</code>）生态。</td>
+            <td><strong>跨国合规、欧盟 AI 法案审计与法务交付首选</strong>：数据集偏见/脱敏元数据与精确有向关系粒度最细。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 只读无加载 AI-BOM 采集、Layer 2 统一图谱扩展与双标准合规闭环架构</strong>
+        <span>只读文件头元数据（禁运行态反序列化）&rarr; Layer 2 统一血缘图谱 &rarr; CycloneDX 1.7 / SPDX 3.0.1 无损投影 &amp; 模型许可门禁</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">Layer 1 只读无加载采集器（Zero-Execution AI Metadata Extractors）</span>
+            <span class="orch-stage-kicker">PEFT adapter_config.json · GGUF Header · Safetensors Header · CNCF ModelPack / Kitfile</span>
+          </div>
+          <p class="orch-stage-desc">
+            仅以静态二进制只读偏移量与 JSON/YAML 解析提取模型架构、LoRA 基座指向、许可证与内容 SHA256；<strong>严禁执行 <code>torch.load()</code> 等反序列化动作</strong>（防范 Lesson 0018 Pickle RCE 投毒）。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 归一化为 pkg:huggingface (ECMA-427) + SHA256 并注入血缘边 &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Layer 2 统一图谱扩展（Unified IR Graph）</span>
+              <span class="badge badge-blue">图谱同构</span>
+            </div>
+            <ul>
+              <li><strong>AI 节点 + 代码节点共存：</strong>同一张图内串联容器 OS、Python <code>vllm</code>/<code>torch</code> CVE、基座模型、LoRA 适配器与数据集。</li>
+              <li><strong>血缘递归解析：</strong>沿 <code>ADAPTS</code> / <code>DERIVED_FROM</code> / <code>TRAINED_ON</code> 边向上穿透全部祖先基座与训练语料。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">Layer 3/4 非 OSI 许可门禁与双标准投影</span>
+              <span class="badge badge-warn">EU AI Act · 非 OSI 阻断</span>
+            </div>
+            <ul>
+              <li><strong>非 OSI 与数据传染检查：</strong>拦截 <code>CC-BY-NC</code> 数据集污染、强制继承 Llama 3（700M MAU / <code>"Built with Llama"</code>）与 OpenRAIL 领域禁令。</li>
+              <li><strong>双标准导出 + 法规摘要：</strong>无损投影 CycloneDX 1.7 ML-BOM 与 SPDX 3.0.1 JSON-LD，校验 EU AI Act Art. 53(1)(d) 训练数据摘要。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>无加载元数据采集、非 OSI 许可治理与 Go 核心原语</h2>
+
+    <div class="prose-col">
+      <h3>3.1 毫秒级“不加载权重”采集锚点与 OCI ModelPack 生态</h3>
+      <p>在现代 ML 工程仓库与推理镜像中，模型文件动辄几十 GB。优秀的 Layer 1 AI-BOM 采集器绝不能把整块权重塞进显存或调用 <code>pickle.load()</code>，而应精准读取以下 5 类轻量元数据头与 OCI 制品清单：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:22%" />
+          <col style="width:26%" />
+          <col style="width:26%" />
+          <col style="width:26%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>AI 制品形态</th>
+            <th>精确文件 / 字节头锚点</th>
+            <th>提取的核心血缘与配置字段</th>
+            <th>工具底座与许可边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Hugging Face 模型仓</strong></td>
+            <td><code>config.json</code> &amp; <code>README.md</code> YAML Frontmatter</td>
+            <td><code>architectures</code>（如 <code>LlamaForCausalLM</code>）、<code>model_type</code>、<code>license</code>、<code>datasets[]</code>、<code>base_model[]</code>。</td>
+            <td>纯 HTTP/Git 树只读拉取（对齐 <code>pkg:huggingface</code> ECMA-427）。</td>
+          </tr>
+          <tr>
+            <td><strong>PEFT / LoRA 适配器</strong></td>
+            <td><code>adapter_config.json</code></td>
+            <td><code>base_model_name_or_path</code>（基座溯源锚点）、<code>peft_type</code>、<code>r</code>、<code>lora_alpha</code>、<code>target_modules</code>。</td>
+            <td>纯 JSON 解析，无条件触发向基座模型许可的继承追溯。</td>
+          </tr>
+          <tr>
+            <td><strong>GGUF 本地量化权重</strong></td>
+            <td>二进制文件魔数 <code>GGUF</code> 后的 KV 元数据头</td>
+            <td><code>general.architecture</code>、<code>general.name</code>、<code>general.license</code>、<code>general.quantization_version</code>。</td>
+            <td>流式只读前几十 KB Header 即可（参考 <a href="https://github.com/ggml-org/ggml" target="_blank" rel="noopener"><code>ggml</code></a> 规范）。</td>
+          </tr>
+          <tr>
+            <td><strong>Safetensors 权重</strong></td>
+            <td>前 8 字节 uint64 长度 + UTF-8 JSON Header</td>
+            <td><code>__metadata__</code>（含微调来源、训练框架标签与张量 dtype/shape 校验）。</td>
+            <td>零代码执行、只读 Header JSON 即可，无需映射全量张量体。</td>
+          </tr>
+          <tr>
+            <td><strong>OCI 模型制品包</strong></td>
+            <td><a href="https://github.com/modelpack/model-spec" target="_blank" rel="noopener">CNCF ModelPack</a> / <a href="https://github.com/kitops-ml/kitops" target="_blank" rel="noopener">KitOps</a> <code>Kitfile</code></td>
+            <td>OCI Manifest Annotations 与 <code>model</code> / <code>datasets</code> / <code>code</code> / <code>prompts</code> 分层声明与内容 Digest。</td>
+            <td><span class="badge badge-ok">Apache-2.0</span>（<code>modelpack/model-spec</code> 与 <code>kitops-ml/kitops</code> 均纯宽松商用）。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.2 Go 核心原语：LoRA 继承追溯、不可变 SHA 强制门禁与 EU AI Act 合规</h3>
+      <p>不同于普通软件库在 SPDX 3.0.1 中的标准 OSI 开源协议，大量主流大模型采用<strong>自定义非 OSI 社区协议（如 Llama 3 Community License、OpenRAIL-M）</strong>，且受 <strong>EU AI Act Article 53(1)(d)</strong>（已于 <strong>2025 年 8 月 2 日</strong>正式生效，要求进入欧盟市场的 GPAI 模型公开充分的训练数据摘要并披露版权 TDM 退出政策）等监管硬约束。下面用 Pure Go 原语展示如何在 Layer 2/3 内核实现血缘传递与合规门禁：</p>
+      <aside class="sidenote">
+        <span class="sidenote-title">必须盯紧的 Llama 3.1 商业红线 3 条款</span>
+        哪怕下游 LoRA 仓库自己写着 <code>MIT</code>，只要基座为 <code>Llama-3.1</code>，就必须受以下 3 条硬约束：<br/>
+        1. <strong>700M MAU 上限</strong>：月活超 7 亿须向 Meta 另签商业授权；<br/>
+        2. <strong>UI 显著署名</strong>：界面/文档必标 <code>"Built with Llama"</code>；<br/>
+        3. <strong>命名与禁训竞品</strong>：衍生模型名须以 <code>"Llama"</code> 开头，且严禁用其输出去训练其他大模型！
+      </aside>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>Go 核心原语：AI-BOM 血缘递归许可继承、SHA 锁定检查与非商用数据集门禁</strong>
+        <span>Pure Go 自研 Layer 2/3 AI 合规推理内核（无缝对接 CycloneDX 1.7 / SPDX 3.0.1）</span>
+      </div>
+      <pre><code><span class="tok-kw">type</span> AIAssetKind <span class="tok-kw">string</span>
+<span class="tok-kw">const</span> (
+    KindBaseModel AIAssetKind = <span class="tok-str">"MODEL_WEIGHT"</span>
+    KindAdapter   AIAssetKind = <span class="tok-str">"PEFT_ADAPTER"</span>
+    KindDataset   AIAssetKind = <span class="tok-str">"DATASET"</span>
+)
+
+<span class="tok-kw">type</span> AIAssetNode <span class="tok-kw">struct</span> {
+    PURL              <span class="tok-kw">string</span>      <span class="tok-cmt">// pkg:huggingface/&lt;ns&gt;/&lt;name&gt;@&lt;40-hex-sha&gt;</span>
+    Kind              AIAssetKind
+    DeclaredLicense   <span class="tok-kw">string</span>      <span class="tok-cmt">// 例如 "Apache-2.0", "Llama-3.1", "OpenRAIL-M", "CC-BY-NC-4.0"</span>
+    BaseModelRef      <span class="tok-kw">string</span>      <span class="tok-cmt">// 来自 PEFT adapter_config.json 的 base_model_name_or_path</span>
+    TrainedOnDatasets []<span class="tok-kw">string</span>    <span class="tok-cmt">// 对应 SPDX 3.0.1 trainedOn 血缘列表</span>
+    HasEUArt53Summary <span class="tok-kw">bool</span>        <span class="tok-cmt">// EU AI Act Art. 53(1)(d) 训练数据摘要完备性</span>
+}
+
+<span class="tok-kw">var</span> hexSha40Re = regexp.MustCompile(<span class="tok-str">`@[0-9a-f]{40}(\?|$)`</span>)
+
+<span class="tok-kw">func</span> EvaluateAICompliance(nodeID <span class="tok-kw">string</span>, graph <span class="tok-kw">map</span>[<span class="tok-kw">string</span>]AIAssetNode, mauMillion <span class="tok-kw">int</span>, targetEU <span class="tok-kw">bool</span>) (allowed <span class="tok-kw">bool</span>, obligations []<span class="tok-kw">string</span>, blockers []<span class="tok-kw">string</span>) {
+    visited := <span class="tok-kw">make</span>(<span class="tok-kw">map</span>[<span class="tok-kw">string</span>]<span class="tok-kw">bool</span>)
+    <span class="tok-kw">var</span> walk <span class="tok-kw">func</span>(id <span class="tok-kw">string</span>)
+    walk = <span class="tok-kw">func</span>(id <span class="tok-kw">string</span>) {
+        <span class="tok-kw">if</span> visited[id] { <span class="tok-kw">return</span> }
+        visited[id] = <span class="tok-kw">true</span>
+        n, ok := graph[id]
+        <span class="tok-kw">if</span> !ok { <span class="tok-kw">return</span> }
+
+        <span class="tok-cmt">// 1. 强制不可变 SHA 钉死（禁止 @main 等可变分支名）</span>
+        <span class="tok-kw">if</span> strings.HasPrefix(n.PURL, <span class="tok-str">"pkg:huggingface/"</span>) &amp;&amp; !hexSha40Re.MatchString(n.PURL) {
+            blockers = <span class="tok-kw">append</span>(blockers, <span class="tok-str">"mutable_ref_forbidden:"</span>+n.PURL)
+        }
+
+        <span class="tok-cmt">// 2. 非 OSI 许可与数据集传染校验（无论适配器自己宣称 MIT 还是 Apache-2.0，均须沿血缘叠加）</span>
+        <span class="tok-kw">switch</span> n.DeclaredLicense {
+        <span class="tok-kw">case</span> <span class="tok-str">"CC-BY-NC-4.0"</span>:
+            blockers = <span class="tok-kw">append</span>(blockers, <span class="tok-str">"non_commercial_taint:"</span>+n.PURL)
+        <span class="tok-kw">case</span> <span class="tok-str">"Llama-3.1"</span>:
+            <span class="tok-kw">if</span> mauMillion &gt; <span class="tok-num">700</span> {
+                blockers = <span class="tok-kw">append</span>(blockers, <span class="tok-str">"llama_700m_mau_exceeded:"</span>+n.PURL)
+            }
+            obligations = <span class="tok-kw">append</span>(obligations, <span class="tok-str">"UI/文档必标 Built with Llama 且衍生命名须以 Llama 开头"</span>)
+        <span class="tok-kw">case</span> <span class="tok-str">"OpenRAIL-M"</span>:
+            obligations = <span class="tok-kw">append</span>(obligations, <span class="tok-str">"受 OpenRAIL 使用领域限制条款约束，须人工审批上线场景"</span>)
+        }
+
+        <span class="tok-kw">if</span> targetEU &amp;&amp; n.Kind == KindBaseModel &amp;&amp; !n.HasEUArt53Summary {
+            blockers = <span class="tok-kw">append</span>(blockers, <span class="tok-str">"missing_eu_ai_act_art53_training_summary:"</span>+n.PURL)
+        }
+
+        <span class="tok-cmt">// 3. 沿适配器基座与 trainedOn 数据集递归向上回溯</span>
+        <span class="tok-kw">if</span> n.BaseModelRef != <span class="tok-str">""</span> { walk(n.BaseModelRef) }
+        <span class="tok-kw">for</span> _, ds := <span class="tok-kw">range</span> n.TrainedOnDatasets { walk(ds) }
+    }
+    walk(nodeID)
+    <span class="tok-kw">return</span> <span class="tok-kw">len</span>(blockers) == <span class="tok-num">0</span>, obligations, blockers
+}</code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与架构师实战沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中切换四大实战场景（Qwen2.5 纯宽松栈、Llama 3.1 + LoRA 隐性继承、<code>CC-BY-NC-4.0</code> 数据集污染、<code>@main</code> 可变引用漂移 + OpenRAIL 禁令），实时对比 CycloneDX 1.7 ML-BOM 与 SPDX 3.0.1 JSON-LD 导出视图，并测试关闭血缘追溯开关后的漏报后果；在<strong>模式二</strong>中编辑 <code>pkg:huggingface</code> 坐标并体验大小写归一化与 Llama / EU AI Act Art. 53 履约清单生成。</p>
+    </div>
+
+    <!-- INTERACTIVE AIBOM LINEAGE LAB -->
+    <section class="widget-panel full-width" data-widget="aibom-lineage-lab">
+      <script type="application/json" class="aibom-lineage-lab-data">
+        {
+          "title": "交互实验台：AI-BOM 血缘图谱投影与非 OSI 模型合规模拟",
+          "intro": "验证基座模型、LoRA 适配器与 trainedOn 数据集的许可传递逻辑，并实时校验 ECMA-427 pkg:huggingface 规范。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "Layer 1/2/3 AI-BOM 统一建模架构评审沙盘（5 项核心拍板决策）",
+          "intro": "设定：你正在为商业闭源 SCA 平台扩展 AI-BOM 模块，使客户能够在一个平台里统筹大模型权重、微调适配器、数据集、推理引擎 CVE 与商业合规审计。",
+          "summary": {
+            "optimal": "全部 {optimal} 项决策完美对齐现代 AI-BOM 架构最佳实践！模型、适配器、数据集与推理引擎已无缝融合进统一 Layer 2 IR，并具备 CycloneDX 1.7 与 SPDX 3.0.1 双向投影及法规门禁。",
+            "warning": "方案基本可行，但在 {warning} 项上存在双标准映射断裂、只读安全性或非 OSI 继承盲区（标黄项），建议按递归血缘与不可变 SHA 进一步收口。",
+            "critical": "当前方案踩中 {critical} 处致命隐患（标红项）：可能放任 @main 权重静默篡改、在扫描阶段触发权重反序列化执行、或遗漏 CC-BY-NC / Llama 商业违约！"
+          },
+          "modules": [
+            {
+              "name": "AI-BOM 与现有软件依赖图谱的数据底座关系",
+              "layer": "Layer 2 IR · 图谱主权",
+              "context": "团队讨论是直接扩充现有的 Layer 2 统一 IR 图谱，还是给 AI 资产另建一套完全独立的表与前端产品。",
+              "options": [
+                {
+                  "label": "直接扩展 Layer 2 IR 节点（MODEL_WEIGHT / PEFT_ADAPTER / DATASET）与血缘边，共享图检索与合规引擎",
+                  "status": "optimal",
+                  "verdictTitle": "一次查清推理框架 CVE + 模型许可 + 数据集血缘，避免孤岛与数据割裂",
+                  "feedback": "Aligns with Lesson 0002 IR sovereignty: 当 vllm 爆出 CVE 或某数据集违法时，一条图查询直达受影响业务服务。"
+                },
+                {
+                  "label": "另起一套完全独立、与软件 SBOM 毫无外键关联的 Excel/文档式静态模型台账",
+                  "status": "warning",
+                  "verdictTitle": "形成数据孤岛，无法把底层 PyTorch/vLLM 漏洞、容器镜像与上层模型血缘关联溯源",
+                  "feedback": "用户真正需要的是端到端 AI 服务视图，而非孤立的模型花名册。"
+                },
+                {
+                  "label": "把模型权重直接套用传统 Python pypi PURL（如 pkg:pypi/llama-3）强行塞入软件表",
+                  "status": "critical",
+                  "verdictTitle": "彻底破坏 PURL 标准语义与版本解析，引发全链路版本与漏洞匹配错乱",
+                  "feedback": "ECMA-427 已专设 pkg:huggingface 等 AI 坐标体系，不可张冠李戴。"
+                }
+              ]
+            },
+            {
+              "name": "Hugging Face 模型坐标规范与版本钉死策略",
+              "layer": "L1/L2 规范 · 防权重掉包",
+              "context": "研发代码常写 from_pretrained('Qwen/Qwen2.5-7B-Instruct') 且省略 revision 或传 'main'。",
+              "options": [
+                {
+                  "label": "按 ECMA-427 保持 namespace/name 区分大小写、SHA 转小写，并强制门禁将 @main 钉死为 40 位 Commit SHA",
+                  "status": "optimal",
+                  "verdictTitle": "杜绝上游权重静默替换攻击（OWASP LLM03），同时保证跨系统 PURL 100% 一致",
+                  "feedback": "遵循 ECMA-427 pkg:huggingface 大小写与小写 commit hash 规范，彻底消除可变标签漂移。"
+                },
+                {
+                  "label": "把全部 PURL 字符一股脑全部强制转成小写，并允许生产环境直接写 @main 浮动拉取",
+                  "status": "critical",
+                  "verdictTitle": "破坏大小写敏感仓库定位，且一旦上游账户被黑即可被静默注入恶意/篡改权重",
+                  "feedback": "可变分支引用是供应链防篡改大忌，生产模型必须锁定不可变 Commit Hash 或文件 SHA256。"
+                },
+                {
+                  "label": "只记录模型本地保存文件名（如 model.safetensors），不记录任何远程来源与 Commit Hash",
+                  "status": "warning",
+                  "verdictTitle": "完全丢失上游版本血缘，无法追查发布者与后续安全公告",
+                  "feedback": "缺少来源坐标会导致无法关联安全漏洞通告或许可更新。"
+                }
+              ]
+            },
+            {
+              "name": "AI-BOM 国际双标准输出与无损映射策略",
+              "layer": "L2 投影 · 标准互通",
+              "context": "客户既有使用 CycloneDX 工具链的 DevSecOps 团队，也有面向欧洲监管审计的法务团队。",
+              "options": [
+                {
+                  "label": "基于统一 IR 双向投影：支持 CycloneDX 1.7 ML-BOM (modelCard+data) 与 SPDX 3.0.1 JSON-LD (trainedOn/testedOn)",
+                  "status": "optimal",
+                  "verdictTitle": "无缝打通工程安全工具链（cdxgen Apache-2.0）与监管合规审计生态",
+                  "feedback": "内部一份完整血缘图谱，按场景按需无损导出两大国际标准。"
+                },
+                {
+                  "label": "把 modelCard 字段直接硬塞进 type='application' 或 ordinary library 的 CycloneDX 组件里",
+                  "status": "warning",
+                  "verdictTitle": "违反 CycloneDX 1.7 Schema 规范（modelCard 仅限 machine-learning-model 类型），导致下游校验失败",
+                  "feedback": "官方 Schema 严格限定了 modelCard 与 data 组件的类型边界。"
+                },
+                {
+                  "label": "只导出普通 CycloneDX 1.4 软件包列表，忽略所有模型参数与数据集血缘字段",
+                  "status": "warning",
+                  "verdictTitle": "丢失全部模型与训练数据证据，无法满足 OWASP LLM03 与 EU AI Act 审计需求",
+                  "feedback": "传统 1.4 软件字段无法承载 AI 模型架构与数据来源信息。"
+                }
+              ]
+            },
+            {
+              "name": "大模型与 LoRA 资产采集方式及安全边界",
+              "layer": "L1 采集安全 · Zero-Execution",
+              "context": "需要快速识别几十 GB 权重与 LoRA 适配器的架构、基座依赖与许可信息。",
+              "options": [
+                {
+                  "label": "只读解析 config.json、PEFT adapter_config.json、GGUF KV 头、Safetensors 头与 CNCF ModelPack/Kitfile",
+                  "status": "optimal",
+                  "verdictTitle": "毫秒级零加载提取全部血缘元数据，完全免疫反序列化 RCE 攻击",
+                  "feedback": "只读取轻量配置与二进制头偏移量，绝不在扫描器进程内触发模型文件反序列化。"
+                },
+                {
+                  "label": "在扫描器核心进程内直接调用 Python torch.load() 加载每一个 .bin/.pt 权重再读取属性",
+                  "status": "critical",
+                  "verdictTitle": "极其致命！恶意权重内嵌的 Pickle __reduce__ 载荷会当场在扫描服务器上执行任意代码（RCE）",
+                  "feedback": "扫描器本身绝不能加载未知来源的 Pickle 模型，这是下节课 Lesson 0018 的重点攻防对象。"
+                },
+                {
+                  "label": "仅靠人工填写 Excel 登记模型名字与版本，完全不做制品文件自动化采集",
+                  "status": "warning",
+                  "verdictTitle": "研发微调换模型频繁，人工台账两周内必然严重失真脱节",
+                  "feedback": "必须嵌入 CI/CD 与制品库自动采集元数据头。"
+                }
+              ]
+            },
+            {
+              "name": "非 OSI 模型许可继承、数据集污染与 EU AI Act 门禁",
+              "layer": "L3/L4 合规门禁",
+              "context": "模型团队使用基于 Llama 3.1 微调并混入三方语料的 LoRA，计划部署至面向欧盟的商业 SaaS。",
+              "options": [
+                {
+                  "label": "递归沿 base_model 与 trainedOn 传递继承 Llama 3 / OpenRAIL / CC-BY-NC 约束，并核验 EU AI Act Art. 53 摘要",
+                  "status": "optimal",
+                  "verdictTitle": "精准截获隐性非商用数据污染与非 OSI 商业越界，自动输出完整履约清单",
+                  "feedback": "覆盖 700M MAU、Built with Llama 署名、NC 数据禁令及 2025-08-02 生效的 EU Art. 53 摘要义务。"
+                },
+                {
+                  "label": "只沿用原有软件 SPDX 检查器：遇到不在标准 OSI 列表里的 Llama/OpenRAIL 一律忽略放行",
+                  "status": "critical",
+                  "verdictTitle": "遗漏几乎所有大模型专有商业限制与数据非商用传染条款，带来巨额法务违约风险",
+                  "feedback": "大模型合规的核心恰恰是非 OSI 自定义许可与数据集版权限制。"
+                },
+                {
+                  "label": "只检查最终 LoRA 适配器仓库自己声明的 MIT 标签，不去追溯它绑定的基座模型与训练集",
+                  "status": "critical",
+                  "verdictTitle": "典型的“洗白错觉”：合规义务依法会从基座与训练集向上游穿透继承",
+                  "feedback": "必须解析 adapter_config.json 的 base_model_name_or_path 与数据集血缘。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验长期存储强度）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道实战题覆盖 <strong><code>pkg:huggingface</code> 大小写与不可变约束、CycloneDX 1.7 vs SPDX 3.0.1 建模映射、只读头采集原则、以及非 OSI 模型/数据集许可传染与 EU AI Act</strong>。<strong>先凭记忆作答，再看解析。</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0017 · AI-BOM 统一建模与血缘规范回忆测验",
+          "intro": "重点检验 ECMA-427 PURL 细节、双标准无损投影语义、只读安全采集及 Llama/数据集许可继承。",
+          "questions": [
+            {
+              "prompt": "根据 ECMA-427 的 pkg:huggingface 规范与安全供应链最佳实践，以下关于模型坐标编码与版本标识的说法哪项完全正确？",
+              "options": [
+                "命名空间与模型名须全部强转小写，且推荐在生产环境使用可变分支名。",
+                "命名空间区分大小写，模型版本哈希须转小写并强制禁用可变分支名。",
+                "模型坐标只允许使用数字版本号，不允许携带任何提交哈希与仓库参数。",
+                "允许直接使用任意本地相对文件路径作为组件唯一标识符以省略版本哈希。"
+              ],
+              "answerIndex": 1,
+              "explanation": "ECMA-427 明确规定 pkg:huggingface 的 namespace 与 name 严格区分大小写，而作为 version 的 Git Commit Hash 不区分大小写且必须规范化为小写；生产环境严禁使用 @main 等可变分支名，必须钉死 40 位 Commit SHA 防上游静默篡改（B 正确）。"
+            },
+            {
+              "prompt": "在 CycloneDX 1.7 ML-BOM 与 SPDX 3.0.1 JSON-LD 之间进行 AI 模型与训练数据集血缘的双向投影时，哪项映射严格符合官方规范？",
+              "options": [
+                "将模型卡挂入机器学习类型并对应至人工包与训练关系边。",
+                "将模型卡属性直接挂入普通软件依赖对象内部省略关联。",
+                "在扁平图中随意使用通用关联边替代专用训练与评测边。",
+                "为模型权重与软件代码维护孤立台账且禁止共用依赖图谱。"
+              ],
+              "answerIndex": 0,
+              "explanation": "CycloneDX 1.7 规定 type='machine-learning-model' 挂载 modelCard（MUST NOT 用于其他组件类型），并通过 modelParameters.datasets[] 关联 type='data' 组件；SPDX 3.0.1 则用 ai_AIPackage 与 dataset_DatasetPackage 通过 Core_Relationship 的标准词表 trainedOn / testedOn 精确关联（A 正确）。"
+            },
+            {
+              "prompt": "企业算法团队下载了一个声称采用 MIT 协议的开源 LoRA 适配器，且微调过程中混入了社区 CC-BY-NC-4.0 语料，准备用于面向欧盟市场的商业闭源服务。AI-BOM 引擎应如何采集与裁决？",
+              "options": [
+                "直接信任适配器主页自称的宽松协议标签，并放行面向欧盟的商业服务发布。",
+                "在中心扫描服务器内用反序列化接口直接加载权重文件以读取全部张量结构。",
+                "仅对代码库里的推理框架运行漏洞扫描，无需采集模型权重与任何数据集信息。",
+                "只读解析配置基座与数据集血缘，拦截非商用污染及缺失欧盟摘要的阻断项。"
+              ],
+              "answerIndex": 3,
+              "explanation": "严禁对未知权重执行 torch.load()（防 Pickle RCE）；必须只读解析 adapter_config.json 的 base_model_name_or_path 与训练数据集血缘，沿基座与 trainedOn 向上传递继承（拦截 CC-BY-NC-4.0 商用污染并核验 EU AI Act Art. 53(1)(d) 2025-08-02 生效的训练数据摘要）（D 正确）。"
+            },
+            {
+              "prompt": "关于主流非 OSI 大模型许可（如 Llama 3 Community License）以及基于 OCI 分发 AI 模型与数据集的开源规范，以下哪项架构认知准确？",
+              "options": [
+                "只要微调模型更换了全新业务名称，即可自动豁免原基座的署名与月活条款。",
+                "开放负责任协议属于标准开源许可，商业化分发可以无条件忽略领域禁令。",
+                "社区条款按月活、署名与命名传染，且可用宽松开放容器模型规范封装分发。",
+                "由于模型参数体积过于庞大，行业内尚未出现基于容器仓库的标准打包格式。"
+              ],
+              "answerIndex": 2,
+              "explanation": "Llama 3 社区许可虽非 OSI 开源但要求：月活超 7 亿（700M MAU）需另签授权、UI/文档显著标注 Built with Llama、衍生模型名须以 Llama 开头且禁训竞品模型；同时 CNCF ModelPack (modelpack/model-spec) 与 KitOps (kitops-ml/kitops) 均采用 Apache-2.0 提供标准 OCI 模型打包规范（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>落地 AI-BOM 统一 IR、双向标准投影与 OCI 模型打包采集时，推荐精读以下官方规范与 Apache-2.0 仓库：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://cyclonedx.org/docs/1.7/json/" target="_blank" rel="noopener"><strong>CycloneDX 1.7 Specification</strong></a>（<a href="https://cyclonedx.org/schema/bom-1.7.schema.json" target="_blank" rel="noopener"><code>bom-1.7.schema.json</code></a>）· <a href="https://spdx.github.io/spdx-spec/v3.0.1/" target="_blank" rel="noopener"><strong>SPDX 3.0.1 AI &amp; Dataset Profiles</strong></a>（<a href="https://github.com/spdx/spdx-3-model" target="_blank" rel="noopener"><code>spdx-3-model</code></a>）：<code>modelCard</code> / <code>ai_AIPackage</code> / <code>trainedOn</code> 权威定义。</li>
+          <li><a href="https://github.com/package-url/purl-spec" target="_blank" rel="noopener"><strong>Package-URL (ECMA-427)</strong></a> &amp; <a href="https://genai.owasp.org/" target="_blank" rel="noopener"><strong>OWASP Top 10 for LLM Apps (<code>LLM03:2025</code>)</strong></a>：<code>pkg:huggingface</code> 类型定义与 AI 供应链威胁全景。</li>
+          <li><a href="https://github.com/modelpack/model-spec" target="_blank" rel="noopener"><strong>CNCF ModelPack (<code>modelpack/model-spec</code>, <code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/kitops-ml/kitops" target="_blank" rel="noopener"><strong>KitOps (<code>kitops-ml/kitops</code>, <code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/CycloneDX/cdxgen" target="_blank" rel="noopener"><strong><code>CycloneDX/cdxgen</code> (<code>Apache-2.0</code>)</strong></a> · <a href="https://github.com/ggml-org/ggml" target="_blank" rel="noopener"><strong>GGML / GGUF Spec</strong></a>：云原生 OCI 模型打包与 ML-BOM 采集参照。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>保持追问 · 你的架构导师随时在线</h3>
+        <p>我们刚讲完“不能对未知模型权重直接调用 <code>torch.load()</code>”，那么模型文件内部到底怎么藏木马？下一课我们将直接剖开模型文件的字节码内核！随时在对话中继续追问或开启下节：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“在企业私有模型仓库（如自建 Harbor + ModelPack 或内部 Hugging Face Hub Mirror）中，如何在 CI/CD 阶段强制阻断未锁定 40 位 Commit SHA 的模型拉取？”</li>
+          <li>“如果客户只给了 <code>.pkl</code> / <code>.pt</code> / <code>.bin</code> PyTorch 权重文件，扫描器在不运行它的前提下，怎么静态反汇编并抓出恶意 <code>__reduce__</code> 操作码？”</li>
+          <li>“准备好了！请为我开启 <strong>Lesson 0018（模型序列化安全与恶意载荷扫描：Pickle RCE vs Safetensors）</strong>！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0016-snippet-fingerprinting-and-binary-sca.html">&larr; 上一课：Lesson 0016 · 代码同源与二进制 SCA</a>
+      <a href="../reference/ch5-malware-binary-and-ai-supply-chain-matrix.html">配套速查卡：Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 准备进入 Lesson 0018（模型序列化安全与载荷扫描） &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/aibom-lineage-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

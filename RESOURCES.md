@@ -152,6 +152,14 @@
 - [Binary & LSH Permissive Stack vs GPL Redlines: `lief-project/LIEF` (`Apache-2.0`) · `ReFirmLabs/binwalk` v3 (`MIT`) · `trendmicro/tlsh` (`Apache-2.0 OR BSD-3`) · `capstone` (`BSD-3`) · `ghidra` (`Apache-2.0`) vs `scanoss` (`GPL-2.0`) · `ossf/cve-bin-tool` (`GPL-3.0-or-later`) · `radare2` (`LGPL-3.0`)](https://github.com/lief-project/LIEF)
   明确商业闭源栈边界：采用 Pure Go 自研 Winnowing/TF-IDF 核心 + 宽松协议解析/解包/模糊哈希/反编译底座；严禁将 `scanoss/wfp`、`scanoss/engine`（`GPL-2.0`）与 `ossf/cve-bin-tool`（`GPL-3.0-or-later`）嵌入闭源产品，规避 `radare2`（`LGPL-3.0`）静态链接负担。
 
+### AI-BOM 统一建模、OCI 模型打包与模型合规（Ch 05 · Lesson 0017）
+- [AI-BOM Dual Standards: CycloneDX 1.7 ML-BOM (`bom-1.7.schema.json`) & SPDX 3.0.1 AI/Dataset Profiles (`spdx/spdx-3-model`)](https://cyclonedx.org/schema/bom-1.7.schema.json)
+  CycloneDX 1.7 规定 `machine-learning-model` 挂载 `modelCard`（MUST NOT 用于非模型组件）并指向 `data` 组件；SPDX 3.0.1 在 `@graph` 中以 `ai_AIPackage` 和 `dataset_DatasetPackage` 搭配标准 `Core_Relationship`（`trainedOn` / `testedOn`）精确建模数据血缘。
+- [Model Identifiers & Threat Scope: `pkg:huggingface` (ECMA-427 `package-url/purl-spec`) & OWASP LLM03:2025 Supply Chain](https://genai.owasp.org/)
+  `pkg:huggingface/<namespace>/<name>@<commit-hash>` 严格规定 `namespace`/`name` 区分大小写而 Commit Hash 转小写，生产严禁 `@main` 可变引用；对齐 OWASP `LLM03:2025` 将基座、LoRA、数据集与推理框架纳入统一 Layer 2 IR 图谱。
+- [Zero-Execution Extractors, OCI Model Packaging & Non-OSI Governance: CNCF ModelPack (`modelpack/model-spec`, `Apache-2.0`) · KitOps (`kitops-ml/kitops`, `Apache-2.0`) · `ggml-org/ggml` (GGUF)](https://github.com/modelpack/model-spec)
+  只读解析 `adapter_config.json`（`base_model_name_or_path`）、GGUF Header（`general.license`）、Safetensors `__metadata__` 及 OCI ModelPack/`Kitfile`（严禁 `torch.load()`）；沿血缘递归校验 `CC-BY-NC-4.0` 污染、Llama 3（700M MAU / `"Built with Llama"`）、OpenRAIL-M 禁令及 2025-08-02 生效的 EU AI Act Art. 53(1)(d) 训练数据摘要。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
@@ -168,7 +176,7 @@
   PURL 与 VERS 版本规范的核心维护社区。用于：解决跨生态冷门包管理器命名规范与版本区间边界争议。
 
 ## Gaps
-- **AI 时代供应链安全三部曲（Ch 05 · Lesson 0017–0019）**：`Lesson 0015–0016` 及 `Ref 06` 第 01–03 节已补齐恶意包投毒防御、Winnowing/TLSH/CENTRIS 同源检测与三层二进制 SCA；待后续在 0017–0019 补齐 AI-BOM（ML-BOM/SPDX 3.0）、模型序列化载荷（Pickle vs Safetensors）与 MCP/Agentic AI 治理实证资料。
+- **模型反序列化安全与 MCP/Agent 供应链治理（Ch 05 · Lesson 0018–0019）**：`Lesson 0015–0017` 及 `Ref 06` 第 01–04 节已补齐恶意包投毒防御、Winnowing/TLSH/CENTRIS 同源与三层二进制 SCA、以及 AI-BOM 统一建模（CycloneDX 1.7 ML-BOM / SPDX 3.0.1 / `pkg:huggingface` / ModelPack / 非 OSI 与 EU AI Act 合规）；待后续在 0018–0019 补齐 Pickle RCE vs Safetensors 操作码扫描与 MCP/Agentic AI (ASI04) 治理。
 - **静态、运行时可达性与优先级/VEX/自动修复协同闭环（Ch 04 · Lessons 0011–0014 已全面收口）**：第 11–13 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）、运行时融合/容器裁剪与 EPSS/KEV/SSVC/VEX 协同降噪；第 14 课及 Ref 05 第 05 节已补齐 OSV-Scanner v2 Guided Remediation（`in-place/relock/override`）、`deps.dev/util/resolve`、PubGrub（`MPL-2.0`）、Ochoa et al. (EMSE 2022) `API Diff ∩ Call Graph` 实证与五大生态 Diff 底座、OpenRewrite LST（`Apache-2.0`）、`dependabot-core`（`MIT`）vs `Renovate`（`AGPL-3.0`）红线及双触点防 PR 风暴闭环。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。
