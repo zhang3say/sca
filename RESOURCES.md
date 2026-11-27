@@ -225,6 +225,8 @@
   商业闭源双模部署必须严避 MinIO（`AGPL-3.0`，2021 年起变更且社区版删减管理功能）与 Garage（`AGPL-3.0`），改用 `Apache-2.0` 的 [SeaweedFS](https://github.com/seaweedfs/seaweedfs) / 标准 S3 接口 / 单机本地 FS；缓存严避 Redis 8 三重非宽松许可，选用 Linux 基金会旗下 [Valkey](https://valkey.io/)（`BSD-3-Clause`）；Hybrid Runner 出站隧道基于 `SPIFFE` 短寿命 X.509 mTLS SVID 校验身份。
 - [Enterprise AuthZ, Provisioning & Open Webhooks (Lesson 0026): OpenFGA (`Apache-2.0`) · SCIM 2.0 (`RFC 7643`/`7644`) · Ed25519 (`RFC 8032`) · Standard Webhooks Spec](https://www.standardwebhooks.com/)
   以 `RBAC × ABAC` 资产树及可选 [OpenFGA](https://openfga.dev/)（`Apache-2.0`）管控组织与 Project 访问权限，对接 OIDC 与 `SCIM 2.0` 实现离职秒级自动吊销；Air-Gapped 离线商业授权采用 `Ed25519` 非对称签名证书接入 OpenFeature；对外开放事件遵循 `Standard Webhooks`（`webhook-id` + `webhook-timestamp` + `webhook-signature`，`v1` HMAC-SHA256 / `v1a` Ed25519 + 5 分钟防重放窗）并强制叠加出口 SSRF 阻断私网/云元数据 IP。
+- [Observability, Contract Codegen & AI Benchmark Gates (Lesson 0027): OpenTelemetry Go & Python (`Apache-2.0`) · W3C Trace Context (`traceparent`) · `oapi-codegen` (`Apache-2.0`) · MADR](https://opentelemetry.io/)
+  基于 [opentelemetry-go](https://github.com/open-telemetry/opentelemetry-go) 与 [opentelemetry-python](https://github.com/open-telemetry/opentelemetry-python)（均 `Apache-2.0`）透传 W3C `traceparent` 统一剖析 L1/L3/Python/PG Outbox 扫描耗时；结合 `Buf`（`Apache-2.0`）、[`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen)（`Apache-2.0`）、`sqlc`（`MIT`）与 [MADR](https://adr.github.io/madr/) 在单仓 Monorepo 内锁死契约并防 AI Agent 漂移，并以黄金样本 Benchmark Harness（Precision / Recall / F1 / P95 延迟）卡住每一次 PR 合并。
 
 ## Wisdom (Communities)
 

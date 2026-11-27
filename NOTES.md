@@ -54,7 +54,7 @@
   - `0024` 1 人 + AI 模块化单体架构：Go↔Python 强契约与快慢双路径任务编排（已发布；已扩展 Ref 08 第 03 节）
   - `0025` 多租户隔离（PG RLS）、Finding 稳定指纹状态机与 Outbox 多存储一致性（已发布；已扩展 Ref 08 第 04 节）
   - `0026` 一套代码双模交付：Hybrid Runner、Air-Gapped 私有化与 RBAC/开放平台底座（已发布；已扩展 Ref 08 第 05 节）
-  - `0027` AI 协同质量防线：SCA 黄金样本回归评测、OTel 剖析与 Monorepo/Spec 落地（下一课 · ZPD · 全章收官）
+  - `0027` AI 协同质量防线：SCA 黄金样本回归评测、OTel 剖析与 Monorepo/Spec 落地（已发布；已扩展 Ref 08 第 06 节 · CH 07 & 全 27 课收官）
 
 ## Workspace Maintenance Rule
 - 每次新增课程或速查卡后，同步更新根目录 `index.html` 的课程状态、链接与进度计数，并在新课顶部导航栏保持指向 `../index.html`。

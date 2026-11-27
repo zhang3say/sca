@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0027：AI 协同质量防线：SCA 黄金样本回归评测、OTel 剖析与 Monorepo/Spec 落地</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html">Lesson 0026 · 双模部署与权限底座</a>
+        <a href="./0027-sca-benchmark-harness-observability-and-ai-spec-repo.html" class="active">Lesson 0027 · 评测门禁与工程落地</a>
+        <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">Ref 08 · 产品架构与双模工程矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0027 · CH 07 CAPSTONE</span>
+        <span class="sep">/</span>
+        <span>PHASE 4 &amp; CH 07 第 5 课（全章收官）</span>
+        <span class="sep">/</span>
+        <span>约 18 分钟</span>
+      </div>
+      <h1>AI 协同质量防线：SCA 黄金样本回归评测、OTel 剖析与 Monorepo/Spec 落地</h1>
+      <p class="subtitle">这是专为 <strong>「1 人总架构师 + AI Coding Agents」</strong> 准备的收官工程保险。AI 可以用 10 分钟帮你重构 Maven BOM 解析器或重写 Pickle 操作码校验，但如果只靠几十条单元测试，一次“看似全绿”的修改就可能悄悄让全站 Recall 暴跌 15% 而你毫无察觉。本课拍板三道终极护栏：<strong>SCA 黄金样本 Benchmark Harness（精度与延迟硬门禁）、OpenTelemetry 跨语言 Span 剖析、以及「单一契约真值」Monorepo 与 90 天垂直切片 MVP 落地蓝图</strong>。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>建立不让 AI 静默改坏 SCA 精度的黄金评测基准（Precision/Recall/F1/P95）；用 <a href="https://opentelemetry.io/" target="_blank" rel="noopener">OpenTelemetry</a>（<code>Apache-2.0</code>）串通 Go↔Python 全链路性能归因；带走可直接建仓的 Go+Python+Proto+<a href="https://github.com/oapi-codegen/oapi-codegen" target="_blank" rel="noopener"><code>oapi-codegen</code></a> Monorepo 骨架与 90 天垂直切片节奏</span>
+        <span><strong>前置关联：</strong><a href="./0008-ecosystem-version-range-semantics-and-backport-engine.html">Lesson 0008 (版本比较)</a> · <a href="./0024-solo-ai-modular-monolith-and-scan-orchestration.html">Lesson 0024 (Go↔Python 契约)</a> · <a href="./0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html">Lesson 0026 (双模交付)</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">Solo + AI Agent 最致命的幻觉：“单元测试全绿 = SCA 引擎没改坏”</div>
+      <p>SCA 引擎处理的是成千上万个真实开源仓库的边角语义（Maven `import` BOM、Debian Epoch、npm Hoisting、Python Pickle 变种绕过）。AI Agent 在修复某个局部 Bug 时，非常容易通过简化分支条件“凑绿”单测，却导致真实世界的误报或漏报激增。<strong>把真实世界样本的 Precision / Recall 评测变成不可绕过的 CI 闸门，是一个人敢放手让 AI 全速编码的前提条件。</strong></p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>SCA 黄金样本回归评测基准（Benchmark Harness）</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 四维评测黄金数据集（Golden Corpus）怎么建？</h3>
+      <p>你不需要第一天就攒几万个仓库；从 <strong>80–150 个精心挑选的高信噪比真实样本</strong>（涵盖每类陷阱至少 5 个固定 Commit Snapshot 与人工校对 Ground Truth）起步，就能拦住 95% 的 AI 回归事故：</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">黄金集必须独立于 AI 改代码的测试目录</span>
+        把黄金集 Manifest 与 Ground Truth 放进受保护的 <code>eval/golden-corpus/</code> 目录并配置 CODEOWNERS / Spec 锁死——绝不允许 AI Agent 在跑不通过时顺手去修改预期答案（Ground Truth）来“凑绿”！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:22%" />
+          <col style="width:28%" />
+          <col style="width:26%" />
+          <col style="width:24%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>黄金样本测试象限</th>
+            <th>样本构成与真实陷阱覆盖</th>
+            <th>强制卡死的量化门禁指标</th>
+            <th>典型防 AI 事故示例</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. L1 依赖提取象限</strong><br/>（源码 + 容器 + 制品）</td>
+            <td>覆盖 Maven BOM/Gradle、pnpm Monorepo、Go <code>replace</code>、PEP 508 markers、OCI Whiteout 层与 Distroless。</td>
+            <td>组件 PURL <strong>Precision &ge; 99.0%</strong>；<strong>Recall &ge; 98.0%</strong>；直接/传递边准确率。</td>
+            <td>拦住 AI 重构依赖树遍历时丢失多层 BOM 覆写或忽略删除层标记。</td>
+          </tr>
+          <tr>
+            <td><strong>2. L3 版本与 Backport 象限</strong><br/>（匹配零误差）</td>
+            <td>覆盖 SemVer 预发布、Debian <code>~</code>/Epoch、RPM <code>^</code>、Backport 隔离（<code>CVE-2024-6387</code>）与 VERS 合并。</td>
+            <td><strong>误报回退 = 0</strong>；<strong>漏报回退 = 0</strong>（任何既有确定病例出错即 Fail）。</td>
+            <td>拦住 AI 误用通用字符串比大小替换生态原生比较器。</td>
+          </tr>
+          <tr>
+            <td><strong>3. L4 可达性与投毒象限</strong><br/>（护城河指标）</td>
+            <td>Go/Java/JS/Python 带真实调用链与未调用孤岛样本；恶意包变种与 Pickle/NullifAI 载荷样本。</td>
+            <td>可达性降噪比（Noise Reduction）&amp; 恶意载荷 <strong>Recall 零下降</strong>（严守 Fail-Closed）。</td>
+            <td>拦住 AI 为提升速度把 Pickle 白名单偷偷放宽导致 RCE 样本逃逸。</td>
+          </tr>
+          <tr>
+            <td><strong>4. 性能与 P95 预算象限</strong><br/>（防尾部劣化）</td>
+            <td>1 个中型 Monorepo（~2,000 依赖）+ 1 个多层容器镜像的端到端延迟压测。</td>
+            <td>PR 快路径 <strong>P95 &lt; 15s</strong>；内存峰值不超私有化 4C8G 容器上限。</td>
+            <td>拦住 AI 写出 `O(N^2)` 图递归或无界正则回溯导致线上 OOM。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>OpenTelemetry 跨语言（Go &harr; Python）全链路耗时剖析</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 用一条 <code>traceparent</code> 贯穿单次扫描的真实瓶颈，不再盲猜优化</h3>
+      <p>当客户抱怨“为什么这次扫描花了 45 秒？”时，不要拍脑袋优化 Go 循环——真实瓶颈往往藏在某个跨语言调用、镜像层解压或数据库锁等待里。借助 CNCF <a href="https://opentelemetry.io/" target="_blank" rel="noopener"><strong>OpenTelemetry</strong></a>（<a href="https://github.com/open-telemetry/opentelemetry-go" target="_blank" rel="noopener"><code>opentelemetry-go</code></a> 与 <a href="https://github.com/open-telemetry/opentelemetry-python" target="_blank" rel="noopener"><code>opentelemetry-python</code></a>，均 <code>Apache-2.0</code>）与 W3C Trace Context 规范，在每次扫描创建时生成唯一 TraceID：</p>
+      <ul>
+        <li><strong>HTTP / ConnectRPC 自动注入 <code>traceparent</code> 头</strong>：Go 控制面调起 Python AI-BOM Worker 时自动透传上下文，同一张火焰图直接展现 Go L1 提取、ConnectRPC 传输、Python Safetensors 解析、Go L3 匹配与 PG <code>WithTenantTx</code> + Outbox 的精确毫秒数占比。</li>
+        <li><strong>结构化业务属性（Span Attributes）</strong>：在 Span 上挂载脱敏维度 <code>sca.tenant_id</code>、<code>sca.asset_kind</code>、<code>sca.lane (interactive|batch)</code>、<code>sca.cache_hit (cas)</code>，绝不记录用户源码片段或敏感凭证。</li>
+        <li><strong>双模零运维观测后端</strong>：SaaS 导出至任意兼容 OTLP 的观测平台；极简私有化模式下仅输出结构化 JSON Trace/Metrics 日志或单二进制采集器，不强制客户运维整套重型监控集群。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">给关键核心指标加 3 条 Prometheus Histogram</span>
+        <code>sca_scan_duration_seconds{lane,kind}</code>、<code>sca_queue_lag_seconds{lane}</code>、<code>sca_outbox_pending_rows</code>。仅这 3 个指标就能在 30 秒内判定系统是卡在扫描器 CPU、Python 队列积压还是 PG 出站同步。
+      </aside>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>AI 友好的「单一契约真值」Monorepo 与 90 天垂直切片蓝图</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 Monorepo 目录与「生成代码只读禁手改」规则</h3>
+      <p>为了最大化发挥 AI Coding Agent 的全局视野并根除前后端/跨语言联调幻觉，强烈推荐采用 <strong>单一契约真值（Single-Source-of-Truth Codegen）Monorepo</strong>：</p>
+      <ul>
+        <li><strong><code>contracts/</code>（人工与 AI 唯一可改的接口源头）</strong>：包含 <code>proto/</code>（经 <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener"><code>Buf</code></a> 生成 Go &amp; Python ConnectRPC 代码）、<code>openapi.yaml</code>（OpenAPI 3.1，经 <a href="https://github.com/oapi-codegen/oapi-codegen" target="_blank" rel="noopener"><code>oapi-codegen</code></a> <code>Apache-2.0</code> 生成 Go 强类型服务端/SDK 与前端 TypeScript 类型）、以及 <code>db/queries/*.sql</code>（经 <code>sqlc</code> <code>MIT</code> 生成 Go DAO）。</li>
+        <li><strong>生成产物目录标为 Generated Read-Only</strong>：在 <code>AGENTS.md</code> / <code>CLAUDE.md</code> 中明确约定：禁止 AI 手改任何 <code>gen/</code> 生成代码；改接口必须先改契约再跑 <code>make generate</code>。</li>
+        <li><strong><code>docs/adr/</code>（<a href="https://adr.github.io/madr/" target="_blank" rel="noopener">MADR</a> 轻量决策记录）+ <code>spec/</code></strong>：每次拍板重要架构取舍（如为什么选 Valkey 替 Redis、为什么选 PG RLS），留下一页 MADR，让未来的自己与新开对话的 AI Agent 瞬间继承完整上下文。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">前 90 天（M1–M3）垂直切片原则</span>
+        不要第一个月全写数据库表、第二个月全写扫描器、第三个月才联调界面！按月垂直切出“端到端可演示、可签单、可跑双模”的闭环切片，每月都能真刀真枪拿去跑客户 POC。
+      </aside>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB -->
+    <h2><span class="sec-num">04</span>交互实验台：AI 防回归 Benchmark 门禁 &amp; OTel/90 天切片台</h2>
+
+    <section class="widget-panel full-width" data-widget="eval-observability-lab">
+      <script type="application/json" class="eval-observability-lab-data">
+        {
+          "title": "交互实验台：SCA 黄金样本 Benchmark 门禁与 OTel/90 天落地台",
+          "intro": "模式一演练 4 个真实 AI Coding Agent 提交的 PR（单元测试全绿却在黄金集现出原形）；模式二观察 Go↔Python 链路剖析并逐月推演 90 天垂直切片 MVP。"
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验 AI 研发质量防线与落地蓝图）</h2>
+
+    <div class="prose-col">
+      <p>完成最后 4 道测验题，为整个 Phase 4（CH 07）画上扎实句号！</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0027 · SCA 回归评测、OTel 剖析与工程落地测验",
+          "intro": "重点检验 Benchmark Harness 门禁作用、OpenTelemetry 跨语言归因与单一契约 Monorepo 规范。",
+          "questions": [
+            {
+              "prompt": "在「1 人 + AI Coding Agent」高速迭代模式下，为何单元测试全部通过仍不足以保证 SCA 引擎可以安全合并上线？",
+              "options": [
+                "因为现代编译器与运行环境完全不支持在持续集成阶段自动运行单元测试用例。",
+                "因为单元测试极难覆盖多生态边缘解析语义，需要黄金样本评测来卡住精度回退。",
+                "因为开源协议规定任何安全扫描产品一律禁止在本地或云端流水线编写单元测试。",
+                "因为单元测试执行耗时会比全量容器镜像扫描慢十倍以上，无法放进合并检查里。"
+              ],
+              "answerIndex": 1,
+              "explanation": "AI Agent 非常容易在修某个 bug 时顺带简化分支从而“凑绿”十几条单测，却导致真实世界 Maven BOM、Debian Backport 或 Pickle 绕过样本出现严重 Recall 暴跌。唯有受保护的黄金样本 Benchmark Harness 能卡死 Precision/Recall 与 P95 延迟（B 正确）。"
+            },
+            {
+              "prompt": "为了防止 AI Coding Agent 在一次版本重构中把 Go 服务接口、OpenAPI 契约与 Python Worker 数据结构改得互不匹配，Monorepo 应坚持什么契约工作流？",
+              "options": [
+                "先修改唯一契约文件再自动生成双端代码，并在规则中严禁人工手改生成产物目录。",
+                "放任各语言端手写和维护独立的字典结构与校验代码，出线上报错后再手工对字段。",
+                "取消一切静态接口描述文档与类型生成工具，全部接口统一使用自由文本字符串传递。",
+                "每周五由人工肉眼逐行比对所有跨语言文件的字段拼写，彻底依赖事后手动联调排查。"
+              ],
+              "answerIndex": 0,
+              "explanation": "把 Protobuf (Buf)、OpenAPI 3.1 (oapi-codegen) 与 SQL (sqlc) 集中作为唯一可写契约真值，生成代码目录标记为只读并由 CI 校验漂移，可在结构上彻底杜绝 AI 跨语言联调错位（A 正确）。"
+            },
+            {
+              "prompt": "使用 OpenTelemetry 定位「Go 控制面调用 Python AI-BOM Worker 耗时过长」问题时，贯穿跨进程调用链的核心标准原语是什么？",
+              "options": [
+                "强制两个进程把所有源代码全文明文写进本地磁盘临时日志里，靠人工文本检索对齐。",
+                "要求 Python 进程直接登录主数据库，把每次推理过程中的全量内存快照写入交易表。",
+                "彻底关闭所有异步调用与并发协程，强迫整套系统按全局单线程依次同步串行执行。",
+                "通过标准链路上下文头在跨语言请求间透传同一追踪标识，汇聚生成统一耗时火焰图。"
+              ],
+              "answerIndex": 3,
+              "explanation": "借助 OpenTelemetry（Apache-2.0）与 W3C Trace Context（traceparent 请求头）在 Go 与 Python 之间无损传递 TraceID，即可在统一火焰图上精确拆解 L1、L3、Python Worker 与 Outbox 各自的真实延迟占比（D 正确）。"
+            },
+            {
+              "prompt": "对于黄金评测集目录（eval/golden-corpus/）与架构决策记录（MADR），在配置 AI Coding Agent 工作规则时最关键的治理铁律是什么？",
+              "options": [
+                "允许 AI Agent 在评测不通过时自行删改黄金集预期答案，确保流水线永远显示绿色通过。",
+                "受保护的黄金集严禁被顺手篡改以凑绿门禁，重大取舍须沉淀轻量决策记录供跨会话继承。",
+                "把所有历史架构文档彻底删除干净，让每次新开的 AI 会话完全从零开始自由猜测设计。",
+                "前九十天禁止联调任何端到端扫描流程，必须等全部十几个外围模块彻底写完才开始测试。"
+              ],
+              "answerIndex": 1,
+              "explanation": "黄金数据集是检验 AI 工作成果的“裁判尺”，必须受保护严禁顺手改答案凑绿；同时用轻量 MADR 记录架构决策配合 90 天垂直切片交付，才能让 1 人 + AI 越跑越稳（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://opentelemetry.io/" target="_blank" rel="noopener"><strong>OpenTelemetry</strong></a>（<a href="https://github.com/open-telemetry/opentelemetry-go" target="_blank" rel="noopener"><code>opentelemetry-go</code></a> &amp; <a href="https://github.com/open-telemetry/opentelemetry-python" target="_blank" rel="noopener"><code>opentelemetry-python</code></a>，<code>Apache-2.0</code>）：Go 与 Python 跨进程 W3C <code>traceparent</code> 链路追踪与指标标准。</li>
+          <li><a href="https://github.com/oapi-codegen/oapi-codegen" target="_blank" rel="noopener"><strong><code>oapi-codegen</code> (`Apache-2.0`)</strong></a> · <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener"><strong><code>Buf</code> (`Apache-2.0`)</strong></a> · <a href="https://github.com/sqlc-dev/sqlc" target="_blank" rel="noopener"><strong><code>sqlc</code> (`MIT`)</strong></a>：三剑客锁死 HTTP API、RPC 与 SQL 契约单点真值。</li>
+          <li><a href="https://adr.github.io/madr/" target="_blank" rel="noopener"><strong>MADR (Markdown Architectural Decision Records)</strong></a>：轻量级架构决策记录规范，为 AI Coding Agent 跨会话提供高信噪比长期上下文。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>CH 07 &amp; 全 27 课圆满收官 · 进入编码实战！</h3>
+        <p>恭喜！你已完成从 <strong>SCA 底层算法原理（0001–0022）</strong> 到 <strong>1 人 + AI · Go+Python · 双模产品工程架构（0023–0027）</strong> 的完整 27 课旅程。现在可以直接带着这份蓝图进入代码实现阶段，随时在对话中呼唤导师协助：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“帮我按 Lesson 0027 的结构，为我们的真实仓库生成第一版 <code>SPEC.md</code>、<code>contracts/</code> 骨架和 M1 垂直切片任务清单。”</li>
+          <li>“请帮我设计第一批 30 个多语言/Backport/AI-BOM 黄金测试样本目录结构与 <code>sca-eval</code> 门禁脚本。”</li>
+          <li>“我们今天要开始写 <code>WithTenantTx</code> + PG RLS Migration 了，帮我做一次安全边界审查！”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html">&larr; 上一课：Lesson 0026 · 双模部署与权限底座</a>
+      <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">速查参考卡：Ref 08 · 产品架构与双模工程矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 全 27 课圆满收官 &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/eval-observability-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>
