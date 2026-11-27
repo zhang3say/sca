@@ -72,14 +72,14 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Description:** 查验并登记一手源（ConnectRPC / Protobuf、PostgreSQL `FOR UPDATE SKIP LOCKED`、River 协议边界、NATS JetStream、Apache Kafka、Temporal MIT、Go `errgroup` / Python `asyncio`/Process Pool 等）。编写第 24 课微课与 `assets/service-orchestration-lab.js`（模块化单体拆分边界对比 + 快路径/慢路径队列与背压限流沙盘），扩展 Ref 08 第 03 节并同步 `index.html`（`0024` → `ready`、`0025` → `next`）与 `NOTES.md`。
 
 **Acceptance criteria:**
-- [ ] `lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html` 讲清「1 人 + AI」为何首选 Go 模块化单体 + Python 独立 Worker 进程而非早产微服务、Protobuf/ConnectRPC 强类型跨语言边界、三段式队列演进（PG `SKIP LOCKED` → NATS JetStream → Kafka）、快慢双路径隔离、状态机与幂等防雪崩。
-- [ ] 所有引用工具与队列组件均经一手仓库核实并标明精确开源协议（含 River `MPL-2.0` 边界、ConnectRPC `Apache-2.0`、NATS `Apache-2.0`）。
-- [ ] 交互实验台与 4 题测验符合规范，`Ref 08` 新增第 03 节并双向互链。
+- [x] `lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html` 讲清「1 人 + AI」为何首选 Go 模块化单体 + Python 独立 Worker 进程而非早产微服务、Protobuf/ConnectRPC 强类型跨语言边界、三段式队列演进（PG `SKIP LOCKED` → NATS JetStream → Kafka）、快慢双路径隔离、状态机与幂等防雪崩。
+- [x] 所有引用工具与队列组件均经一手仓库核实并标明精确开源协议（含 River `MPL-2.0` 边界、ConnectRPC `Apache-2.0`、NATS `Apache-2.0`）。
+- [x] 交互实验台与 4 题测验符合规范，`Ref 08` 新增第 03 节并双向互链。
 
 **Verification:**
-- [ ] Content accuracy check: 逐条核对一手源与开源协议写入 `RESOURCES.md`。
-- [ ] Static check: `node --check assets/*.js` 与 Python Quiz/链接检查通过。
-- [ ] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0024`、`Ref 08` 与 `index.html`，通过后 `git commit && git push`。
+- [x] Content accuracy check: 逐条核对一手源与开源协议写入 `RESOURCES.md`。
+- [x] Static check: `node --check assets/*.js` 与 Python Quiz/链接检查通过。
+- [x] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0024`、`Ref 08` 与 `index.html`，通过后 `git commit && git push`。
 
 **Dependencies:** Task 2
 
@@ -93,10 +93,10 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Estimated scope:** Medium (5–6 files)
 
 ### Checkpoint 3: Lesson 0024 双门禁核验与发布
-- [ ] 内容准确性核验通过（Go↔Python 契约与队列组件协议经一手查验）
-- [ ] 静态脚本检查通过
-- [ ] 真实浏览器 1280px & 375px UI/UX 交互与溢出检查通过
-- [ ] 已同步 `Ref 08`、`index.html`、`NOTES.md` 并推送 `origin/main`
+- [x] 内容准确性核验通过（Go↔Python 契约与队列组件协议经一手查验）
+- [x] 静态脚本检查通过
+- [x] 真实浏览器 1280px & 375px UI/UX 交互与溢出检查通过
+- [x] 已同步 `Ref 08`、`index.html`、`NOTES.md` 并推送 `origin/main`
 
 ---
 

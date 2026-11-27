@@ -13,6 +13,7 @@
       <div class="course-links">
         <a href="../index.html">课程首页 · 全局路线图</a>
         <a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023 · 产品域模型与闭环</a>
+        <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">Lesson 0024 · 模块化单体与编排</a>
         <a href="./ch7-product-arch-and-tech-design-matrix.html" class="active">Ref 08 · 产品架构与双模工程矩阵</a>
         <a href="./ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
       </div>
@@ -27,10 +28,10 @@
         <span>PRINT-READY CHAPTER 07 CHEAT SHEET</span>
       </div>
       <h1>产品域模型、双模架构与工程落地速查矩阵</h1>
-      <p class="subtitle">Chapter 07 &amp; Phase 4（<strong>1 人 + AI Agent · Go+Python · 双模兼容</strong>）架构师与系统工程落地速查卡（<strong>已覆盖 Lesson 0023 精华</strong>；后续将随 <code>0024–0027</code> 逐课增量扩展至服务编排、PG RLS、双模基础设施许可与 AI Benchmark 门禁）。</p>
+      <p class="subtitle">Chapter 07 &amp; Phase 4（<strong>1 人 + AI Agent · Go+Python · 双模兼容</strong>）架构师与系统工程落地速查卡（<strong>已覆盖 Lesson 0023–0024 精华</strong>；后续将随 <code>0025–0027</code> 逐课增量扩展至 PG RLS 与 Outbox、双模基础设施许可及 AI Benchmark 门禁）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与参考底座：</strong><a href="https://dependencytrack.org/" target="_blank" rel="noopener">OWASP Dependency-Track v5</a> (<code>Apache-2.0</code>) · <a href="https://openfeature.dev/" target="_blank" rel="noopener">CNCF OpenFeature</a> (<code>Apache-2.0</code>) · <a href="https://github.com/openvex/spec" target="_blank" rel="noopener">OpenVEX</a> (<code>Apache-2.0</code>) · <a href="https://owaspsamm.org/" target="_blank" rel="noopener">OWASP SAMM</a> (<code>Apache-2.0</code>)</span>
-        <span><strong>关联课程：</strong><a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023</a>（<code>0024–0027</code> 待扩展）</span>
+        <span><strong>依据标准与参考底座：</strong><a href="https://dependencytrack.org/" target="_blank" rel="noopener">OWASP Dependency-Track v5</a> (<code>Apache-2.0</code>) · <a href="https://openfeature.dev/" target="_blank" rel="noopener">CNCF OpenFeature</a> (<code>Apache-2.0</code>) · <a href="https://connectrpc.com/" target="_blank" rel="noopener">ConnectRPC</a> (<code>Apache-2.0</code>) · <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener">Buf</a> (<code>Apache-2.0</code>) · <a href="https://github.com/nats-io/nats-server" target="_blank" rel="noopener">NATS JetStream</a> (<code>Apache-2.0</code>) · <a href="https://github.com/riverqueue/river" target="_blank" rel="noopener">River</a> (<code>MPL-2.0</code>)</span>
+        <span><strong>关联课程：</strong><a href="../lessons/0023-product-domain-model-and-persona-workflows.html">Lesson 0023</a> · <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">Lesson 0024</a>（<code>0025–0027</code> 待扩展）</span>
       </div>
     </header>
 
@@ -142,9 +143,58 @@
       </div>
     </section>
 
+    <!-- SECTION 3: MODULAR MONOLITH, GO<->PYTHON & QUEUE LADDER -->
+    <section class="full-width">
+      <h2><span class="sec-num">03</span>Go 模块化单体边界、跨语言契约与队列演进速查（Lesson 0024）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:18%" />
+            <col style="width:32%" />
+            <col style="width:30%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>工程单元 / 队列阶段</th>
+              <th>协议与核心组件</th>
+              <th>1 人 + AI 协同工程规范</th>
+              <th>隔离与抗雪崩底线</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Go Modular Monolith</strong></td>
+              <td><code>--role=api|worker|all</code><br/>Go <code>internal/</code> 包隔离</td>
+              <td>全部控制面/Domain/L1+L3/Policy 同仓收敛；私有化单二进制极简启动，SaaS 按角色副本水平扩容。</td>
+              <td>严禁跨模块直接 JOIN 私有表；禁止在控制面跑不可信项目构建脚本。</td>
+            </tr>
+            <tr>
+              <td><strong>Python AI/Deep Worker</strong></td>
+              <td><a href="https://connectrpc.com/" target="_blank" rel="noopener"><code>ConnectRPC</code></a> + <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener"><code>Buf</code></a> (<code>Apache-2.0</code>)</td>
+              <td>Proto3 单点定义生成双端类型，RPC 仅传对象 URI/SHA256 与 <code>traceparent</code>（兼支持 curl JSON 调试）。</td>
+              <td><strong>严禁 Python Worker 直写业务核心库！</strong>仅回传结构化 IR 由 Go 统一校验落盘。</td>
+            </tr>
+            <tr>
+              <td><strong>Queue Stage 1 &rarr; 2 &rarr; 3</strong></td>
+              <td>PG <code>SKIP LOCKED</code> / River (<code>MPL-2.0</code>) &rarr; NATS (<code>Apache-2.0</code>) &rarr; Kafka / Temporal (<code>MIT</code>)</td>
+              <td>通过抽象 <code>ScanQueue</code> 接口平滑替换：Day-1 用 PG 同事务入队零丢单，成长后切单二进制 NATS JetStream。</td>
+              <td>River 须守 <code>MPL-2.0</code>（仅直接调用不改源文件）；中小私有化不强制捆绑 Kafka。</td>
+            </tr>
+            <tr>
+              <td><strong>快慢双路径与状态机</strong></td>
+              <td><code>lane=interactive|batch</code> + DLQ</td>
+              <td>PR/MCP（&lt;15s）独立快车道；幂等键 <code>(tenant, asset, commit/digest, profile)</code> 合并 CI 重推风暴。</td>
+              <td>Lease 心跳回收防僵尸任务；毒丸文件 3 次退避进 <code>DEAD_LETTER</code>；租户令牌桶防挤占。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <footer class="lesson-end-nav">
-      <a href="../lessons/0023-product-domain-model-and-persona-workflows.html">&larr; 回到 Lesson 0023 · 产品域模型与闭环</a>
-      <a href="../index.html">返回课程首页 &middot; 23 / 27 课 &rarr;</a>
+      <a href="../lessons/0024-solo-ai-modular-monolith-and-scan-orchestration.html">&larr; 回到 Lesson 0024 · 模块化单体与编排</a>
+      <a href="../index.html">返回课程首页 &middot; 24 / 27 课 &rarr;</a>
     </footer>
   </main>
 </body>

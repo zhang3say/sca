@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0024：1 人 + AI 模块化单体架构：Go↔Python 强契约与快慢双路径任务编排</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0023-product-domain-model-and-persona-workflows.html">Lesson 0023 · 产品域模型与闭环</a>
+        <a href="./0024-solo-ai-modular-monolith-and-scan-orchestration.html" class="active">Lesson 0024 · 模块化单体与编排</a>
+        <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">Ref 08 · 产品架构与双模工程矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0024 · PHASE 4</span>
+        <span class="sep">/</span>
+        <span>CH 07 第 2 课 · 服务边界与任务编排</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>1 人 + AI 模块化单体架构：Go↔Python 强契约与快慢双路径任务编排</h1>
+      <p class="subtitle">很多技术负责人一旦立项企业级平台，就会本能地画一张包含 10 个微服务的拓扑图——在 15 人团队里这叫组织拆分，但在 <strong>「1 人架构师 + AI Coding Agents」</strong> 模式下，早产微服务等于把 AI 的上下文窗口撕成十块碎片，还会让私有化客户面对十几个镜像望而却步。本课拍板 <strong>Go 模块化单体 + Python 专项 Worker + ConnectRPC 强契约 + 三段式队列演进</strong>，让一个人就能跑出十人团队的稳定交付力。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>划定 Go 与 Python 的物理进程边界；用 <a href="https://connectrpc.com/" target="_blank" rel="noopener"><code>ConnectRPC</code></a> + <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener"><code>Buf</code></a>（<code>Apache-2.0</code>）锁死跨语言契约防 AI 漂移；掌握 <code>PG SKIP LOCKED</code> / <code>River</code>（<code>MPL-2.0</code>）&rarr; <code>NATS JetStream</code> &rarr; <code>Kafka</code> 演进阶梯与快慢双路径防雪崩状态机</span>
+        <span><strong>前置关联：</strong><a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006 (多触点)</a> · <a href="./0018-model-serialization-security-and-payload-scanning.html">Lesson 0018 (Python AI 安全)</a> · <a href="./0023-product-domain-model-and-persona-workflows.html">Lesson 0023 (产品域模型)</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">为什么「模块化单体 + 隔离 Worker」是 AI 协同研发的最优解？</div>
+      <p>AI Coding Agent 最怕跨 8 个独立微服务仓库的隐式 JSON 契约变更——改了上游忘了下游、本地起不来集成测试。把全部控制面逻辑（鉴权、域台账、L1/L3 核心、策略、调度器）收敛在一个编译为单一二进制的 <strong>Go Modular Monolith</strong> 内（内部严格按 Go `internal/` 包划清模块接口），仅在「语言生态刚需（Python AI/模型解析）」与「安全隔离刚需（不可信构建期沙箱）」两处切出独立进程，既守住高内聚，又为未来水平扩缩容留好无痛切口。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>三层物理拓扑：Go 单体核、Python 专项 Worker 与构建沙箱</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 严守「双语言职责单向分工」，绝不让 Python 抢控制面</h3>
+      <p>在 Go + Python 双栈团队里，最容易出现的架构腐化是“随手在 Python 里又写一套 HTTP API、又连数据库改 <code>Finding</code> 表”，最后演变成双大脑架构。基于前 22 课沉淀的 SCA 技术栈，我们把全系统运行态收敛为 <strong>3 个边界极度清晰的物理单元</strong>：</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">Go 与 Python 为什么不是“对称双写”？</span>
+        我们的主存储引擎、OSV-SCALIBR/Syft 采集核、Sigstore 验签、<code>cel-go</code> 网关和 CLI/MCP/Hook（Single Go Core）全部是 Go 生态；Python 的不可替代价值只在 AI 模型格式生态（HuggingFace / Safetensors / PyTorch AST / 学术静态分析）。让 Go 充当唯一系统大脑，Python 保持无状态专职计算节点，运维心智直接减半。
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:22%" />
+          <col style="width:26%" />
+          <col style="width:26%" />
+          <col style="width:26%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>运行单元与主力语言</th>
+            <th>内部模块划分（强边界）</th>
+            <th>资源特征与扩缩容方式</th>
+            <th>架构禁忌（Red Lines）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Go Control Plane &amp; Core Scanner</strong><br/>（Go 模块化单体 · 可按 Role 启动）</td>
+            <td><code>internal/auth</code> · <code>internal/domain</code> · <code>internal/orchestrator</code> · <code>internal/l1_l3</code> · <code>internal/policy</code></td>
+            <td>CPU/内存均衡；同一二进制通过 <code>--role=api|worker|all</code> 启停：单机私有化跑 <code>all</code>，SaaS 独立扩展 <code>worker</code>。</td>
+            <td>严禁模块间绕过 Service Interface 直接 JOIN 对方私有表；禁止在控制面进程内直接跑不可信用户构建脚本。</td>
+          </tr>
+          <tr>
+            <td><strong>2. Python AI &amp; Deep Analysis Worker</strong><br/>（Python ASGI / Worker 进程）</td>
+            <td>AI-BOM 模型/数据集血缘提取、深度学习 AST/序列化特征、特定 Python 静态调用图分析。</td>
+            <td>大内存/多进程（<code>asyncio</code> + ProcessPool 防 GIL 阻塞）；按专职队列独立扩缩容。</td>
+            <td><strong>严禁直接写入核心业务表！</strong>只能通过强类型响应回传结构化 IR/Evidence，由 Go 控制面校验入库。</td>
+          </tr>
+          <tr>
+            <td><strong>3. Untrusted Build Sandbox</strong><br/>（gVisor / Kata / Firecracker）</td>
+            <td>运行 <code>cdxgen --lifecycle build</code>、Maven/Gradle/npm 原生解析等可能触发恶意 <code>postinstall</code> 的重任务。</td>
+            <td>一次性短命隔离容器/MicroVM（无内网凭据、白名单出口代理、严格 CPU/内存/Timeout 限制）。</td>
+            <td>严禁和主业务数据库在同一网络平面内运行；容器销毁即彻底清理磁盘缓存。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>Go ↔ Python 强类型契约：用 Protobuf + ConnectRPC 锁死 AI 协同边界</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 为什么不要用“手写 Flask JSON 字典”做跨语言通信？</h3>
+      <p>当 1 个人指挥 AI Agent 同时修改 Go 调用方和 Python 处理端时，最常见的隐蔽 Bug 是：AI 在 Python 端把字段 <code>package_purl</code> 顺手改成了 <code>purl</code>，或者把毫秒时间戳传成了秒，静态类型检查完全抓不到，直到线上半夜扫到特定样本才静默崩溃。</p>
+      <p>解决方案是把所有 Go ↔ Python 边界收敛到唯一一份 <code>proto3</code> 契约目录下，配合 <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener"><strong>Buf CLI</strong></a>（<code>Apache-2.0</code>）与 <a href="https://connectrpc.com/" target="_blank" rel="noopener"><strong>ConnectRPC</strong></a>（<a href="https://github.com/connectrpc/connect-go" target="_blank" rel="noopener"><code>connect-go</code></a> 与 <a href="https://github.com/connectrpc/connect-py" target="_blank" rel="noopener"><code>connect-py</code></a>，均为 <code>Apache-2.0</code>）：</p>
+      <ul>
+        <li><strong>一处定义、双端代码生成</strong>：每次 AI 修改接口，CI 强制校验 <code>buf breaking</code> 与 <code>buf generate</code>，Go 结构体与 Python dataclass/protobuf stub 编译期对齐。</li>
+        <li><strong>原生兼容 HTTP/JSON + gRPC + Streaming</strong>：<code>connect-py</code>（支持 ASGI <code>uvicorn</code> 与 <code>asyncio</code>）无需像传统 gRPC 那样强依赖复杂 Envoy 代理；既能用二进制 Protobuf 跑内网高速 RPC，调试时还能直接用 <code>curl -H "Content-Type: application/json"</code> 复现现场！</li>
+        <li><strong>大文件零拷贝传递指针，不传 4GB 模型体</strong>：RPC 请求体永远只传对象存储/本地共享卷的 <code>artifact_uri</code>、<code>sha256</code>、<code>max_bytes_budget</code> 与 <code>traceparent</code>（W3C 链路追踪上下文），绝对禁止把几十 MB 的 SBOM 或几 GB 的模型权重塞进 RPC Payload。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">Go 模块化单体为何支持 `--role=all|api|worker`？</span>
+        这是双模兼容的神器：在客户内网单台 8C16G 机器上，运维只需起 1 个 Go 二进制（<code>--role=all</code>）+ 1 个 Python Worker + 1 个 PG，5 分钟拉起整套平台；到了 SaaS 万级负载时，同一份镜像用 Helm 分别部署 <code>--role=api</code> 和 <code>--role=worker</code> 即可水平扩缩。
+      </aside>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>零重型运维队列演进阶梯 &amp; 快慢双路径防雪崩状态机</h2>
+
+    <div class="prose-col">
+      <h3>3.1 三段式异步队列演进（拒绝 Day-1 引入重型集群）</h3>
+      <p>很多人在第一天就把 Kafka + ZooKeeper/KRaft + Temporal 全家桶搬进私有化安装包，结果安装脚本 800 行、调试一次消费积压半天过去了。我们把 <code>ScanQueue</code> 抽象成极简的 Go Interface（<code>Enqueue</code> / <code>Claim</code> / <code>Ack</code> / <code>Nack</code>），按客户规模与产品阶段分三步平滑演进：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:16%" />
+          <col style="width:32%" />
+          <col style="width:32%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>演进阶段与选型</th>
+            <th>精确开源协议</th>
+            <th>核心工程机制与优势</th>
+            <th>适用上限与商用合规边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Stage 1 · Day-1 极简态</strong><br/>PG <code>SKIP LOCKED</code> / <a href="https://github.com/riverqueue/river" target="_blank" rel="noopener"><code>River</code></a></td>
+            <td>PostgreSQL License / <span class="badge badge-warn">MPL-2.0 (River)</span></td>
+            <td>直接复用主库 PostgreSQL，与创建 <code>Snapshot</code>/<code>ScanJob</code> 共用同一个 ACID 事务入队，100% 消除“写库成功但发 MQ 失败”的双写丢单，私有化零额外中间件。</td>
+            <td>轻松承载 ~500–2,000 任务/秒；注意 <code>River</code> 为 <code>MPL-2.0</code>（文件级弱传染）：作为未修改 Go 依赖库直接 <code>import</code> 完全合法闭源，若修改 River 自身源文件则改动文件须开源。</td>
+          </tr>
+          <tr>
+            <td><strong>Stage 2 · 成长/高并发</strong><br/><a href="https://github.com/nats-io/nats-server" target="_blank" rel="noopener"><strong>NATS JetStream</strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span></td>
+            <td>Go 原生单二进制（&lt;30MB），内建持久化 Stream、WorkQueue 语义、Ack 等待与消费者组；既可独立运行也适合嵌入企业私有化集群。</td>
+            <td>承载数万级消息/秒，把高频扫描心跳与重算流从 PostgreSQL 连接池彻底剥离，保住数据库稳定。</td>
+          </tr>
+          <tr>
+            <td><strong>Stage 3 · 超大型/长周期</strong><br/><strong>Apache Kafka</strong> + <a href="https://github.com/temporalio/temporal" target="_blank" rel="noopener"><strong>Temporal</strong></a></td>
+            <td><span class="badge badge-ok">Apache-2.0</span> / <span class="badge badge-ok">MIT</span></td>
+            <td>Kafka 支撑十万+事件扇出（参考 <a href="./0006-multi-touchpoint-ingestion-and-continuous-reevaluation.html">Lesson 0006</a> Hyades v5）；Temporal 管理跨数小时的沙箱构建 + 静态/动态多阶段可恢复编排。</td>
+            <td>仅面向超大规模 SaaS 或大型集团部署启用，不捆绑进中小私有化默认安装包。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.2 致命陷阱防范：快慢双路径隔离、幂等键与租户公平调度</h3>
+      <p>哪怕队列再快，如果把“凌晨 5,000 个项目的 0-day 全网重算”和“开发者等在面前的 15 秒 PR 门禁 / 1.5 秒 Agent MCP”放进同一条 FIFO 队列，早高峰 PR 必然全部超时红灯。必须从第一天建立三条编排铁律：</p>
+      <ol>
+        <li><strong>快慢双路径（Fast Lane vs Slow Lane）硬隔离</strong>：<code>lane=interactive</code>（Agent MCP / PR Diff）拥有独立 Worker 池或高优先级抢占槽位，SLA 硬卡 P95 &lt; 15s；<code>lane=batch</code>（全量镜像、0-day 重算、C/C++ 同源）独立池运行，绝不互相饿死。</li>
+        <li><strong>幂等键去重（Idempotency Key）</strong>：队列消息与入库统一绑定幂等键 <code>(tenant_id, asset_id, commit_sha_or_digest, scan_profile)</code>；处于 <code>PENDING/RUNNING</code> 状态的重复 Webhook 请求直接合并等待同一结果，省去 CI 抖动带来的数十倍冗余计算。</li>
+        <li><strong>租户令牌桶 + 有界状态机 + 死信隔离（DLQ）</strong>：单租户突增提交时由带配额的公平调度防止挤占全站资源；每条 <code>ScanJob</code> 显式经历 <code>PENDING → RUNNING(Lease 心跳) → SUCCEEDED / RETRY_BACKOFF → DEAD_LETTER</code>，遇到畸形文件或 OOM 毒丸任务超过 3 次自动隔离进 DLQ 并告警，杜绝无限重入拖死整群 Worker。</li>
+      </ol>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">Lease 心跳租约防“僵尸任务”</span>
+        Worker 抢到任务后必须每隔 10 秒续期 <code>lease_expires_at</code>。若某个 Pod 因 OOM 被 K8s Kill，30 秒后租约过期，调度器自动安全回收并重投（且每次重投递增 <code>attempt_count</code>），绝不依赖不可靠的内存态信号。
+      </aside>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB -->
+    <h2><span class="sec-num">04</span>交互实验台：服务拓扑权衡 &amp; 快慢双路径防雪崩沙盘</h2>
+
+    <section class="widget-panel full-width" data-widget="service-orchestration-lab">
+      <script type="application/json" class="service-orchestration-lab-data">
+        {
+          "title": "交互实验台：1 人 + AI 服务拓扑与快慢双路径调度沙盘",
+          "intro": "模式一对比「Go 模块化单体 + Python Worker」与早产微服务的研发/运维差距及三段式队列演进；模式二演练 0-day 风暴与毒丸任务下的双路径防雪崩护栏。"
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验服务边界与调度抗雪崩设计）</h2>
+
+    <div class="prose-col">
+      <p>先凭记忆作答以下 4 题，确认你已吃透模块化单体、Go↔Python 契约、Queue 演进许可边界与防雪崩机制。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0024 · 模块化单体与快慢双路径调度测验",
+          "intro": "重点检验 Solo+AI 服务切分、ConnectRPC 契约、River MPL-2.0 边界与防队头阻塞机制。",
+          "questions": [
+            {
+              "prompt": "对于「1 人 + AI Agent」且主力为 Go + Python 的双模 SCA 团队，为什么推荐「Go 模块化单体 + Python 专项 Worker」而非 Day-1 全拆微服务？",
+              "options": [
+                "因为微服务架构无法运行在容器环境中，也完全不支持任何异步队列组件。",
+                "因为单体结构能禁止后续进行横向扩容，只能永远运行在单台宿主机里面。",
+                "既保留 AI 上下文高内聚和私有化极简部署，又避免分布式事务与跨仓联调损耗。",
+                "因为所有开源组件协议都明确禁止开发者把系统拆分成多个独立进程去部署。"
+              ],
+              "answerIndex": 2,
+              "explanation": "Go 控制面模块化单体配合 --role=api|worker|all 可兼顾极简私有化单进程与 SaaS 独立扩展，同时把大量 Go 领域逻辑聚合在一处供 AI 高效检索，只在 Python AI 专项解析与不可信沙箱处做物理进程隔离（C 正确）。"
+            },
+            {
+              "prompt": "在 Go 控制面与 Python 专项 Worker 协作时，关于两者的数据通信契约与数据库写入权限，哪项架构设计最安全可靠？",
+              "options": [
+                "通过强类型契约接口传递引用指针，仅由控制面校验并写库。",
+                "双端直接互传无版本约束字典，由专项节点绕过网关写主表。",
+                "每次请求都把数百兆模型权重流直接塞进同步调用体里传输。",
+                "取消一切跨语言接口契约定义，改用共享临时目录交换状态。"
+              ],
+              "answerIndex": 0,
+              "explanation": "通过 Buf + Proto3 + ConnectRPC（Apache-2.0）保证编译期双端契约零漂移，大文件仅传递 URI 与 SHA256 引用，且 Python Worker 保持无状态计算，最终由 Go 控制面校验租户权限后统一写入核心台账（A 正确）。"
+            },
+            {
+              "prompt": "关于 Day-1 队列采用 PostgreSQL SKIP LOCKED / River（MPL-2.0）再到 NATS JetStream 的演进，以下哪项合规与工程判断准确？",
+              "options": [
+                "MPL-2.0 与 AGPL-3.0 效力完全相同，闭源后端只要导入库就必须全量开源。",
+                "NATS JetStream 采用专有商业付费授权协议，绝对禁止免费嵌入私有化方案。",
+                "PostgreSQL 队列无法与业务建表共用同一个事务，必然产生消息双写丢失。",
+                "PG 同事务入队消除双写丢单，直接调用未修改的 River 库文件符合闭源要求。"
+              ],
+              "answerIndex": 3,
+              "explanation": "PostgreSQL 队列与业务写入共用 ACID 事务可彻底根除双写不一致；River 的 MPL-2.0 属于文件级弱传染协议，未修改其源码直接作为 Go 库导入完全合规闭源产品；成长后可平滑切换至 Apache-2.0 的 NATS JetStream（D 正确）。"
+            },
+            {
+              "prompt": "当凌晨爆发全网 5,000 个项目 0-day 重算任务时，如何保证早高峰研发的 PR 门禁（15 秒 SLA）与 Agent MCP 不被拖垮？",
+              "options": [
+                "把全部实时与批量任务塞进同一条先入先出队列，靠手工拉长超时时间来硬扛。",
+                "实行快慢双路径硬隔离与幂等键去重，辅以租户令牌桶与死信队列隔离防护。",
+                "一旦检测到全网批量重算任务启动，立刻自动拒绝全公司所有代码合并检查。",
+                "允许异常卡死的专项扫描节点无上限重复入队，直到彻底耗尽全部集群内存。"
+              ],
+              "answerIndex": 1,
+              "explanation": "快慢双路径隔离（interactive vs batch）彻底消除队头阻塞；幂等键防止 CI 抖动重复耗尽算力；租户公平调度与有界重试+DLQ 确保单租户或毒丸文件不引发全网雪崩（B 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://connectrpc.com/" target="_blank" rel="noopener"><strong>ConnectRPC (`connect-go` &amp; `connect-py`)</strong></a> &amp; <a href="https://github.com/bufbuild/buf" target="_blank" rel="noopener"><strong>Buf CLI</strong></a>（均 <code>Apache-2.0</code>）：Go 与 Python 强类型跨语言 RPC 与 Breaking Change 门禁。</li>
+          <li><a href="https://github.com/riverqueue/river" target="_blank" rel="noopener"><strong>River (`riverqueue/river`, <code>MPL-2.0</code>)</strong></a> &amp; <a href="https://github.com/nats-io/nats-server" target="_blank" rel="noopener"><strong>NATS JetStream (`Apache-2.0`)</strong></a> &amp; <a href="https://github.com/temporalio/temporal" target="_blank" rel="noopener"><strong>Temporal (`MIT`)</strong></a>：从零中间件事务队列到高并发流与长周期耐用工作流的三段式演进栈。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>下一步与导师实时答疑</h3>
+        <p>下一课 <strong>Lesson 0025</strong> 将进入数据层硬核设计：<strong>用一套 PostgreSQL Schema（<code>tenant_id</code> + <code>FORCE ROW LEVEL SECURITY</code> + <code>SET LOCAL</code>）打通 SaaS 多租户与私有化单租户，并落地 Finding 稳定指纹与 Transactional Outbox 一致性</strong>。欢迎随时提问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“我的私有化客户只有 4 核 8G 虚拟机，<code>--role=all</code> + Python Worker 的内存上限和并发协程池该怎么配比？”</li>
+          <li>“如果某些语言构建期沙箱任务（如大型 Gradle）要跑 8 分钟，ConnectRPC 是保持流式等待还是改成异步回调任务？”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0023-product-domain-model-and-persona-workflows.html">&larr; 上一课：Lesson 0023 · 产品域模型与闭环</a>
+      <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">速查参考卡：Ref 08 · 产品架构与双模工程矩阵</a>
+      <a href="../index.html">返回课程总览（下一课 0025 即将上线）&rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/service-orchestration-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

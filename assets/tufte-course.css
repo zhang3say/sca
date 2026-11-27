@@ -5960,7 +5960,7 @@ pre code,
 
 @media (max-width: 900px) {
   .grl-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -5969,7 +5969,7 @@ pre code,
   .grl-compare-grid,
   .grl-compare-grid.is-2col,
   .grl-graph-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .grl-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5978,8 +5978,15 @@ pre code,
 
 @media (max-width: 520px) {
   .grl-kpi-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.grl-compare-grid > *,
+.grl-graph-grid > *,
+.grl-bar-card {
+  min-width: 0;
+  max-width: 100%;
 }
 
 @media print {

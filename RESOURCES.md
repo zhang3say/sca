@@ -213,6 +213,10 @@
   CNCF 孵化的厂商中立 Feature Flag 开放标准（`Apache-2.0`），将业务代码里的能力开关评估与底层配置源解耦——公有云 SaaS 可对接远端多租户 Entitlement 评估器，离线私有化无缝切换至 Ed25519 本地签名 License 文件 Provider，实现一套代码控制 Tier 1–3 功能门控与灰度发布。
 - [AppSec Maturity & BOM/VEX Interop: OWASP SAMM (`Apache-2.0`) · CycloneDX 1.7 (`ECMA-424`) · OpenVEX (`Apache-2.0`)](https://owaspsamm.org/)
   为五类用户旅程（研发/Agent、AppSec、DevOps/SRE、合规法务、CISO）建立可衡量的度量闭环，并通过标准化的 CycloneDX VDR/SBOM 与 OpenVEX 将产品内部 `Finding` / `Waiver` 状态对外投影为标准交付件。
+- [Cross-Language Contracts (Lesson 0024): ConnectRPC Go & Python (`connectrpc/connect-go`, `connectrpc/connect-py`, `Apache-2.0`) · Buf CLI (`bufbuild/buf`, `Apache-2.0`)](https://connectrpc.com/)
+  基于同一份 `proto3` 定义同时兼容标准 HTTP/JSON、gRPC 与 gRPC-Web；`connect-py` 原生对接 ASGI/WSGI（`uvicorn`）与 `asyncio`，配合 `buf generate` 实现 Go 控制面与 Python 专项 Worker 之间的零漂移强类型契约。
+- [Queue Evolution & Durable Orchestration (Lesson 0024): PG `FOR UPDATE SKIP LOCKED` · `riverqueue/river` (`MPL-2.0`) · `nats-io/nats-server` JetStream (`Apache-2.0`) · Apache Kafka (`Apache-2.0`) · `temporalio/temporal` (`MIT`)](https://github.com/nats-io/nats-server)
+  Day-1 优先基于 PostgreSQL 原生 `SKIP LOCKED` 或 `river`（与业务写库共用事务彻底消灭双写不一致；注意 `river` 为 `MPL-2.0` 文件级弱传染，不修改其源文件直接库级调用完全合规），高并发流化平滑演进至单二进制 `NATS JetStream`（`Apache-2.0`）或企业集群 `Kafka`（`Apache-2.0`），复杂长耗时多阶段工作流可选 `Temporal`（`MIT`）。
 
 ## Wisdom (Communities)
 
