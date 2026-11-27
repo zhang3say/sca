@@ -221,6 +221,10 @@
   在 PgBouncer 事务池化下必须用 `BEGIN; SET LOCAL app.current_tenant = '...';` 取代会话级 `SET`（防连接复用跨租户泄露），并强制启用 `FORCE ROW LEVEL SECURITY`、应用角色 `NOBYPASSRLS` 及 `NULLIF(current_setting('app.current_tenant', true), '')::uuid` Fail-Closed；配合 `sqlc` 与 `pgx` 事务封装器以同一套 Schema 同时服务 SaaS 多租户与私有化单租户。
 - [Eventual Consistency & Analytical Deduplication (Lesson 0025): Transactional Outbox Pattern · Debezium (`Apache-2.0`) · ClickHouse `ReplacingMergeTree` (`Apache-2.0`)](https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree)
   业务状态与 `outbox_events` 在 PG 同事务提交彻底消除“写 PG 成功但同步 ClickHouse/RoaringBitmap 失败”脑裂；分析端采用 `ReplacingMergeTree(version, is_deleted)` 配合单调 `version` 幂等落盘，并在实时大盘查询侧使用 `FINAL` 或 `argMax` 应对异步 Merge 窗口去重。
+- [Dual-Mode Infra License Replacements & Workload Identity (Lesson 0026): SeaweedFS (`Apache-2.0`) vs MinIO/Garage (`AGPL-3.0`) · Valkey (`BSD-3-Clause`) vs Redis 8 (`RSALv2/SSPLv1/AGPLv3`) · SPIFFE/SPIRE (`Apache-2.0`)](https://spiffe.io/)
+  商业闭源双模部署必须严避 MinIO（`AGPL-3.0`，2021 年起变更且社区版删减管理功能）与 Garage（`AGPL-3.0`），改用 `Apache-2.0` 的 [SeaweedFS](https://github.com/seaweedfs/seaweedfs) / 标准 S3 接口 / 单机本地 FS；缓存严避 Redis 8 三重非宽松许可，选用 Linux 基金会旗下 [Valkey](https://valkey.io/)（`BSD-3-Clause`）；Hybrid Runner 出站隧道基于 `SPIFFE` 短寿命 X.509 mTLS SVID 校验身份。
+- [Enterprise AuthZ, Provisioning & Open Webhooks (Lesson 0026): OpenFGA (`Apache-2.0`) · SCIM 2.0 (`RFC 7643`/`7644`) · Ed25519 (`RFC 8032`) · Standard Webhooks Spec](https://www.standardwebhooks.com/)
+  以 `RBAC × ABAC` 资产树及可选 [OpenFGA](https://openfga.dev/)（`Apache-2.0`）管控组织与 Project 访问权限，对接 OIDC 与 `SCIM 2.0` 实现离职秒级自动吊销；Air-Gapped 离线商业授权采用 `Ed25519` 非对称签名证书接入 OpenFeature；对外开放事件遵循 `Standard Webhooks`（`webhook-id` + `webhook-timestamp` + `webhook-signature`，`v1` HMAC-SHA256 / `v1a` Ed25519 + 5 分钟防重放窗）并强制叠加出口 SSRF 阻断私网/云元数据 IP。
 
 ## Wisdom (Communities)
 

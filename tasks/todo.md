@@ -138,14 +138,14 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Description:** 查验并登记一手源（SPIFFE/SPIRE `Apache-2.0`、SeaweedFS `Apache-2.0` vs MinIO `AGPL-3.0`、Garage `AGPL-3.0`、Valkey `BSD-3-Clause` vs Redis `RSALv2/SSPLv1/AGPLv3`、OIDC & SCIM 2.0 RFC 7643/7644、Ed25519 RFC 8032、Webhook HMAC-SHA256 与 SSRF 防护实践、Helm `Apache-2.0`）。编写第 26 课微课与 `assets/dual-mode-deploy-lab.js`（三种部署拓扑切换模拟器 + RBAC/ABAC 与基础设施许可排雷检查台），扩展 Ref 08 第 05 节并同步 `index.html`（`0026` → `ready`、`0027` → `next`）与 `NOTES.md`。
 
 **Acceptance criteria:**
-- [ ] `lessons/0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html` 讲清如何用同一套代码与配置抽象兼容公有云 SaaS、Hybrid Runner（源码不出内网，Outbound-only mTLS 回传脱敏 IR）、以及 Air-Gapped 极简私有化（Docker Compose 单机 / K8s Helm + Ed25519 离线商用 License 签发与 Feature Flag 校验）；讲透 RBAC + ABAC 资产范围树、OIDC/SCIM 组织同步、不可篡改审计日志与防 SSRF Webhook 开放契约；并给出基础设施商用许可红线替换表（严避 MinIO `AGPL-3.0` / Redis `SSPL` 等）。
-- [ ] 不重复 `0009` 的 `bbolt`/SQLite 漏洞包内部构造，聚焦全系统级运行时依赖与双模交付架构。
-- [ ] 交互实验台、4 题测验与 `Ref 08` 第 05 节全部完成并互链。
+- [x] `lessons/0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html` 讲清如何用同一套代码与配置抽象兼容公有云 SaaS、Hybrid Runner（源码不出内网，Outbound-only mTLS 回传脱敏 IR）、以及 Air-Gapped 极简私有化（Docker Compose 单机 / K8s Helm + Ed25519 离线商用 License 签发与 Feature Flag 校验）；讲透 RBAC + ABAC 资产范围树、OIDC/SCIM 组织同步、不可篡改审计日志与防 SSRF Webhook 开放契约；并给出基础设施商用许可红线替换表（严避 MinIO `AGPL-3.0` / Redis `SSPL` 等）。
+- [x] 不重复 `0009` 的 `bbolt`/SQLite 漏洞包内部构造，聚焦全系统级运行时依赖与双模交付架构。
+- [x] 交互实验台、4 题测验与 `Ref 08` 第 05 节全部完成并互链。
 
 **Verification:**
-- [ ] Content accuracy check: 逐个验证基础设施最新开源许可（MinIO/SeaweedFS/Valkey/Redis/SPIFFE）并登记 `RESOURCES.md`。
-- [ ] Static check: `node --check assets/*.js` 与 Python Quiz/链接检查通过。
-- [ ] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0026`、`Ref 08` 与 `index.html`，通过后 `git commit && git push`。
+- [x] Content accuracy check: 逐个验证基础设施最新开源许可（MinIO/SeaweedFS/Valkey/Redis/SPIFFE）并登记 `RESOURCES.md`。
+- [x] Static check: `node --check assets/*.js` 与 Python Quiz/链接检查通过。
+- [x] Browser UI/UX check: 本地 HTTP 服务在 1280px & 375px 实测 `0026`、`Ref 08` 与 `index.html`，通过后 `git commit && git push`。
 
 **Dependencies:** Task 4
 
@@ -159,10 +159,10 @@ Source spec: `SPEC-ch07-product-and-tech-design.md` | Plan: `tasks/plan.md`
 **Estimated scope:** Medium (5–6 files)
 
 ### Checkpoint 5: Lesson 0026 双门禁核验与发布
-- [ ] 内容准确性核验通过（全部基础设施开源许可与标准协议经一手核实）
-- [ ] 静态脚本检查通过
-- [ ] 真实浏览器 1280px & 375px UI/UX 交互与溢出检查通过
-- [ ] 已同步 `Ref 08`、`index.html`、`NOTES.md` 并推送 `origin/main`
+- [x] 内容准确性核验通过（全部基础设施开源许可与标准协议经一手核实）
+- [x] 静态脚本检查通过
+- [x] 真实浏览器 1280px & 375px UI/UX 交互与溢出检查通过
+- [x] 已同步 `Ref 08`、`index.html`、`NOTES.md` 并推送 `origin/main`
 
 ---
 

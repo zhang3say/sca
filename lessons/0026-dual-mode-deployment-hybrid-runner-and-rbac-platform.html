@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0026：一套代码双模交付：Hybrid Runner、Air-Gapped 私有化与 RBAC/开放平台底座</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0025-multitenant-storage-finding-lifecycle-and-consistency.html">Lesson 0025 · 多租户与一致性</a>
+        <a href="./0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html" class="active">Lesson 0026 · 双模部署与权限底座</a>
+        <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">Ref 08 · 产品架构与双模工程矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0026 · PHASE 4</span>
+        <span class="sep">/</span>
+        <span>CH 07 第 4 课 · 双模交付与企业底座</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>一套代码双模交付：Hybrid Runner、Air-Gapped 私有化与 RBAC/开放平台底座</h1>
+      <p class="subtitle">1 人 + AI Agent 团队最怕客户一问“能不能先用 SaaS 试用，下季度金融监管部门买断跑纯内网离线版？”，就被迫复制出一套魔改仓库。本课把产品底座收束为<strong>「一套代码三态部署」</strong>：公有云 SaaS、源码不出内网的 <strong>Hybrid Runner</strong>、以及极简 <strong>Air-Gapped 离线包 + Ed25519 商业 License</strong>；同时帮你逐一排清基础设施的开源协议暗雷（<strong>MinIO / Garage <code>AGPL-3.0</code>、Redis 8 <code>RSALv2/SSPLv1</code></strong>），并补齐 RBAC×ABAC、SCIM 2.0 与防 SSRF 的开放平台 Webhook。</p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>掌握 Hybrid Runner 纯出站 mTLS（<a href="https://spiffe.io/" target="_blank" rel="noopener">SPIFFE</a>）与 Air-Gapped 离线交付架构；用 <a href="https://github.com/seaweedfs/seaweedfs" target="_blank" rel="noopener">SeaweedFS</a>（<code>Apache-2.0</code>）与 <a href="https://valkey.io/" target="_blank" rel="noopener">Valkey</a>（<code>BSD-3-Clause</code>）替代雷区组件；落地 <a href="https://openfga.dev/" target="_blank" rel="noopener">OpenFGA</a>/ABAC、SCIM 2.0 与 <a href="https://www.standardwebhooks.com/" target="_blank" rel="noopener">Standard Webhooks</a></span>
+        <span><strong>前置关联：</strong><a href="./0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009 (离线漏洞包)</a> · <a href="./0023-product-domain-model-and-persona-workflows.html">Lesson 0023 (OpenFeature)</a> · <a href="./0025-multitenant-storage-finding-lifecycle-and-consistency.html">Lesson 0025 (PG RLS)</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">为什么「基础设施选型」也能一票否决整单商业合同？</div>
+      <p>前 22 课我们严防了 SCA 扫描引擎的 GPL/AGPL/BSL 坑，但很多架构师在打私有化安装包时，随手在 <code>docker-compose.yml</code> 里塞进了默认对象存储 MinIO 和默认缓存 Redis——殊不知 MinIO 自 2021 年起转为 <strong><code>AGPL-3.0</code></strong>（且社区版不断削减控制台能力），Redis 8 则采用 <strong><code>RSALv2 / SSPLv1 / AGPLv3</code></strong> 三重授权。大客户开源法务一扫你的私有化安装包镜像清单，照样当场亮红牌！</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>一套代码三态部署：SaaS、Hybrid Runner 与 Air-Gapped 离线</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 用部署抽象隔离环境差异，不分裂业务逻辑</h3>
+      <p>凭借前几课打下的 <strong>OpenFeature（能力开关）+ Go <code>--role=all|api|worker</code> + PG RLS（固定默认单租户 UUID）+ Store/Queue Port 接口</strong>，同一套容器镜像可以无分叉切换三种交付形态：</p>
+      <ol>
+        <li><strong>公有云多租户 SaaS</strong>：面向互联网/敏捷团队最快开箱试用；全量跑在云端 K8s + 托管 PostgreSQL + 对象存储 S3 + ClickHouse。</li>
+        <li><strong>Hybrid Runner（金融/SaaS 混合最佳甜蜜点）</strong>：控制面和漏洞图谱留在云端享受分钟级 0-day 更新，客户在内网部署一个轻量的 <strong>Single Go Runner</strong>。Runner 在客户内网拉取源码/镜像完成 L1 提取与脱敏处理，<strong>只通过单向出站（Outbound-Only）mTLS 通道</strong>把 Layer 2 IR 元数据（PURL/SHA256/调用摘要）推给云端——客户源代码、构建密钥、AI 模型权重永远不出内网，且客户防火墙无需对云端开任何入站端口！Runner 身份基于 <a href="https://spiffe.io/" target="_blank" rel="noopener"><strong>SPIFFE / SPIRE</strong></a>（<code>Apache-2.0</code>）短寿命 X.509 SVID 自动签发轮转。</li>
+        <li><strong>Air-Gapped 极简离线私有化</strong>：面向彻底断网单位，打包为极简 Docker Compose（单机 4–5 容器）或声明式 Kubernetes Helm Chart（<code>Apache-2.0</code>）。漏洞情报与恶意包库复用 <a href="./0009-offline-vuln-db-distribution-and-matching-index.html">Lesson 0009</a> 的签名 OCI 增量包，离线签发一份 <strong>Ed25519（RFC 8032）</strong>商业 License 文件，由内置公钥验签并直接喂给 <a href="./0023-product-domain-model-and-persona-workflows.html">Lesson 0023</a> 的 OpenFeature 本地 Provider，到期后支持“阻断新建配置但保留历史只读查询”的优雅降级策略。</li>
+      </ol>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">Ed25519 离线 License 载荷必须绑定什么？</span>
+        核心字段：<code>license_id</code>、<code>customer_org</code>、<code>sku_tier (starter|pro|sovereign)</code>、<code>max_active_projects</code>、<code>issued_at</code>、<code>expires_at</code> 与功能布尔开关。公钥硬编码或由配置注入验证端，私钥永远留在厂商离线签发机，彻底防篡改。
+      </aside>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>基础设施商用许可排雷与替换矩阵（避开 AGPL / SSPL）</h2>
+
+    <div class="prose-col">
+      <p>做私有化双模软件，除了自研 Go/Python 代码外，你打包交付或 SaaS 托管依赖的每一件基础设施都必须经过法务许可审计。以下是 2026 年最关键的四组「基础设施踩坑与安全替代」清单：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:20%" />
+          <col style="width:24%" />
+          <col style="width:24%" />
+          <col style="width:32%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>基础设施组件域</th>
+            <th>高危红线组件与协议</th>
+            <th>商用合规安全替代方案</th>
+            <th>双模落地工程建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>S3 兼容对象存储</strong><br/>（存 SBOM / VSA / 证据包）</td>
+            <td><span class="badge badge-danger">MinIO (AGPL-3.0)</span><br/><span class="badge badge-danger">Garage (AGPL-3.0)</span></td>
+            <td><span class="badge badge-ok">SeaweedFS (Apache-2.0)</span><br/>或云原生 S3 + 单机 Local FS</td>
+            <td>代码只面向标准 S3 SDK + 本地 POSIX 文件抽象编程：SaaS 用云厂商 S3，单机 Compose 私有化直接挂本地卷（零额外对象存储），集群私有化选 Go 实现的 <a href="https://github.com/seaweedfs/seaweedfs" target="_blank" rel="noopener">SeaweedFS</a>。</td>
+          </tr>
+          <tr>
+            <td><strong>内存缓存 &amp; 限流计数</strong><br/>（令牌桶 / Webhook 去重）</td>
+            <td><span class="badge badge-danger">Redis 8 (RSALv2/SSPLv1/AGPLv3)</span></td>
+            <td><span class="badge badge-ok">Valkey (BSD-3-Clause)</span><br/>或单机进程内缓存</td>
+            <td><a href="https://valkey.io/" target="_blank" rel="noopener">Valkey</a> 由 Linux Foundation 托管，继承 Redis 7.2.4 纯 <code>BSD-3-Clause</code>，协议/客户端 100% 平替无痛迁移。</td>
+          </tr>
+          <tr>
+            <td><strong>API 网关 &amp; 反向代理</strong><br/>（mTLS / 路由限流）</td>
+            <td>部分商业闭源/限流插件网关</td>
+            <td><span class="badge badge-ok">Envoy / Caddy / Traefik</span><br/>（<code>Apache-2.0</code> / <code>MIT</code>）</td>
+            <td>单机极简私有化用 Go 单二进制 Caddy（<code>Apache-2.0</code>）自动管理 TLS；K8s 场景用标准 Gateway API / Envoy（<code>Apache-2.0</code>）。</td>
+          </tr>
+          <tr>
+            <td><strong>身份目录与细粒度鉴权</strong><br/>（SSO / 资产树授权）</td>
+            <td>自研脆弱的多层正则权限判断</td>
+            <td><span class="badge badge-ok">OpenFGA (Apache-2.0)</span><br/>+ OIDC / SAML 2.0</td>
+            <td>简单租户先用内置 Go <code>RBAC × Workspace/Project</code> 作用域表；当需要复杂跨团队资源继承时无缝插接 Zanzibar 模型的 <a href="https://openfga.dev/" target="_blank" rel="noopener">OpenFGA</a>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>企业级权限（RBAC×ABAC+SCIM）、防 SSRF Webhook 与审计日志</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>3.1 RBAC × ABAC 资产范围树与 SCIM 2.0 秒级离职吊销</h3>
+      <p>大企业采购安全平台必看三件事：<strong>“实习生能不能看到核心支付系统的漏洞细节？”“员工离职后 5 分钟内权限能不能自动回收？”“谁在什么时候豁免了那条高危 CVE？”</strong></p>
+      <ul>
+        <li><strong>RBAC（角色操作权限）× ABAC（Workspace/Project 资产作用域）</strong>：权限判定永远是二元组 <code>(RoleCapabilities ∩ ResourceScope)</code>——例如某人虽然是 <code>AppSec Reviewer</code>，但仅绑定了 <code>ws_retail</code> 事业部，就绝对看不到 <code>ws_core_banking</code> 的组件和源码路径。</li>
+        <li><strong>OIDC + SCIM 2.0（RFC 7643 &amp; RFC 7644）</strong>：支持企业 Okta / Azure AD / Keycloak 通过 OIDC 登录，并开放标准 <code>SCIM 2.0</code> REST 端点自动同步组织架构与用户组（Group）映射；员工在公司 HR/IdP 离职，SCIM `PATCH/DELETE` 瞬间冻结会话与个人 PAT（Personal Access Token）。</li>
+        <li><strong>不可篡改追加审计日志（Append-Only Audit Log）</strong>：所有敏感动作（更改策略阈值、签发 VEX/Waiver、生成离线 API Token、导出全量 SBOM、Break-glass 紧急放行）必须同事务写入独立 <code>audit_logs</code> 表（含操作人、IP、TraceID、前后快照 Diff），支持导出至客户 SIEM（Syslog/Webhook）。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">开放平台 Webhook 必须防 SSRF 与重放攻击！</span>
+        允许客户配置 Webhook URL 接收 0-day 告警，等于把服务器变成“可发任意 HTTP 请求的跳板”。若不加校验，攻击者只需填入 <code>http://169.254.169.254/latest/meta-data/</code> 或内网数据库端口即可探测/盗取云主机凭据！
+      </aside>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 开放平台 Standard Webhooks 与出口 SSRF 纵深拦截</h3>
+      <p>面向外部研发流水线与工单系统集成时，遵循 <a href="https://www.standardwebhooks.com/" target="_blank" rel="noopener"><strong>Standard Webhooks</strong></a> 规范发送事件（固定三头：<code>webhook-id</code>、<code>webhook-timestamp</code>、<code>webhook-signature</code>），以 <code>id.timestamp.raw_body</code> 计算 <code>v1</code>（HMAC-SHA256）或 <code>v1a</code>（Ed25519）签名并配合 5 分钟时间戳窗口防重放。同时在 Go 的出站 HTTP Client 层自定义 <code>net.Dialer.Control</code>：<strong>在 DNS 解析完成之后、TCP 建连之前，校验目标真实 IP，严禁连接环回地址（<code>127.0.0.0/8</code>）、私网保留段（<code>10.0.0.0/8</code>、<code>172.16.0.0/12</code>、<code>192.168.0.0/16</code>）及云元数据地址（<code>169.254.0.0/16</code>）并禁用自动跟随 302 重定向</strong>（私有化客户如需推送内部 Jira，必须由管理员显式配置精确域名/CIDR 白名单放行）。</p>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB -->
+    <h2><span class="sec-num">04</span>交互实验台：三态部署拓扑切换 &amp; 基础设施许可/安全审计台</h2>
+
+    <section class="widget-panel full-width" data-widget="dual-mode-deploy-lab">
+      <script type="application/json" class="dual-mode-deploy-lab-data">
+        {
+          "title": "交互实验台：三态部署拓扑与基础设施许可/安全审计台",
+          "intro": "模式一切换同一份 Go+Python 镜像在 SaaS、Hybrid Runner（源码不出域）与 Air-Gapped 离线包间的拓扑差异；模式二排查 MinIO/Redis 协议陷阱并检验 SCIM 与防 SSRF Webhook 防线。"
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>主动回忆测验（检验双模部署、基础设施许可与安全防线）</h2>
+
+    <div class="prose-col">
+      <p>先凭记忆回答下面 4 道实际客户 POC 与法务审核必考题，确保双模方案零硬伤。</p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0026 · 双模部署、许可替代与开放平台安全测验",
+          "intro": "重点检验 Hybrid Runner 数据不出域、MinIO/Redis 许可替换、Ed25519 离线 License 与防 SSRF 机制。",
+          "questions": [
+            {
+              "prompt": "金融或政企客户要求使用云端实时更新的漏洞情报平台，但绝对禁止将源码、凭证和模型权重上传至公有云，最契合的架构形态是什么？",
+              "options": [
+                "要求客户把全量私有代码仓库和密钥镜像同步推送到公有云扫描节点里。",
+                "在内网运行单向出站连接控制面的混合扫描器，只回传脱敏中间组件图。",
+                "彻底断开所有情报更新机制，仅向客户提供一张永不更新的静态网页报表。",
+                "让云端服务端反向穿透客户防火墙主动拉取内网代码，绕过安全边界审查。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Hybrid Runner 部署在客户内网完成本地 L1 提取与沙箱解析，源码、密钥和模型权重零出域；仅通过基于 SPIFFE mTLS 的纯出站连接将脱敏 L2 IR 摘要回传至云端控制面，兼顾数据主权与实时 0-day 能力（B 正确）。"
+            },
+            {
+              "prompt": "在构建商业闭源 SCA 的私有化安装包时，为何必须排查并替换默认选用的 MinIO 社区版和 Redis 8，转而使用 SeaweedFS 与 Valkey？",
+              "options": [
+                "因为前两者在主流 Linux 容器环境下无法正常启动，也完全不支持网络连接。",
+                "因为标准开源协议强制要求所有对象存储和内存缓存必须使用同一种编程语言。",
+                "因为新版本替换协议的吞吐量必然低于旧版本，只能满足测试环境的开发用途。",
+                "因为前两者采用强网络传染或限竞品非宽松条款，后者才是纯宽松商用开源协议。"
+              ],
+              "answerIndex": 3,
+              "explanation": "MinIO（AGPL-3.0）与 Redis 8（RSALv2/SSPLv1/AGPLv3）均带有强网络传染或限制商业托管条款；而 SeaweedFS（Apache-2.0）与 Valkey（BSD-3-Clause）属纯宽松商用协议，可安全打包交付进闭源产品（D 正确）。"
+            },
+            {
+              "prompt": "为避免客户配置的告警 Webhook URL 被恶意利用来探测云主机元数据（169.254.169.254）或内网敏感端口，Go 出口发送器应如何防 SSRF？",
+              "options": [
+                "在域名解析后建连前校验真实地址，拦截私网与元数据段并禁用自动跳转。",
+                "仅在前端网页保存配置时检查网址是否以标准协议头开头，发送端直接放行。",
+                "直接把出口防火墙对全互联网和内部保留网段开放，只靠重试机制过滤报错。",
+                "只在日志里打印告警链接字符串而不对地址做校验，由接收方自行拦截异常。"
+              ],
+              "answerIndex": 0,
+              "explanation": "单纯校验 URL 字符串或解析前检查会被 DNS 重绑定和 302 跳转轻松绕过；必须在 Go net.Dialer.Control 钩子中对 DNS 解析后的真实目标 IP 阻断私网/环回/元数据段并关闭自动重定向（A 正确）。"
+            },
+            {
+              "prompt": "在 Air-Gapped 物理断网私有化交付中，如何利用同一套 OpenFeature 能力开关体系安全管控客户购买的 Tier 1–3 模块与项目席位？",
+              "options": [
+                "把全部功能开关以明文配置文件形式交给客户运维人员手工随意修改启用。",
+                "要求客户的离线断网服务器每隔十分钟强行联网回连公有云认证中心校验。",
+                "通过非对称签名生成离线授权文件并注入本地评估器，统一映射能力键值。",
+                "放弃功能模块区分并为每个离线客户手工编译裁剪不同版本的二进制程序。"
+              ],
+              "answerIndex": 2,
+              "explanation": "采用 Ed25519（RFC 8032）非对称私钥在厂商侧签发离线 License 文件，私有化节点用内置公钥验签后通过 OpenFeature Local Provider 暴露一致的能力键，既防篡改又保持双模代码零分叉（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://github.com/seaweedfs/seaweedfs" target="_blank" rel="noopener"><strong>SeaweedFS (`Apache-2.0`)</strong></a> &amp; <a href="https://valkey.io/" target="_blank" rel="noopener"><strong>Valkey (`BSD-3-Clause`)</strong></a>：替代 MinIO/Garage（<code>AGPL-3.0</code>）与 Redis 8（<code>RSALv2/SSPLv1/AGPLv3</code>）的纯宽松商用开源基础设施。</li>
+          <li><a href="https://spiffe.io/" target="_blank" rel="noopener"><strong>SPIFFE (`Apache-2.0`)</strong></a> &amp; <a href="https://openfga.dev/" target="_blank" rel="noopener"><strong>OpenFGA (`Apache-2.0`)</strong></a>：Hybrid Runner 零信任工作负载 mTLS 身份与细粒度资源授权引擎。</li>
+          <li><a href="https://www.standardwebhooks.com/" target="_blank" rel="noopener"><strong>Standard Webhooks Specification</strong></a> &amp; <strong>SCIM 2.0 (RFC 7643/7644)</strong> &amp; <strong>Ed25519 (RFC 8032)</strong>：签名防重放事件投递、身份自动吊销与离线授权标准。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>下一步与导师实时答疑</h3>
+        <p>下一课 <strong>Lesson 0027（CH 07 全章收官）</strong> 将专为「1 人 + AI Coding Agents」打造终极工程保险与落地蓝图：<strong>SCA 黄金样本回归评测基准（Benchmark Harness 防 AI 静默改坏解析器）、OpenTelemetry Go↔Python 耗时剖析、强契约 Monorepo 结构与 90 天 MVP 垂直切片 Spec</strong>。欢迎随时提问：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“单机 Docker Compose 离线版（4 核 8G）到底哪些组件可以省掉直接内置进 Go 单体？”</li>
+          <li>“客户内网确实需要让 Webhook 推送内部自建 Jira 时，白名单放行策略该怎么设计才既安全又不难用？”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0025-multitenant-storage-finding-lifecycle-and-consistency.html">&larr; 上一课：Lesson 0025 · 多租户与一致性</a>
+      <a href="../reference/ch7-product-arch-and-tech-design-matrix.html">速查参考卡：Ref 08 · 产品架构与双模工程矩阵</a>
+      <a href="../index.html">返回课程总览（下一课 0027 收官即将上线）&rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/dual-mode-deploy-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

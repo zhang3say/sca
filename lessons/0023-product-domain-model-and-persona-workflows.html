@@ -195,7 +195,7 @@
       <p>正确解法是采用 CNCF <a href="https://openfeature.dev/" target="_blank" rel="noopener"><strong>OpenFeature</strong></a>（<code>Apache-2.0</code>）建立一层薄而稳定的 <strong>Capability &amp; Entitlement Gateway</strong>：业务与 API 层永远只询问语义化能力键（例如 <code>reachability.static.enabled</code>、<code>ai_bom.scanner.enabled</code>、<code>deploy.hybrid_runner.max_seats</code>），而具体数值从哪里算出来，由启动时注入的 Provider 决定：</p>
       <ul>
         <li><strong>SaaS 模式 Provider</strong>：读取中心化 Entitlement 表（带短 TTL 本地内存缓存），支持租户在线增购、7 天试用解锁或针对特定大客户的灰度开关。</li>
-        <li><strong>私有化 / 离线模式 Provider</strong>：启动时使用内置公钥校验离线签名 License 文件（我们将在 <strong>Lesson 0026</strong> 详解 Ed25519 签发机制），直接把离线证书里的权限矩阵映射成一模一样的 OpenFeature Evaluation Context。</li>
+        <li><strong>私有化 / 离线模式 Provider</strong>：启动时使用内置公钥校验离线签名 License 文件（我们将在 <a href="./0026-dual-mode-deployment-hybrid-runner-and-rbac-platform.html">Lesson 0026</a> 详解 Ed25519 签发机制），直接把离线证书里的权限矩阵映射成一模一样的 OpenFeature Evaluation Context。</li>
       </ul>
 
       <aside class="sidenote">
