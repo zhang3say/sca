@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lesson 0022：总架构师收官实战：全场景 SCA 产品矩阵、研发配比与竞品攻防蓝图</title>
+  <link rel="stylesheet" href="../assets/tufte-course.css" />
+</head>
+<body>
+  <nav class="course-nav">
+    <div class="course-nav-inner">
+      <div class="course-brand"><span>SCA</span> 现代供应链安全架构手记</div>
+      <div class="course-links">
+        <a href="../index.html">课程首页 · 全局路线图</a>
+        <a href="./0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021 · 海量资产与 0-day 应急</a>
+        <a href="./0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html" class="active">Lesson 0022 · 商业矩阵与总装收官</a>
+        <a href="../reference/ch6-provenance-scale-and-blueprint-matrix.html">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+        <a href="../reference/sca-oss-landscape-and-4layer-map.html">Ref 01 · 架构与协议矩阵</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="lesson-header">
+      <div class="lesson-kicker">
+        <span>LESSON 0022 · CAPSTONE</span>
+        <span class="sep">/</span>
+        <span>PHASE 3 &amp; CH 06 第 3 课（全课程收官总装）</span>
+        <span class="sep">/</span>
+        <span>约 20 分钟</span>
+      </div>
+      <h1>总架构师收官实战：全场景 SCA 产品矩阵、研发配比与竞品攻防蓝图</h1>
+      <p class="subtitle">经过前 21 课对 L1–L4 技术内核、投毒与同源检测、AI 供应链安全、SLSA v1.2 溯源及万级资产规模化底座的拆解，收官终章回答总架构师面向董事会与 CTO 最关键的三个商业工程命题：<strong>如何把全技术栈收束为「一核三阶」可收费产品矩阵？如何在 12 个月内借助 <a href="https://teamtopologies.com/key-concepts" target="_blank" rel="noopener">Team Topologies</a> 动态配比研发人力以避开“手写解析器黑洞”？以及如何在 <a href="https://eur-lex.europa.eu/eli/reg/2024/2847/oj" target="_blank" rel="noopener">EU CRA</a> 与 <a href="https://github.com/ossf/s2c2f" target="_blank" rel="noopener">OpenSSF S2C2F</a> 法规窗口下，对标 Snyk、Endor Labs、Socket、Wiz Code 与 Black Duck 赢得真实商业签单？</strong></p>
+      <div class="meta-strip">
+        <span><strong>本课收获：</strong>完成从 0 到 1 的「一核三阶」SKU 分层与全球四大合规预算锚点对齐；拍板 M1–M3 / M4–M9 / M10–M12+ 研发人力配比迁移模型；掌握五大全球商业标杆的核心定位与非对称破局打法；带走一份可直接提交评审会的全课程终极 <code>ADR-0001..0022</code> 商业与许可总红线蓝图</span>
+        <span><strong>贯穿前置：</strong><a href="./0001-decoupled-sca-architecture-and-oss-boundary.html">Lesson 0001</a> · <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">Lesson 0002</a> · <a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a> · <a href="./0019-agentic-ai-and-mcp-supply-chain-governance.html">Lesson 0019</a> · <a href="./0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021</a></span>
+      </div>
+    </header>
+
+    <div class="callout mission">
+      <div class="callout-label">总架构师终极拍板命题（技术底座 &rarr; 商业护城河的最后一跃）</div>
+      <p>优秀的工程师能做出高准确率扫描器，但真正成功的总架构师必须回答：<strong>“凭什么客户愿意把预算从传统 SCA 或免费开源工具切给我们？”</strong>答案不在重复造 30 种语言解析器的轮子，而在于把 80% 的基础采集/格式/存储沉进严格遵守 <code>Apache-2.0/MIT</code> 的可插拔底座，再把最精锐的研发子弹倾泻到<strong>降噪可达性、恶意包与 MCP 防火墙、AI-BOM、C/C++ 同源及 10 秒 0-day 企业指挥台</strong>这五把商业尖刀上。</p>
+    </div>
+
+    <!-- SECTION 1 -->
+    <h2><span class="sec-num">01</span>「一核三阶」全场景产品矩阵与全球四大合规预算锚点</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>1.1 用唯一 Layer 2 IR 脊椎，支撑三个逐级溢价的商业分层</h3>
+      <p>切忌为“基础合规”“可达性降噪”“AI 供应链”“军工离线版”分别维护四套互不相通的后端数据模型。正确的产品工程化是<strong>「一核三阶（One Spine, Three Tiers）」</strong>：底层永远只有一套围绕 <a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">ECMA-427 PURL 与 Layer 2 统一 IR</a> 运转、经 CAS 去重与 PostgreSQL 持久化的平台脊椎，通过 Layer 3/4 能力开关与交付形态切出三个清晰锚定不同买家预算的商业 SKU：</p>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">为什么 2026–2027 年是企业购买现代 SCA 的黄金窗口？</span>
+        欧盟 <a href="https://eur-lex.europa.eu/eli/reg/2024/2847/oj" target="_blank" rel="noopener"><strong>Cyber Resilience Act（Regulation (EU) 2024/2847）</strong></a>已于 2024-12-10 正式生效：自 <strong>2026-09-11</strong> 起强制执行第 14 条漏洞与重大事件上报（24h 早期预警 / 72h 通告 ENISA），自 <strong>2027-12-11</strong> 起全量强制实施 CE 标志与机器可读 SBOM。没有自动化 SBOM 与 10 秒爆炸半径定位能力的软件厂商根本无法踩中 24 小时上报红线！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:28%" />
+          <col style="width:24%" />
+          <col style="width:30%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>商业版本分层 (SKU)</th>
+            <th>挂载的核心技术模块（对应课程）</th>
+            <th>核心买家与合规预算锚点</th>
+            <th>商业价值叙事与防同质化边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Tier 1 · Starter</strong><br/>统一合规与 SBOM 底座版</td>
+            <td>L1 多触点采集（<a href="./0004-oss-extractors-architecture-and-orchestration.html">0004</a>/<a href="./0005-container-image-os-and-artifact-extraction.html">0005</a>）+ L2 统一 IR（<a href="./0002-unified-ir-purl-and-cyclonedx-graph.html">0002</a>）+ L3 OSV/Backport 与许可合规（<a href="./0007-osv-schema-and-multisource-vuln-aggregation.html">0007</a>–<a href="./0010-oss-license-compliance-and-copyleft-reasoning.html">0010</a>）。</td>
+            <td>合规团队 / 法务 / DevOps<br/>锚定 <a href="https://www.cisa.gov/sbom" target="_blank" rel="noopener"><strong>CISA SBOM 最小要素</strong></a>（Hash/License/Tool）与 <strong>EU CRA</strong> 合规基线。</td>
+            <td><strong>快速进场钩子（Land）：</strong>解决“多工具输出互不兼容、OS Backport 误报成灾、SBOM 缺字段不达标”问题，把客户资产先吸进自研 Layer 2 IR。</td>
+          </tr>
+          <tr>
+            <td><strong>Tier 2 · Pro</strong><br/>第三代智能壁垒与 AI 安全版</td>
+            <td>L4 静动态可达性（<a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">0011</a>–<a href="./0012-dynamic-runtime-reachability-and-container-trimming.html">0012</a>）+ EPSS/KEV/VEX 降噪（<a href="./0013-beyond-cvss-epss-kev-ssvc-and-vex-triage.html">0013</a>）+ 无破坏升级（<a href="./0014-guided-remediation-and-upgrade-path-solver.html">0014</a>）+ 投毒/Agent MCP/AI-BOM（<a href="./0015-malicious-packages-and-supply-chain-poisoning-engine.html">0015</a>/<a href="./0017-aibom-modeling-models-datasets-and-lineage.html">0017</a>–<a href="./0019-agentic-ai-and-mcp-supply-chain-governance.html">0019</a>）。</td>
+            <td>AppSec / 研发效能负责人 / AI 平台团队<br/>锚定 <a href="https://github.com/ossf/s2c2f" target="_blank" rel="noopener"><strong>OpenSSF S2C2F</strong></a>（消费端防护）与 <strong>EU AI Act Art. 53</strong>。</td>
+            <td><strong>核心商业溢价引擎（Expand）：</strong>把 90% 无效 CVE 砍掉，在 AI Agent 写代码和安装依赖前拦住 Slopsquatting 与 MCP 投毒，直接替研发省工时。</td>
+          </tr>
+          <tr>
+            <td><strong>Tier 3 · Enterprise Sovereign</strong><br/>全场景可信溯源与离线指挥台</td>
+            <td>C/C++ 同源与二进制金字塔（<a href="./0016-snippet-fingerprinting-and-binary-sca.html">0016</a>）+ SLSA v1.2 Private Sigstore（<a href="./0020-build-provenance-slsa-intoto-and-sigstore.html">0020</a>）+ 离线 OCI 增量库（<a href="./0009-offline-vuln-db-distribution-and-matching-index.html">0009</a>）+ 万级 CAS/RoaringBitmap 10 秒 0-day 应急（<a href="./0021-enterprise-asset-graph-scale-and-0day-response.html">0021</a>）。</td>
+            <td>CISO / 集团安全中心 / 车企与金融科技<br/>锚定 <a href="https://csrc.nist.gov/pubs/sp/800/218/final" target="_blank" rel="noopener"><strong>NIST SP 800-218 SSDF</strong></a>、<strong>EU CRA 24h 上报</strong>与数据不出域主权。</td>
+            <td><strong>大客护城河与百万级 ACV：</strong>打通无源码固件审计、自建 Rekor v2 私有签名与全集团 10 秒定损，形成高转换成本的平台中枢。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2><span class="sec-num">02</span>12 个月研发人力动态配比与 Team Topologies 组织设计</h2>
+
+    <div class="prose-col has-sidenote">
+      <h3>2.1 避开康威定律陷阱：为什么必须按能力域而非“按语言”建团队？</h3>
+      <p>许多绿地 SCA 团队在立项第一天按“Java 组 / JS 组 / Python 组 / Go 组”划分编制，结果半年后每个语言组都各自造了一套互不兼容的扫描器和漏洞匹配器，陷入无止境的边缘语法修补。遵循 Matthew Skelton 与 Manuel Pais 的 <a href="https://teamtopologies.com/key-concepts" target="_blank" rel="noopener"><strong>Team Topologies</strong></a> 四类基础团队模型，我们把全部研发资源划分为四支目标清晰的小队，并在 12 个月内执行三段式动态调仓：</p>
+      <ul>
+        <li><strong>Platform Team（统一底座组）：</strong>守住 L1 开源引擎适配器（OSV-SCALIBR / Syft / cdxgen）、L2 统一 IR 图模型、L3 多源汇聚/版本引擎/OCI 离线库与 CAS + PostgreSQL 台账。</li>
+        <li><strong>Complicated-Subsystem Team（核心壁垒算法组）：</strong>集中高阶编译原理与安全分析骨干，专攻静态/动态可达性、恶意包 Capability Diff、Winnowing/CENTRIS 同源与 AI 载荷/SLSA 密码学内核。</li>
+        <li><strong>Stream-Aligned Team（场景与触点交付组）：</strong>面向客户真实工作流交付——Single Go Core（MCP/Hook/LSP）、PR 自动修复（OpenRewrite）、Backstage 派单、CEL/OPA 准入网关与合规报表。</li>
+        <li><strong>Enabling Team（安全研究与规则赋能组）：</strong>负责漏洞函数符号库标定（<a href="./0011-static-call-graph-reachability-and-cross-language-challenges.html">Lesson 0011</a>）、恶意包行为特征提炼、OSADL/SPDX 许可矩阵校准及商业标杆攻防基准集维护。</li>
+      </ul>
+
+      <aside class="sidenote">
+        <span class="sidenote-title">资源分配铁律：永远别让 Platform 组超过 35%（Phase 2 起）</span>
+        在 Phase 1（M1–M3），Platform 组需要集中 55% 兵力立住四层解耦脊椎；但从第 4 个月起必须果断通过 Apache-2.0 借力把 Platform 组收缩至 ~25%，把 <strong>40%–45% 的黄金兵力</strong>长期锁定在壁垒算法组（Complicated-Subsystem）与安全研究组（Enabling）！
+      </aside>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:18%" />
+          <col style="width:20%" />
+          <col style="width:20%" />
+          <col style="width:20%" />
+          <col style="width:22%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>演进阶段与典型规模</th>
+            <th>Platform Team<br/>(L1/L2/L3 与规模化底座)</th>
+            <th>Complicated-Subsystem<br/>(L4 壁垒 / AI / 二进制)</th>
+            <th>Stream-Aligned<br/>(Agent/CI/门禁/控制台)</th>
+            <th>Enabling Research<br/>(符号/投毒/许可研究)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Phase 1 · M1–M3</strong><br/>统一底座拍板（~12 人）</td>
+            <td><strong>55%（~6–7 人）</strong><br/>立住 L2 IR、OSV-SCALIBR/Syft 嵌入、OSV/版本/Backport 引擎。</td>
+            <td><strong>15%（~2 人）</strong><br/>启动 Go/Java 调用图原型与可插拔符号挂载点验证。</td>
+            <td><strong>20%（~2–3 人）</strong><br/>打通 Single Go Core（MCP+Hook+LSP）与 CI PR 门禁 MVP。</td>
+            <td><strong>10%（~1 人）</strong><br/>建立漏洞符号采样基准、许可隔离审计与 MAL-* 冷启动接入。</td>
+          </tr>
+          <tr>
+            <td><strong>Phase 2 · M4–M9</strong><br/>三代壁垒冲刺（~20 人）</td>
+            <td><strong>25%（~5 人）</strong><br/>维护 OCI 离线增量库、L2 AI-BOM 扩展字段与 CAS 稳定运行。</td>
+            <td><strong>45%（~9 人）</strong><br/>全速交付跨语言静动态可达性、API Diff 升级、Capability Diff、Pickle/MCP 防护。</td>
+            <td><strong>15%（~3 人）</strong><br/>落地 OpenRewrite 自动修复 PR、MCP 工具 Pinning 网关与降噪工作台。</td>
+            <td><strong>15%（~3 人）</strong><br/>持续生产函数级漏洞符号映射、70+ 投毒信号与新型绕过对抗样本。</td>
+          </tr>
+          <tr>
+            <td><strong>Phase 3 · M10–M12+</strong><br/>企业规模领跑（~30 人）</td>
+            <td><strong>25%（~7–8 人）</strong><br/>落地 ClickHouse/S3 分层、RoaringBitmap + PG14 CYCLE 万级台账。</td>
+            <td><strong>40%（~12 人）</strong><br/>攻克 C/C++ 同源与三层二进制、SLSA v1.2 Private Sigstore 闭环。</td>
+            <td><strong>20%（~6 人）</strong><br/>打通 Backstage 路由、CEL(VAP)/OPA 灰度网关、EU CRA/SSDF 审计导出。</td>
+            <td><strong>15%（~4–5 人）</strong><br/>7×24 0-day 秒级函数符号响应与多语言生态对抗情报。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="arch-diagram full-width">
+      <figcaption class="arch-diagram-caption">
+        <strong>图 1 · 全课程终极总装图：四层技术脊椎 &times; Team Topologies 组织架构 &times; 一核三阶商业矩阵</strong>
+        <span>把第 0001–0022 课的全部工程决策压缩进一张可执行的总架构师作战图</span>
+      </figcaption>
+      <div class="orch-flow">
+        <div class="orch-stage stage-router">
+          <div class="orch-stage-head">
+            <span class="orch-stage-title">技术总脊椎 · L1 借力提取 &rarr; L2 自研统一 IR (PURL / CycloneDX 1.7 / CAS) &rarr; L3 OSV+Backport 情报引擎</span>
+            <span class="orch-stage-kicker">Platform Team (Phase 1 55% &rarr; 稳定后 25%) &middot; 全栈 Apache-2.0 / MIT 商业安全底座</span>
+          </div>
+          <p class="orch-stage-desc">
+            拒绝重复造轮子：OSV-SCALIBR / Syft / cdxgen / ORT 负责全形态采集；自研 Layer 2 IR 与 CAS + PostgreSQL（PG14 CYCLE）+ ClickHouse + S3 承担唯一状态真值；RoaringBitmap + OCI 逻辑增量库支撑万级资产 10 秒 0-day 定损。
+          </p>
+        </div>
+
+        <div class="orch-connector">&darr; &nbsp; 统一 IR 与情报底座向四类高价值壁垒与多触点商业交付持续输血 &nbsp; &darr;</div>
+
+        <div class="orch-lanes">
+          <div class="orch-lane">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">L4 商业护城河（Complicated-Subsystem + Enabling）</span>
+              <span class="badge badge-build">55%–60% 高阶火力长期锁定</span>
+            </div>
+            <ul>
+              <li><strong>精准降噪与安全修复：</strong>CHA/VTA/Jelly/JARVIS + 运行时 JFR/PEP 669 融合 + EPSS/KEV/VEX + API Diff 安全升级。</li>
+              <li><strong>无 CVE 威胁与 AI 安全：</strong>72h 投毒冷却/Capability Diff、Winnowing/CENTRIS 二进制同源、AI-BOM、Safetensors/Pickle 与 MCP 治理。</li>
+            </ul>
+          </div>
+
+          <div class="orch-lane lane-sandbox">
+            <div class="orch-stage-head">
+              <span class="orch-stage-title">多触点与一核三阶商业交付（Stream-Aligned）</span>
+              <span class="badge badge-ok">EU CRA / S2C2F / NIST SSDF</span>
+            </div>
+            <ul>
+              <li><strong>Agentic 时代左移：</strong>Single Go Core（MCP + Hook + LSP）护航 AI 编程，SLSA v1.2 + Private Sigstore + CEL/OPA 守住云原生准入。</li>
+              <li><strong>商业分层变现：</strong>Starter 吸纳资产 &rarr; Pro 靠降噪与 AI 防护溢价 &rarr; Enterprise Sovereign 拿下百万级离线与 C/C++ 大客单。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- SECTION 3 -->
+    <h2><span class="sec-num">03</span>对标全球五大商业标杆的攻防策略与全栈协议总红线</h2>
+
+    <div class="prose-col">
+      <h3>3.1 全球五大商业标杆格局演变与我方非对称破局打法</h3>
+      <p>全球软件供应链安全市场已从单纯的“列表对比扫描”分化为五股特征鲜明的头部势力（包括 <strong>2026 年 3 月 11 日 Google 完成 320 亿美元现金收购 Wiz</strong> 带来的云代码融合格局，以及 <strong>Black Duck 从 Synopsys 分拆独立</strong>）。总架构师必须清楚每一家对手的“命门”与“软肋”，避免在对手最强项上打正面消耗战：</p>
+    </div>
+
+    <div class="table-wrap full-width">
+      <table class="table-fixed">
+        <colgroup>
+          <col style="width:17%" />
+          <col style="width:21%" />
+          <col style="width:28%" />
+          <col style="width:34%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>全球商业标杆</th>
+            <th>核心定位与买家</th>
+            <th>标杆最强壁垒 vs 结构性软肋</th>
+            <th>我方非对称破局策略（POC 必杀技）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><a href="https://snyk.io/" target="_blank" rel="noopener">Snyk</a></strong></td>
+            <td>开发者优先 All-in-One AppSec<br/>（研发经理 / 互联网团队）</td>
+            <td><strong>壁垒：</strong>极致的 IDE/PR 体验与 Snyk VulnDB。<br/><strong>软肋：</strong>传统 SCA 默认误报噪音仍偏高、深度私有化与离线场景沉重、MCP/AI-BOM 尚未成为中心脊椎。</td>
+            <td><strong>「真降噪 + AI Agent 护栏」破局：</strong>用真实业务仓现场跑函数级可达性压掉 85%+ 噪音，叠加 Single Go Core MCP/Hook 实时拦住 Slopsquatting 并保留客户数据不出域主权。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://www.endorlabs.com/" target="_blank" rel="noopener">Endor Labs</a></strong></td>
+            <td>高保真依赖与函数可达性标杆<br/>（AppSec / 金融科技）</td>
+            <td><strong>壁垒：</strong>强悍的函数级调用图降噪与安全升级。<br/><strong>软肋：</strong>主战场偏应用源码，在容器 OS Backport、C/C++ 二进制同源、模型序列化及本地离线交付侧相对薄弱。</td>
+            <td><strong>「全域资产 + AI/离线补位」破局：</strong>在代码可达性同台打平后，亮出统一 IR 纳管 OCI/Debian Backport、AI-BOM/Safetensors/MCP 与 Private Sigstore 空气隔离交付。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://socket.dev/" target="_blank" rel="noopener">Socket.dev</a></strong></td>
+            <td>主动供应链投毒防火墙<br/>（Modern DevSecOps）</td>
+            <td><strong>壁垒：</strong>70+ AST 行为红旗、npm/PyPI 实时投毒与 <code>sfw</code> 防火墙。<br/><strong>软肋：</strong>定位偏投毒拦截点工具，缺少万级资产图谱、长周期 CVE 可达性、C/C++ 与法务合规闭环。</td>
+            <td><strong>「投毒防线 &times; 全生命周期合并预算」：</strong>补齐 72h 冷却与 Capability Diff 后向 CISO 算总账：不必买两套彼此割裂的平台，一套底座同时管住增量投毒与存量漏洞/VEX。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://www.wiz.io/" target="_blank" rel="noopener">Wiz / Wiz Code</a></strong><br/>（2026-03 并入 Google Cloud）</td>
+            <td>Cloud-to-Code CNAPP 霸主<br/>（CISO / 云安全团队）</td>
+            <td><strong>壁垒：</strong>无代理云上暴露面关联（网络/IAM/运行时）。<br/><strong>软肋：</strong>强在云基础设施上下文，对复杂构建期语言解析、函数调用图与研发写入前拦截天然需要生态集成（WIN）。</td>
+            <td><strong>「OpenVEX/VSA 生态共生，切分昼夜边界」：</strong>不与 CNAPP 硬抢云运行时盘子，主动输出高精度 CycloneDX 1.7 / VEX / SLSA VSA 给 Wiz；自己牢牢守住研发左移、私有化与深度分析主权。</td>
+          </tr>
+          <tr>
+            <td><strong><a href="https://www.blackduck.com/" target="_blank" rel="noopener">Black Duck</a></strong><br/>（原 Synopsys SIG 分拆）</td>
+            <td>企业合规、M&amp;A 与深水区 SCA<br/>（法务 / 车企 / 制造业）</td>
+            <td><strong>壁垒：</strong>历史最深的 C/C++ 代码片段同源、二进制扫描与法务审计。<br/><strong>软肋：</strong>架构偏重、扫描耗时慢、现代 CI/Agent 开发者体验与云原生 AI-BOM 敏捷度不足。</td>
+            <td><strong>「轻量高速同源 + 现代 AI-BOM」：</strong>用 Winnowing/CENTRIS + LIEF/Ghidra 金字塔吃下无源码 C/C++ 硬骨头，同时交付分钟级 CI 体验、EU CRA 报表与车载大模型权重审计。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose-col">
+      <h3>3.2 全课程终极架构决议清单（<code>ADR-Master</code> · 全栈选型与许可红线总表）</h3>
+      <p>下面这份浓缩了全 22 课核心拍板的 YAML 蓝图，可以直接作为你新产品立项的 <strong>Master ADR（Architecture Decision Record）</strong> 放进团队代码仓根目录：</p>
+    </div>
+
+    <div class="code-block full-width">
+      <div class="code-block-head">
+        <strong>sca-chief-architect-adr-master.yaml（全课程 22 课架构选型与商用合规红线总汇编）</strong>
+        <span>One Spine · Three Tiers · 100% Commercial Safe (0 GPL / 0 AGPL / 0 BSL)</span>
+      </div>
+      <pre><code><span class="tok-key">architecture_spine</span>:
+  <span class="tok-key">layer_1_sensors</span>:
+    <span class="tok-key">embedded_go</span>:   [<span class="tok-str">"google/osv-scalibr (Apache-2.0)"</span>, <span class="tok-str">"anchore/syft (Apache-2.0)"</span>, <span class="tok-str">"go-rpmdb (MIT)"</span>]
+    <span class="tok-key">sandboxed_cli</span>: [<span class="tok-str">"CycloneDX/cdxgen (Apache-2.0)"</span>, <span class="tok-str">"oss-review-toolkit/ort (Apache-2.0)"</span>]
+    <span class="tok-key">touchpoints</span>:   <span class="tok-str">"Single Go Core (--mode=mcp | --mode=hook | --mode=lsp) + PR Diff + Hyades Event"</span>
+  <span class="tok-key">layer_2_unified_ir</span>:
+    <span class="tok-key">identity</span>:      <span class="tok-str">"ECMA-427 PURL (含 pkg:huggingface) + Immutable Digest (SHA256)"</span>
+    <span class="tok-key">exchange_bom</span>:  <span class="tok-str">"ECMA-424 CycloneDX 1.7 (ML-BOM/VDR/VEX) &lt;-&gt; SPDX 3.0.1 (AI/Dataset)"</span>
+    <span class="tok-key">storage_tiers</span>: <span class="tok-str">"CAS子图去重 -> Hot(PG14+ CYCLE &amp; RoaringBitmap) / Warm(ClickHouse) / Cold(S3 Parquet)"</span>
+  <span class="tok-key">layer_3_intelligence</span>:
+    <span class="tok-key">vuln_schema</span>:   <span class="tok-str">"OpenSSF OSV v1.7.0 (OSV/GHSA/NVD/MAL-*) + 生态原生 VERS + Backport 双轨隔离"</span>
+    <span class="tok-key">offline_dist</span>:  <span class="tok-str">"SQLite Handle+Blob / bbolt 经 OCI 签名逻辑增量分发 + atomic.Pointer 零锁热切"</span>
+    <span class="tok-key">license_core</span>:  <span class="tok-str">"Declared/Observed/Concluded 三层真值 + SPDX AST + OSADL/FSF 传染性矩阵"</span>
+  <span class="tok-key">layer_4_moats_and_ai</span>:
+    <span class="tok-key">reachability</span>:  <span class="tok-str">"Go SSA+VTA / Java ASM+OPAL / JS Jelly / Python JARVIS &amp; 运行时 JFR/PEP669/V8"</span>
+    <span class="tok-key">triage_remedy</span>: <span class="tok-str">"EPSS v4 + CISA KEV + SSVC 非补偿树 + OpenVEX + (API Diff ∩ CG) + OpenRewrite"</span>
+    <span class="tok-key">supply_chain</span>:  <span class="tok-str">"72h 冷却 + Capability Diff + Winnowing/CENTRIS/LIEF + Fail-Closed Safetensors/MCP"</span>
+    <span class="tok-key">provenance</span>:    <span class="tok-str">"SLSA v1.2 (Build+Source) + DSSE PAE + Private Sigstore (Rekor v2) + CEL(VAP)/OPA"</span>
+
+<span class="tok-key">commercial_license_guardrails</span>:
+  <span class="tok-key">green_permissive</span>: <span class="tok-str">"Apache-2.0 / MIT / BSD-2/3 / PostgreSQL (直接嵌入或适配零传染)"</span>
+  <span class="tok-key">yellow_isolated</span>:
+    - <span class="tok-str">"ScanCode LicenseDB (CC-BY-4.0): 严格履行署名与变更说明"</span>
+    - <span class="tok-str">"PubGrub (MPL-2.0) / WALA (EPL-2.0): 文件级弱传染，隔离独立文件不混改"</span>
+    - <span class="tok-str">"Semgrep CE / SootUp (LGPL-2.1) &amp; fickling (LGPL-3.0): 禁闭源静态链接 &amp; 禁官方规则商用，须子进程隔离"</span>
+  <span class="tok-key">red_strictly_banned</span>:
+    - <span class="tok-str">"GPL-2.0/3.0: FOSSology, SCANOSS, cve-bin-tool, Neo4j Community, GPL eBPF"</span>
+    - <span class="tok-str">"AGPL-3.0: Renovate, Canonical chisel"</span>
+    - <span class="tok-str">"BSL / 专有禁止商用: ArangoDB, Memgraph, GitHub CodeQL CLI, Malcontent (ELv2/DRL 规则边界)"</span></code></pre>
+    </div>
+
+    <!-- SECTION 4: INTERACTIVE LAB & SANDBOX -->
+    <h2><span class="sec-num">04</span>交互实验台与总架构师终极拍板沙盘</h2>
+
+    <div class="prose-col">
+      <p>在实验台<strong>模式一</strong>中调整团队规模与三个演进阶段，开关开源借力与 L2 IR 主权闸门，直观对比 Team Topologies 配比与“手写解析器黑洞”的惨烈差异；在<strong>模式二</strong>中切换 Snyk、Endor Labs、Socket.dev、Wiz Code 与 Black Duck 五大标杆，组合商业 SKU 与交付模式推演大客户 POC 胜算。</p>
+    </div>
+
+    <!-- INTERACTIVE BLUEPRINT STRATEGY LAB -->
+    <section class="widget-panel full-width" data-widget="blueprint-strategy-lab">
+      <script type="application/json" class="blueprint-strategy-lab-data">
+        {
+          "title": "交互实验台：12 个月研发配比仿真与全球标杆竞品攻防推演",
+          "intro": "动态验证 Phase 1→3 人力调仓、L2 IR 主权保护以及面向全球五大商业标杆的 SKU 分层与 POC 破局策略。"
+        }
+      </script>
+    </section>
+
+    <!-- ARCHITECTURE DECISION SANDBOX -->
+    <section class="widget-panel full-width" data-widget="sandbox">
+      <script type="application/json" class="sandbox-data">
+        {
+          "title": "总架构师收官评审沙盘（5 项面向 CEO/CTO 的终极拍板决策）",
+          "intro": "设定：你已完成全部技术预研，明天将向公司管理层汇报 0→1 全场景现代化 SCA 产品的 12 个月立项总蓝图。",
+          "summary": {
+            "optimal": "满分收官！全部 {optimal} 项战略决策精准对齐第三代现代化 SCA 架构哲学的核心精髓——技术脊椎稳固、组织火力集中、合规与竞品策略清晰且 100% 守住商用红线。",
+            "warning": "大方向可行，但有 {warning} 项存在商业溢价不足、技术债或生态摩擦隐患（标黄项），建议在汇报前补强调整。",
+            "critical": "汇报将遭否决！当前方案踩中 {critical} 处致命战略误区（标红项）：可能深陷造轮子黑洞、触碰 GPL/BSL 法务生死线或错失 AI 时代核心战场。"
+          },
+          "modules": [
+            {
+              "name": "Phase 1–3 研发人力配比与开源借力总战略",
+              "layer": "组织与研发配比",
+              "context": "初创核心研发团队仅 12–20 人，必须在 12 个月内跑出既有稳定底座又有商业壁垒的产品。",
+              "options": [
+                {
+                  "label": "M1–M3 集中 55% 兵力立稳 L2 IR 与 Apache-2.0 适配器，M4 起收缩底座至 25%，将 45% 火力转向 L4 壁垒与研究",
+                  "status": "optimal",
+                  "verdictTitle": "最符合 Team Topologies 演进律：先立脊椎再长护城河",
+                  "feedback": "用 OSV-SCALIBR/Syft/cdxgen 替团队省出数万人天，把最贵的高阶工程师留在可达性、投毒与 AI-BOM 上。"
+                },
+                {
+                  "label": "按语言设立 6 个独立小组从零手写全部 Manifest/Lockfile 解析器，70% 人力常年扑在语法兼容性上",
+                  "status": "critical",
+                  "verdictTitle": "必死的“解析器黑洞”！半年后毫无商业壁垒可言",
+                  "feedback": "常规生态解析已经是商品化（Commodity）能力，自研 30 种解析器不仅打不赢免费开源工具，更会彻底耗光高阶护城河预算。"
+                },
+                {
+                  "label": "为了快出 Demo，不建自研 Layer 2 IR，直接把第三方扫描器输出的 JSON 原样存库并供前端直连",
+                  "status": "warning",
+                  "verdictTitle": "严重技术债！Phase 2 接入可达性与 AI-BOM 时将被迫推倒重来",
+                  "feedback": "底层可以用开源工具，但内部 IR 契约与图谱主权必须 100% 自研隔离。"
+                }
+              ]
+            },
+            {
+              "name": "商业产品矩阵分层与全球法规预算撬动",
+              "layer": "商业矩阵与合规",
+              "context": "如何避免落入“免费扫描器价格战”，撬动企业千万级年度安全预算？",
+              "options": [
+                {
+                  "label": "以唯一 L2 IR 支撑 Starter(合规底座) / Pro(降噪+AI/MCP) / Enterprise(离线+SLSA+10秒0-day) 三阶 SKU",
+                  "status": "optimal",
+                  "verdictTitle": "一核三阶完美覆盖 Land-and-Expand，精准踩中 EU CRA / S2C2F / SSDF 预算",
+                  "feedback": "用合规基线低门槛进场吸纳资产，再靠可达性、投毒防线与万级应急指挥台实现数倍客单价跃迁。"
+                },
+                {
+                  "label": "为政务、AI、容器、代码分别开发四套互不兼容的独立小工具和独立后台数据库",
+                  "status": "critical",
+                  "verdictTitle": "研发与运维成本爆炸 4 倍！客户根本无法实现统一资产关联与 0-day 定损",
+                  "feedback": "现代企业购买的是统一的软件供应链风险视角，数据模型割裂将摧毁平台价值。"
+                },
+                {
+                  "label": "所有版本一视同仁按相同功能打包低价售卖，完全不围绕 EU CRA 24h 上报或可达性做差异化定价",
+                  "status": "warning",
+                  "verdictTitle": "沦为红海低价工具！难以体现第三代降噪与 AI 供应链能力的十倍价值",
+                  "feedback": "必须用高价值壁垒能力锚定 Pro 与 Enterprise 阶梯溢价。"
+                }
+              ]
+            },
+            {
+              "name": "面对全球五大商业标杆（尤以 CNAPP 巨头 Wiz 为例）的定位策略",
+              "layer": "竞品攻防策略",
+              "context": "Google 已于 2026-03 完成 320 亿美元收购 Wiz，大客户普遍已在云端部署 CNAPP。",
+              "options": [
+                {
+                  "label": "通过 CycloneDX/OpenVEX/SLSA VSA 与 CNAPP 生态共生，聚焦研发左移、真可达性、AI-BOM 与私有化破局",
+                  "status": "optimal",
+                  "verdictTitle": "高明的不对称竞争：把巨头变成自己的下游消费端而非正面死敌",
+                  "feedback": "用高质量静态与研发态信号补强 CNAPP 短板，同时靠私有化与深度降噪赢下独立的 AppSec 与研发预算。"
+                },
+                {
+                  "label": "宣称一年内从零再造一套完整的无代理云安全 CNAPP 与 CSPM 来正面取代 Wiz",
+                  "status": "critical",
+                  "verdictTitle": "战略自杀！战线过长直接导致主业 SCA 底座与壁垒双双失守",
+                  "feedback": "聚焦「Code / Artifact / AI / Build」供应链主航道，通过标准协议对接云安全大盘。"
+                },
+                {
+                  "label": "只做传统 CVE 列表展示，不投入函数可达性与恶意包防线，在标书中仅靠堆砌规则数量打价格战",
+                  "status": "warning",
+                  "verdictTitle": "无法撼动 Snyk/Endor/Socket 的现网地位！POC 现场将被降维打击",
+                  "feedback": "没有降噪与主动投毒防线，客户只会觉得“比免费 Trivy 多了一层漂亮 UI”。"
+                }
+              ]
+            },
+            {
+              "name": "全栈开源底座商业闭源交付许可终审",
+              "layer": "法务与协议红线",
+              "context": "产品需同时支持公有云 SaaS 商业售卖与政企/金融源代码及镜像私有化交付。",
+              "options": [
+                {
+                  "label": "核心层严守 Apache-2.0/MIT/BSD/PG，CC-BY 履行署名，LGPL 进程隔离并彻底零引入 GPL/AGPL/BSL/CodeQL",
+                  "status": "optimal",
+                  "verdictTitle": "无懈可击的商用合规防线！顺利通过最严苛的金融/跨国企业尽调",
+                  "feedback": "既充分享受了开源生态 80% 的工程红利，又保障了 100% 闭源商业知识产权纯净度。"
+                },
+                {
+                  "label": "将 Neo4j CE（GPL-3.0）、Renovate（AGPL-3.0）、SCANOSS（GPL-2.0）或 ArangoDB（BSL）直接打进商业内核",
+                  "status": "critical",
+                  "verdictTitle": "毁灭性法务暴雷！触发全产品被迫开源或违约禁售风险",
+                  "feedback": "在并购尽调或大客户安全审计中一旦查出 GPL/AGPL/BSL 违约，整个商业合同将被一票否决。"
+                },
+                {
+                  "label": "内嵌 Semgrep CE 官方规则集直接打包成商业 SaaS 卖点，忽视其规则禁止竞品商业条款",
+                  "status": "warning",
+                  "verdictTitle": "高危商业条款违约隐患！务必区分代码许可与配套规则/数据集许可",
+                  "feedback": "引擎与规则往往适用不同协议，自研规则或选用纯 Apache-2.0 检测内核才是长久之计。"
+                }
+              ]
+            },
+            {
+              "name": "AI 编程时代研发左移（触点 1）与安全护栏范式",
+              "layer": "AI 时代工作流",
+              "context": "大量工程师已在对话式 AI Coding Agent（Claude Code / Cursor / Codex）内直接生成并安装代码与依赖。",
+              "options": [
+                {
+                  "label": "打造 Single Go Core 三模入口（MCP + Hook + LSP），在 Agent 安装前阻断投毒/幻觉包并同步治理 MCP 工具链",
+                  "status": "optimal",
+                  "verdictTitle": "精准卡位 2026+ 下一代研发入口，打造传统厂商尚不具备的代差体验",
+                  "feedback": "把 SCA 从“事后给人类发工单”进化成“驱动 AI Agent 自主选安全版本的实时免疫系统”。"
+                },
+                {
+                  "label": "假设工程师仍在手动写 pom.xml 且一定会打开传统 IDE 查看红色波浪线，完全忽略 Agent 与 MCP 风险",
+                  "status": "critical",
+                  "verdictTitle": "触点全面失明！AI Agent 绕过传统门禁静默引入幻觉恶意包与投毒 MCP",
+                  "feedback": "工具形态已经迁移到对话式 Agent 与工具链，SCA 触点必须同步跟进。"
+                },
+                {
+                  "label": "只在 CI 夜间流水线每天扫一次，允许开发者和 Agent 白天先把带毒包拉到本机跑一整天",
+                  "status": "warning",
+                  "verdictTitle": "为时已晚！研发笔记本凭据与源码在 postinstall 执行瞬间就已失窃",
+                  "feedback": "恶意包防御必须左移到包安装与 Agent 调用工具的亚秒边界。"
+                }
+              ]
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- SECTION 5: RETRIEVAL QUIZ -->
+    <h2><span class="sec-num">05</span>全课程终极综合回忆测验（检验架构总装能力）</h2>
+
+    <div class="prose-col">
+      <p>以下 4 道综合实战题串联全课程的 <strong>Team Topologies 人力演进、EU CRA 与 OpenSSF S2C2F 全球合规锚点、五大商业标杆攻防定位以及全栈开源许可终审红线</strong>。<strong>先凭记忆作答，完成全课程收官闭环！</strong></p>
+    </div>
+
+    <section class="widget-panel full-width" data-widget="quiz">
+      <script type="application/json" class="quiz-data">
+        {
+          "title": "Lesson 0022 · 全场景 SCA 产品矩阵与总架构师蓝图终极测验",
+          "intro": "重点检验 12 个月研发动态调仓、EU CRA/SSDF/S2C2F 合规窗口、五大标杆非对称打法与全栈商用许可边界。",
+          "questions": [
+            {
+              "prompt": "按照 Team Topologies 与四层解耦架构推进 0→1 现代 SCA 研发时，12 个月内不同阶段的研发人力应如何动态演进？",
+              "options": [
+                "全年始终坚持七成以上人力手写多语言解析器，将第三代降噪与新壁垒延后到次年后期再启动。",
+                "初期集中半数人力借开源立稳统一底座模型，中期缩减底座占比并将主力转向可达性与防投毒。",
+                "从立项第一天起就取消底座与研究团队，全员直接分头开发四套互不连通的独立业务线小工具。",
+                "彻底跳过中间层模型直接透传第三方输出格式，把全部研发精力长期投入在定制报表界面美化。"
+              ],
+              "answerIndex": 1,
+              "explanation": "Phase 1（M1–M3）由 Platform 组集中约 55% 兵力立住 L1 适配器与自研 L2 IR 脊椎；从 Phase 2（M4+）起借 Apache-2.0 底座红利将 Platform 收缩至 ~25%，把 40%–45% 的主力转向 Complicated-Subsystem 核心壁垒并配置 Enabling 安全研究组（B 正确）。"
+            },
+            {
+              "prompt": "在制定「一核三阶」商业分层并撬动大客户合规采购预算时，以下关于全球核心法规与标准时间锚点的判断哪项准确？",
+              "options": [
+                "欧盟网络韧性法案完全不涉及漏洞通报义务，企业仅需在十年后再自愿提供一份手工列表格式声明。",
+                "所有人工智能法案与供应链消费框架均要求强制开源全部闭源商业产品源码，禁止开展商业化收费。",
+                "美国政府软件供应链指引与最小要素规范已经明确取消了组件哈希、许可证和生成工具的字段要求。",
+                "欧盟网络韧性法案规定二零二六年九月强制上报在野漏洞，次年十二月强制交付机器可读组件清单。"
+              ],
+              "answerIndex": 3,
+              "explanation": "Regulation (EU) 2024/2847 (EU CRA) 规定自 2026-09-11 起强制执行第 14 条漏洞与事件上报（24h 预警 / 72h 通告 ENISA），自 2027-12-11 起全量强制 CE 标志与机器可读 SBOM；且 CISA SBOM 最小要素进一步强化组件 Hash、许可证、工具名与生成上下文（D 正确）。"
+            },
+            {
+              "prompt": "面对 Google 收购 Wiz（CNAPP 巨头）与 Snyk / Endor / Socket / Black Duck 并立的全球格局，新入局者最明智的破局策略是什么？",
+              "options": [
+                "用开放标准与云平台互补共生，依托统一底座叠加降噪、智能体防护与私有化打出非对称优势。",
+                "立项一年内集中全部兵力从零复刻全套无代理云配置审计，在云主机领域直接替代头部云平台。",
+                "彻底放弃函数可达性与投毒拦截等三代能力，仅靠界面美化去打免费开源扫描器的低价消耗战。",
+                "针对金融和汽车制造客户要求强行拆除私有化部署支持，全部改为公有云多租户模式强制托管。"
+              ],
+              "answerIndex": 0,
+              "explanation": "Google 已于 2026-03 完成 320 亿美元收购 Wiz，新产品绝不可在云基础设施 CNAPP 盘子上消耗兵力，而应通过 CycloneDX 1.7 / OpenVEX / SLSA VSA 向 CNAPP 输血共生，并在“真可达性、AI Agent MCP 治理、AI-BOM、C/C++ 与离线私有化”上建立代差（A 正确）。"
+            },
+            {
+              "prompt": "在提交给法务与 CTO 的最终全栈架构 ADR 中，哪组组件与商业边界判定完全符合商业闭源红线？",
+              "options": [
+                "将受限商业托管引擎直接内置为核心图库，同时把限制竞品的第三方官方规则打包出售为订阅卖点。",
+                "把强传染开源图库和自动升级工具直接静态链接进商业内核，并主张只要不修改源码即可闭源转售。",
+                "以宽松协议组件作为内核并严格隔离弱传染与署名库，彻底禁绝强传染与禁止商业托管转售的组件。",
+                "在闭源企业版内核直接内嵌仅限开源代码分析的专有引擎，同时删去所有配套数据集原始署名声明。"
+              ],
+              "answerIndex": 2,
+              "explanation": "商业闭源红线铁律：底层优先 Apache-2.0 / MIT / BSD / PostgreSQL；CC-BY 履行署名，MPL/EPL/LGPL 严格隔离并禁用竞品限制规则；彻底零引入 GPL（FOSSology / SCANOSS / cve-bin-tool / Neo4j CE）、AGPL（Renovate / chisel）、BSL（ArangoDB / Memgraph）与 CodeQL 专有条款（C 正确）。"
+            }
+          ]
+        }
+      </script>
+    </section>
+
+    <!-- FOOTER: PRIMARY SOURCE & MENTOR REMINDER -->
+    <section class="lesson-footer-grid">
+      <div class="footer-box">
+        <h3>一手必读原典（Primary Source）</h3>
+        <p>向管理层汇报商业路线图、合规预算锚点与研发组织设计时，建议引用以下权威法规、标准与工程著作：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li><a href="https://eur-lex.europa.eu/eli/reg/2024/2847/oj" target="_blank" rel="noopener"><strong>Regulation (EU) 2024/2847 (EU Cyber Resilience Act)</strong></a>：2026-09-11 强制漏洞上报与 2027-12-11 全量 SBOM 的官方法规原文。</li>
+          <li><a href="https://csrc.nist.gov/pubs/sp/800/218/final" target="_blank" rel="noopener"><strong>NIST SP 800-218 (SSDF v1.1)</strong></a> · <a href="https://www.cisa.gov/sbom" target="_blank" rel="noopener"><strong>CISA SBOM Minimum Elements</strong></a> · <a href="https://github.com/ossf/s2c2f" target="_blank" rel="noopener"><strong>OpenSSF S2C2F (<code>Apache-2.0</code>)</strong></a>：生产安全、成分透明度与开源安全消费三大支柱。</li>
+          <li><a href="https://teamtopologies.com/key-concepts" target="_blank" rel="noopener"><strong>Team Topologies Four Fundamental Team Types</strong></a> · <a href="https://snyk.io/" target="_blank" rel="noopener">Snyk</a> · <a href="https://www.endorlabs.com/" target="_blank" rel="noopener">Endor Labs</a> · <a href="https://socket.dev/" target="_blank" rel="noopener">Socket.dev</a> · <a href="https://www.wiz.io/" target="_blank" rel="noopener">Wiz</a> · <a href="https://www.blackduck.com/" target="_blank" rel="noopener">Black Duck</a>。</li>
+        </ul>
+      </div>
+
+      <div class="footer-box">
+        <h3>全课程圆满收官 · 进入真实战场与导师持续陪跑</h3>
+        <p>祝贺你！你已经走完了覆盖 <strong>3 大阶段 · 6 个章节 · 22 节高密度课程与 7 份可打印速查矩阵</strong> 的现代化 SCA 架构全旅程。这份工作区将永远保留作为你的参考手册与组织知识底座。接下来，欢迎随时在对话中开启实战伴随模式：</p>
+        <ul style="margin-bottom:0.5rem;">
+          <li>“结合我们团队目前真实的 X 名 Go/Java/安全工程师人数，帮我定制一份精确到双周 Sprint 的 Q1–Q2 落地甘特图。”</li>
+          <li>“请帮我用本课程的 L1–L4 契约与许可红线，评审这份真实的技术方案 RFC / 开源组件引入清单。”</li>
+          <li>“我们正在打一个【金融/车企/AI 创业公司】的大客户 POC，请帮我输出针对性的技术应答话术与现场演示剧本。”</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="lesson-end-nav">
+      <a href="./0021-enterprise-asset-graph-scale-and-0day-response.html">&larr; 上一课：Lesson 0021 · 海量资产与 0-day 应急</a>
+      <a href="../reference/ch6-provenance-scale-and-blueprint-matrix.html">速查参考卡：Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
+      <a href="../index.html">返回课程总览 &middot; 22 / 22 课全课程圆满收官 &rarr;</a>
+    </footer>
+  </main>
+
+  <script src="../assets/blueprint-strategy-lab.js"></script>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

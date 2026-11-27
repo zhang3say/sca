@@ -194,11 +194,17 @@
 - [Policy Engines & Ownership Routing: `google/cel-go` (`Apache-2.0`) · Kubernetes `1.30` `ValidatingAdmissionPolicy` · `open-policy-agent/opa` (`Apache-2.0`) · Backstage `catalog-info.yaml` (`Apache-2.0`)](https://github.com/google/cel-go)
   [`cel-go`](https://github.com/google/cel-go) 非图灵完备（保证有界终止）且原生驱动 [Kubernetes 1.30 GA `ValidatingAdmissionPolicy`](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/)，负责热路径微秒拦截；[`OPA`](https://github.com/open-policy-agent/opa) 负责跨系统复杂治理；通过 Go `atomic.Pointer` 原子热更并严守 Shadow Dry-Run &rarr; Enforce 灰度及 VEX/紧急热修旁路，联动 [Backstage `spec.owner`](https://backstage.io/docs/features/software-catalog/descriptor-format/)（`Group` 实体）聚合派单。
 
+### 商业矩阵、全球法规窗口与竞品攻防总装（Ch 06 · Lesson 0022）
+- [Global Regulatory & Transparency Pillars: Regulation (EU) 2024/2847 (Cyber Resilience Act) · NIST SP 800-218 (SSDF v1.1) · CISA SBOM Minimum Elements · OpenSSF S2C2F (`ossf/s2c2f`, `Apache-2.0`)](https://eur-lex.europa.eu/eli/reg/2024/2847/oj)
+  [EU CRA](https://eur-lex.europa.eu/eli/reg/2024/2847/oj) 已于 2024-12-10 生效，规定自 **2026-09-11** 起强制执行第 14 条漏洞上报（24h 预警 / 72h 通告 ENISA），自 **2027-12-11** 起全量强制 CE 标志与机器可读 SBOM；配合 [NIST SP 800-218 (SSDF)](https://csrc.nist.gov/pubs/sp/800/218/final)（PO/PS/PW/RV 四域）、[CISA SBOM Minimum Elements](https://www.cisa.gov/sbom)（Component Hashes / Licenses / Tool Names / Generation Context）与 [OpenSSF S2C2F](https://github.com/ossf/s2c2f)（开源消费安全 4 级成熟度 / 8 项实践）共同构成「一核三阶」SKU 的企业级采购预算引擎。
+- [R&D Org Design & 2026 Competitive Landscape: Team Topologies · Wiz (Google Cloud) · Black Duck (ex-Synopsys SIG) · Snyk · Endor Labs · Socket.dev](https://teamtopologies.com/key-concepts)
+  以 *Team Topologies* 四类团队（Platform / Complicated-Subsystem / Stream-Aligned / Enabling）指导 12 个月人力动态调仓，避开 70% 人力困在 L1 手写解析器的康威陷阱；结合 **2026-03-11 Google 完成 320 亿美元现金收购 Wiz**（CNAPP 云代码融合）与 **Black Duck 独立分拆** 后的五大标杆态势，制定 CycloneDX/VEX/VSA 生态共生与「降噪 + AI Agent MCP + AI-BOM + 离线私有化」非对称破局策略。
+
 ### 商用协议排雷与商业标杆技术剖析
 - [License Reference: Semgrep CE (LGPL-2.1 + Semgrep Rules License v1.0)](https://semgrep.dev/) / [FOSSology (GPL-2.0)](https://www.fossology.org/) / [GitHub CodeQL Terms (Non-Commercial for Private Repos)](https://codeql.github.com/)
   商业闭源 SCA 产品必须警惕的典型协议边界：强传染性（GPL）、动态链接/边界约束（LGPL）、禁止竞品 SaaS 商用的规则协议、以及仅限开源代码分析的专有引擎条款。
-- [Technical Architecture: Endor Labs Reachability Analysis](https://www.endorlabs.com/) / [Socket.dev Behavioral Supply Chain Analysis](https://socket.dev/) / [Snyk Vulnerability Database & Contextual SCA](https://snyk.io/)
-  全球商业标杆的三条差异化护城河：函数级调用图可达性降噪（Endor Labs）、基于 AST 行为信号的主动投毒拦截（Socket）、人工研判+语义版本区间+修复图谱（Snyk）。用于：校准自研高价值壁垒方向（注意甄别官网内容中的营销表述，聚焦底层架构原理）。
+- [Technical Architecture: Endor Labs Reachability Analysis](https://www.endorlabs.com/) / [Socket.dev Behavioral Supply Chain Analysis](https://socket.dev/) / [Snyk Vulnerability Database & Contextual SCA](https://snyk.io/) / [Wiz Code](https://www.wiz.io/) / [Black Duck](https://www.blackduck.com/)
+  全球五大商业标杆的护城河分布：函数级调用图可达性降噪（Endor Labs）、基于 AST 行为信号的主动投毒拦截（Socket）、人工研判+语义版本区间+修复图谱（Snyk）、云运行时图谱关联（Wiz Code，2026-03 并入 Google Cloud）与 C/C++ 二进制及法务合规审计（Black Duck）。用于：校准自研高价值壁垒方向（注意甄别官网内容中的营销表述，聚焦底层架构原理）。
 
 ## Wisdom (Communities)
 
@@ -210,7 +216,7 @@
   PURL 与 VERS 版本规范的核心维护社区。用于：解决跨生态冷门包管理器命名规范与版本区间边界争议。
 
 ## Gaps
-- **全场景产品矩阵与商业总装收官（Phase 3 · Lesson 0022）**：`Lesson 0020–0021` 与 `Ref 07` 第 01–04 节已落地，完整覆盖 SLSA v1.2 / DSSE PAE / Sigstore 溯源闭环、GUAC v0.6.0+ / Dependency-Track v5 PostgreSQL 收敛、CAS 三层分流、`RoaringBitmap` + PG 14+ `CYCLE` 10 秒应急、Neo4j/BSL 商业排雷、Backstage `spec.owner` 与 CEL/OPA 灰度热更；全课程仅余终章 `Lesson 0022`（研发人力配比模型与竞品攻防商业蓝图）。
+- **全场景产品矩阵与全课程总装（Phase 3 · Lesson 0020–0022 已全面收口，全课程 22 课圆满完结）**：`Lesson 0020–0022` 与 `Ref 07` 第 01–06 节已全部落地，完整打通 SLSA v1.2 / DSSE PAE / Sigstore 溯源闭环、GUAC v0.6.0+ / Dependency-Track v5 PostgreSQL 收敛、CAS 三层分流、`RoaringBitmap` + PG 14+ `CYCLE` 10 秒应急、CEL/OPA 灰度热更、「一核三阶」SKU 与 EU CRA/SSDF/S2C2F 锚点、Team Topologies 12 个月人力配比、五大商业标杆攻防与全栈 `ADR-Master` 商用许可总红线。后续可根据实际项目推进按需开启专项深挖（如：真实团队 RFC 评审、C/C++ 无源码固件二进制实战调优、或特定行业 POC 攻防演练）。
 - **静态、运行时可达性与优先级/VEX/自动修复协同闭环（Ch 04 · Lessons 0011–0014 已全面收口）**：第 11–13 课已覆盖静态调用图（RTA/VTA/Java/JS/Python）、运行时融合/容器裁剪与 EPSS/KEV/SSVC/VEX 协同降噪；第 14 课及 Ref 05 第 05 节已补齐 OSV-Scanner v2 Guided Remediation（`in-place/relock/override`）、`deps.dev/util/resolve`、PubGrub（`MPL-2.0`）、Ochoa et al. (EMSE 2022) `API Diff ∩ Call Graph` 实证与五大生态 Diff 底座、OpenRewrite LST（`Apache-2.0`）、`dependabot-core`（`MIT`）vs `Renovate`（`AGPL-3.0`）红线及双触点防 PR 风暴闭环。
 - **多语言依赖解析器（Lockfile vs Build-time）、四大引擎、镜像制品与多触点采集（Ch 02 已全面收口）**：已于第 3 课补齐 Java/多语言静态 vs 构建期实证研究（Balliu et al., IEEE S&P 2023 `arXiv:2303.11102`）与五大生态解析算法规范，于第 4 课补齐 OSV-SCALIBR / Syft / cdxgen / ORT 接口与融合架构对比，于第 5 课补齐 OCI 镜像分层合成（`.wh.` / `.wh..wh..opq`）、OS 数据库及 Java/Go/Rust 二进制提取，并于第 6 课及 Ref 03 Section 06 补齐 Agentic 时代本地三模入口（MCP + Hook + LSP / `arXiv:2406.10279`）、GitHub Dependency Review、CAS 去重与 Dependency-Track v5（Hyades）事件驱动持续重算架构。
 - **Layer 3 情报底座、版本引擎、离线分发与许可合规（Phase 1 · Ch 03 已全面收口）**：已于第 7–10 课及 Ref 04 完整覆盖 OSV v1.7.0 与 License Gate、六大生态版本排序与 Backport 隔离、Trivy `bbolt` / Grype v6 `SQLite Handle+Blob` / OCI 签名逻辑增量与 `atomic.Pointer` / `RoaringBitmap` 内存索引，以及 SPDX v3.0.1 Annex B AST、三维传染性矩阵、OSADL/FSF 双向兼容判定与 `THIRD-PARTY-NOTICES` 自动化闭环。

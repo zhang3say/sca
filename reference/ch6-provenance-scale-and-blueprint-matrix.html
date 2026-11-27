@@ -14,6 +14,7 @@
         <a href="../index.html">课程首页 · 全局路线图</a>
         <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
         <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021 · 海量资产与 0-day 应急</a>
+        <a href="../lessons/0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">Lesson 0022 · 商业矩阵与总装收官</a>
         <a href="./ch6-provenance-scale-and-blueprint-matrix.html" class="active">Ref 07 · 溯源 / 规模化 / 蓝图矩阵</a>
         <a href="./ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
       </div>
@@ -28,10 +29,10 @@
         <span>PRINT-READY CHAPTER 06 CHEAT SHEET</span>
       </div>
       <h1>可信溯源证明、海量资产检索与商业蓝图速查矩阵</h1>
-      <p class="subtitle">Chapter 06 &amp; Phase 3 架构师与研发决策核心速查表（<strong>已覆盖 Lesson 0020–0021 精华</strong>；后续将随 <code>Lesson 0022</code> 全场景商业总装蓝图扩展收官）。</p>
+      <p class="subtitle">Chapter 06 &amp; Phase 3 架构师与研发决策核心速查表（<strong>已完整覆盖 Lesson 0020–0022 精华 · 全课程 22 课圆满收官</strong>）。</p>
       <div class="meta-strip">
-        <span><strong>依据标准与规范：</strong><a href="https://slsa.dev/spec/v1.2/" target="_blank" rel="noopener">SLSA v1.2 (2025-11-24)</a> · <a href="https://slsa.dev/verification_summary/v1" target="_blank" rel="noopener">SLSA VSA v1</a> · <a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><code>in-toto Statement v1</code></a> · <a href="https://github.com/secure-systems-lab/dsse" target="_blank" rel="noopener">DSSE PAE</a> · <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener">PyPI PEP 740</a> · <a href="https://github.com/guacsec/guac" target="_blank" rel="noopener">GUAC v0.6.0+</a> · <a href="https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE" target="_blank" rel="noopener">PG 14+ <code>CYCLE</code></a> · <a href="https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/" target="_blank" rel="noopener">K8s <code>1.30</code> VAP (CEL)</a></span>
-        <span><strong>关联课程：</strong><a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020</a> · <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021</a>（Lesson 0022 待扩展）</span>
+        <span><strong>依据标准与规范：</strong><a href="https://slsa.dev/spec/v1.2/" target="_blank" rel="noopener">SLSA v1.2 (2025-11-24)</a> · <a href="https://slsa.dev/verification_summary/v1" target="_blank" rel="noopener">SLSA VSA v1</a> · <a href="https://github.com/in-toto/attestation" target="_blank" rel="noopener"><code>in-toto Statement v1</code></a> · <a href="https://peps.python.org/pep-0740/" target="_blank" rel="noopener">PEP 740</a> · <a href="https://github.com/guacsec/guac" target="_blank" rel="noopener">GUAC v0.6.0+</a> · <a href="https://eur-lex.europa.eu/eli/reg/2024/2847/oj" target="_blank" rel="noopener">EU CRA 2024/2847</a> · <a href="https://csrc.nist.gov/pubs/sp/800/218/final" target="_blank" rel="noopener">NIST SSDF v1.1</a> · <a href="https://github.com/ossf/s2c2f" target="_blank" rel="noopener">OpenSSF S2C2F</a> · <a href="https://teamtopologies.com/key-concepts" target="_blank" rel="noopener">Team Topologies</a></span>
+        <span><strong>关联课程：</strong><a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020</a> · <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021</a> · <a href="../lessons/0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">Lesson 0022（全课程收官）</a></span>
       </div>
     </header>
 
@@ -231,16 +232,114 @@
       </div>
     </section>
 
-    <div class="callout tip full-width" style="max-width:100%;">
-      <div class="callout-label">Phase 3 速查卡建档进行中（即将进入终章收官）</div>
-      <p>当前已沉淀 <strong>Lesson 0020（SLSA v1.2、in-toto DSSE PAE、Sigstore Bundle v0.3 与 VSA）</strong> 与 <strong>Lesson 0021（CAS 三层存储、RoaringBitmap + PG 14+ CYCLE、图存储许可排雷与 CEL/OPA 热更）</strong> 核心矩阵。接下来终章 <strong>Lesson 0022（总架构师收官实战：全场景 SCA 产品矩阵、研发配比与竞品攻防蓝图）</strong> 完成后，将补充第 05–06 节并完成全课程圆满收官！</p>
+    <!-- SECTION 5: PRODUCT MATRIX, COMPLIANCE ANCHORS & TEAM TOPOLOGIES -->
+    <section class="full-width">
+      <h2><span class="sec-num">05</span>一核三阶商业矩阵、全球合规锚点与 12 个月 Team Topologies 配比（Lesson 0022）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:28%" />
+            <col style="width:26%" />
+            <col style="width:26%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>商业分层 / 组织演进</th>
+              <th>核心技术挂载（对应课程）</th>
+              <th>全球合规与采购预算锚点</th>
+              <th>研发人力配比 / 商业转化逻辑</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Tier 1 · Starter</strong><br/>统一合规与 SBOM 底座版</td>
+              <td>L1 适配器（0004/0005）+ L2 统一 IR（0002）+ L3 OSV/Backport 与许可推理（0007–0010）。</td>
+              <td><a href="https://www.cisa.gov/sbom" target="_blank" rel="noopener">CISA SBOM Minimum Elements</a>（Hash/License/Tool）· <a href="https://eur-lex.europa.eu/eli/reg/2024/2847/oj" target="_blank" rel="noopener">EU CRA</a> 合规基线。</td>
+              <td><strong>Land 进场钩子：</strong>消除工具碎片与 Backport 误报，先把全资产纳入自研 L2 IR。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 2 · Pro</strong><br/>第三代降噪与 AI 安全版</td>
+              <td>L4 静动态可达性（0011–0012）+ EPSS/KEV/VEX（0013）+ API Diff 安全升级（0014）+ 投毒/MCP/AI-BOM（0015/0017–0019）。</td>
+              <td><a href="https://github.com/ossf/s2c2f" target="_blank" rel="noopener">OpenSSF S2C2F</a>（消费端防护）· EU AI Act Article 53（2025-08-02 生效）。</td>
+              <td><strong>Expand 溢价引擎：</strong>砍掉 85%+ 噪音，通过 MCP+Hook 护航 AI Coding Agent，直接省研发工时。</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 3 · Enterprise Sovereign</strong><br/>可信溯源与离线指挥台</td>
+              <td>C/C++ 同源与三层二进制（0016）+ SLSA v1.2 Private Sigstore（0020）+ 离线增量（0009）+ 万级 CAS/Bitmap（0021）。</td>
+              <td><a href="https://csrc.nist.gov/pubs/sp/800/218/final" target="_blank" rel="noopener">NIST SP 800-218 SSDF</a> · <strong>EU CRA 2026-09-11 上报 &amp; 2027-12-11 全量 SBOM</strong>。</td>
+              <td><strong>百万级 ACV 护城河：</strong>打通无源码固件、私有 Rekor v2 与 10 秒 0-day 全网定损。</td>
+            </tr>
+            <tr>
+              <td><strong>12 个月研发调仓律</strong><br/>（<a href="https://teamtopologies.com/key-concepts" target="_blank" rel="noopener">Team Topologies</a>）</td>
+              <td>Platform（底座）· Complicated-Subsystem（算法壁垒）· Stream-Aligned（交付）· Enabling（安全研究）。</td>
+              <td>Phase 1（M1–M3）：Platform 55% / Moat 15% / Stream 20% / Enabling 10%<br/>Phase 2（M4–M9）：Platform 25% / Moat 45% / Stream 15% / Enabling 15%</td>
+              <td>Phase 3（M10–M12+）：Platform 25% / Moat 40% / Stream 20% / Enabling 15%；严禁陷入 70% 手写解析器黑洞。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 6: COMPETITIVE STRATEGY & MASTER LICENSE REDLINE -->
+    <section class="full-width">
+      <h2><span class="sec-num">06</span>全球五大标杆竞品攻防与全栈商用协议终极红线速查（Lesson 0022）</h2>
+      <div class="table-wrap">
+        <table class="table-fixed">
+          <colgroup>
+            <col style="width:20%" />
+            <col style="width:24%" />
+            <col style="width:28%" />
+            <col style="width:28%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>标杆对手 / 协议层级</th>
+              <th>核心壁垒与代表组件</th>
+              <th>对手软肋 / 协议边界约束</th>
+              <th>我方非对称破局打法 / 商业合规裁决</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Snyk &amp; Endor Labs</strong><br/>（开发者体验 vs 可达性）</td>
+              <td>Snyk：IDE/PR 生态与 VulnDB<br/>Endor：深层调用图降噪与安全升级</td>
+              <td>Snyk 噪音与离线成本偏高；Endor 偏应用层源码，在 OS Backport、C/C++ 与 AI/MCP 侧较薄。</td>
+              <td>用真静动态可达性打平并叠加 Single Go Core（MCP+Hook+LSP）+ 全域 IR（OCI/AI-BOM/空气隔离私有化）。</td>
+            </tr>
+            <tr>
+              <td><strong>Socket.dev &amp; Wiz Code</strong><br/>（行为投毒 vs 2026-03 并入 Google Cloud）</td>
+              <td>Socket：70+ 行为红旗与 <code>sfw</code><br/>Wiz：无代理云图谱 CNAPP</td>
+              <td>Socket 非全周期漏洞/合规平台；Wiz 强在云端暴露面，需靠生态接入研发态深层信号。</td>
+              <td>Socket 线以“投毒+CVE+台账合一预算”攻单；Wiz 线以 CycloneDX/OpenVEX/SLSA VSA 共生补位而非自造 CNAPP。</td>
+            </tr>
+            <tr>
+              <td><strong>Black Duck</strong><br/>（原 Synopsys SIG 独立分拆）</td>
+              <td>C/C++ 片段同源、二进制扫描、M&amp;A 法务与汽车/硬件合规</td>
+              <td>重型架构扫描慢、现代 CI/Agent 体验与云原生 AI-BOM 敏捷度偏弱。</td>
+              <td>以 Winnowing/CENTRIS + LIEF/Ghidra 金字塔补齐 C/C++，再用分钟级 CI 与车规 AI-BOM 拿下增量标段。</td>
+            </tr>
+            <tr>
+              <td><strong>全课程商用许可总红线</strong><br/>（0 GPL / 0 AGPL / 0 BSL）</td>
+              <td>绿灯：OSV-SCALIBR / Syft / cdxgen / ORT / GUAC / PG+AGE / ClickHouse / CEL / OPA / OpenRewrite / sigstore-go</td>
+              <td>黄灯隔离：ScanCode LicenseDB (<code>CC-BY-4.0</code>)、PubGrub (<code>MPL-2.0</code>)、WALA (<code>EPL-2.0</code>)、Semgrep CE/SootUp (<code>LGPL-2.1</code> 禁官方规则商用)、fickling (<code>LGPL-3.0</code>)。</td>
+              <td><span class="badge badge-danger">红灯严禁闭源内嵌</span> FOSSology/SCANOSS (<code>GPL-2.0</code>)、cve-bin-tool/Neo4j CE (<code>GPL-3.0</code>)、Renovate/chisel (<code>AGPL-3.0</code>)、ArangoDB/Memgraph (<code>BSL</code>)、CodeQL CLI。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="callout ok full-width" style="max-width:100%;">
+      <div class="callout-label">Chapter 06 &amp; 全课程 22 课速查矩阵全面收官</div>
+      <p>至此，Ref 07 已完整沉淀 <strong>Lesson 0020（SLSA v1.2 / DSSE PAE / Sigstore）</strong>、<strong>Lesson 0021（CAS 三层存储 / RoaringBitmap + PG14 CYCLE / 图存储许可排雷 / CEL &amp; OPA 热更）</strong> 与 <strong>Lesson 0022（一核三阶产品矩阵 / EU CRA &amp; S2C2F 锚点 / Team Topologies 配比 / 五大标杆攻防 / 全栈许可终审）</strong>，连同 Ref 01–06 共同构成完整的现代化 SCA 架构师作战手册。</p>
     </div>
 
     <footer class="lesson-end-nav no-print">
-      <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">← 返回 Lesson 0021 · 海量资产与 0-day 应急</a>
-      <a href="../lessons/0020-build-provenance-slsa-intoto-and-sigstore.html">Lesson 0020 · SLSA v1.2 与 Sigstore</a>
-      <a href="./ch5-malware-binary-and-ai-supply-chain-matrix.html">Ref 06 · 投毒 / 二进制 / AI 矩阵</a>
-      <a href="../index.html">返回课程总览 · 准备进入终章 Lesson 0022</a>
+      <a href="../lessons/0022-sca-product-matrix-rd-allocation-and-competitive-blueprint.html">← 返回终章 Lesson 0022 · 产品矩阵与竞品攻防</a>
+      <a href="../lessons/0021-enterprise-asset-graph-scale-and-0day-response.html">Lesson 0021 · 海量资产与 0-day 应急</a>
+      <a href="./sca-oss-landscape-and-4layer-map.html">Ref 01 · 四层与协议矩阵</a>
+      <a href="../index.html">返回课程总览（22 / 22 课全收官）</a>
       <span>提示：按 <code>Ctrl+P</code> / <code>Cmd+P</code> 可直接打印或导出为 PDF 速查卡</span>
     </footer>
   </main>
